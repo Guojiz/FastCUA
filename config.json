@@ -1,0 +1,15 @@
+{
+  "costartMode": "claude",
+  "idleTimeoutMin": 5,
+  "approvalPolicy": "auto",
+  "whitelist": [
+    "mspaint.exe",
+    "notepad.exe",
+    "explorer.exe"
+  ],
+  "port": 8420,
+  "bannerEnabled": false,
+  "overlayEnabled": true,
+  "overlayTitle": "FastCUA · using your computer",
+  "cuaBinPath": ""
+}

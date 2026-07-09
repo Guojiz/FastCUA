@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FastCUA · 配置</title>
+<style>
+  :root { --bg:#1a1a2e; --card:#252540; --accent:#339cff; --txt:#eee; --mut:#888; --ok:#4caf50; --warn:#ffb300; --err:#f44336; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.5 system-ui,sans-serif; background:var(--bg); color:var(--txt); }
+  .wrap { max-width:820px; margin:0 auto; padding:24px 18px 60px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  h1 .dot { display:inline-block; width:10px; height:10px; border-radius:50%; background:var(--mut); margin-right:8px; vertical-align:middle; }
+  h1 .dot.on { background:var(--ok); box-shadow:0 0 8px var(--ok); }
+  .sub { color:var(--mut); margin-bottom:18px; font-size:13px; }
+  .card { background:var(--card); border-radius:10px; padding:16px 18px; margin-bottom:14px; }
+  .card h2 { margin:0 0 12px; font-size:15px; color:var(--accent); }
+  .row { display:flex; align-items:center; gap:10px; margin:8px 0; flex-wrap:wrap; }
+  .row label { min-width:120px; color:var(--mut); }
+  input[type=number], input[type=text], select { background:#1f1f38; border:1px solid #3a3a5c; color:var(--txt); border-radius:6px; padding:6px 9px; font:inherit; }
+  input[type=text] { flex:1; min-width:200px; }
+  textarea { width:100%; background:#1f1f38; border:1px solid #3a3a5c; color:var(--txt); border-radius:6px; padding:8px; font:12px ui-monospace,monospace; min-height:80px; }
+  .seg { display:inline-flex; background:#1f1f38; border-radius:8px; padding:3px; }
+  .seg button { background:transparent; border:0; color:var(--mut); padding:6px 14px; border-radius:6px; cursor:pointer; font:inherit; }
+  .seg button.active { background:var(--accent); color:#fff; }
+  .btn { background:var(--accent); color:#fff; border:0; border-radius:6px; padding:8px 16px; cursor:pointer; font:inherit; }
+  .btn.ghost { background:transparent; border:1px solid #3a3a5c; color:var(--txt); }
+  .btn.danger { background:var(--err); }
+  .stat { display:flex; gap:18px; flex-wrap:wrap; }
+  .stat .b { background:#1f1f38; border-radius:8px; padding:10px 14px; min-width:110px; }
+  .stat .b .n { font-size:22px; font-weight:600; }
+  .stat .b .l { font-size:12px; color:var(--mut); }
+  .chip { display:inline-block; background:#1f1f38; border:1px solid #3a3a5c; border-radius:12px; padding:2px 10px; margin:2px 4px 2px 0; font-size:12px; }
+  .logs { background:#0f0f1f; border-radius:6px; padding:8px 10px; height:140px; overflow:auto; font:11px ui-monospace,monospace; color:#9f9fb0; }
+  .savebar { position:sticky; bottom:0; background:var(--bg); padding:12px 0; display:flex; gap:10px; align-items:center; }
+  .saved { color:var(--ok); font-size:12px; opacity:0; transition:opacity .3s; }
+  .saved.show { opacity:1; }
+  a { color:var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1><span id="dot" class="dot"></span>FastCUA</h1>
+  <div class="sub" id="sub">连接中…</div>
+
+  <div class="card">
+    <h2>状态</h2>
+    <div class="stat">
+      <div class="b"><div class="n" id="s-clients">-</div><div class="l">连接客户端</div></div>
+      <div class="b"><div class="n" id="s-binary">-</div><div class="l">二进制</div></div>
+      <div class="b"><div class="n" id="s-approved">-</div><div class="l">已审批应用</div></div>
+      <div class="b"><div class="n" id="s-uptime">-</div><div class="l">运行时长</div></div>
+    </div>
+    <div class="row" style="margin-top:14px"><label>已审批应用</label></div>
+    <div id="approved" style="margin-left:0"></div>
+    <div class="row" style="margin-top:10px"><label>最近请求</label></div>
+    <div class="logs" id="logs">—</div>
+  </div>
+
+  <div class="card">
+    <h2>共启动</h2>
+    <div class="sub">daemon 什么时候启动</div>
+    <div class="seg" id="costart">
+      <button data-v="claude">随 Claude</button>
+      <button data-v="login">开机自启</button>
+      <button data-v="manual">手动</button>
+    </div>
+    <div class="sub" style="margin-top:8px" id="costart-desc"></div>
+  </div>
+
+  <div class="card">
+    <h2>运行参数</h2>
+    <div class="row"><label>空闲自动退出</label><input type="number" id="idle" min="0" max="120" style="width:90px"> 分钟（0=不自动退出）</div>
+    <div class="row"><label>HTTP 端口</label><input type="number" id="port" min="1024" max="65535" style="width:120px"> <span class="sub" style="margin:0">改后重启 daemon 生效</span></div>
+    <div class="row"><label>Helper 路径</label><input type="text" id="cuabin" placeholder="留空=自动发现 Codex 的 codex-computer-use.exe"></div>
+    <div class="sub" style="margin-top:4px">留空则自动扫描 Codex 安装目录；也可用环境变量 <code>SKY_CUA_BIN</code> 覆盖。改后重启生效。</div>
+  </div>
+
+  <div class="card">
+    <h2>浮窗覆盖</h2>
+    <div class="sub">在 computer use 运行时显示桌面上的浮窗（最近 2 个动作）</div>
+    <div class="row">
+      <label style="min-width:0">
+        <input type="checkbox" id="overlay-en" style="margin-right:6px"> 启用浮窗
+      </label>
+    </div>
+    <div class="row"><label>顶栏标题</label><input type="text" id="overlay-title" placeholder="FastCUA · using your computer"></div>
+    <div class="sub">改后重启 daemon 生效</div>
+  </div>
+
+  <div class="card">
+    <h2>应用审批</h2>
+    <div class="seg" id="approval">
+      <button data-v="auto">全部自动放行</button>
+      <button data-v="whitelist">仅白名单</button>
+    </div>
+    <div class="sub" style="margin-top:8px">"仅白名单"时，非白名单应用的审批请求会被拒绝（真实的人工关卡）</div>
+    <div class="row" style="margin-top:6px"><label>白名单</label></div>
+    <textarea id="whitelist" placeholder="每行一个：mspaint.exe&#10;process:C:\Windows\explorer.exe"></textarea>
+  </div>
+
+  <div class="card">
+    <h2>操作</h2>
+    <div class="row">
+      <button class="btn ghost" id="act-restart">重启 daemon</button>
+      <button class="btn ghost" id="act-killbin">杀掉 helper 二进制</button>
+      <button class="btn ghost" id="act-clear">清空审批缓存</button>
+    </div>
+  </div>
+
+  <div class="savebar">
+    <button class="btn" id="save">保存配置</button>
+    <span class="saved" id="saved">已保存</span>
+    <span class="sub" style="margin:0 0 0 auto" id="openhint"></span>
+  </div>
+</div>
+<script>
+const api = (p, o) => fetch(p, o ? {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(o)} : {}).then(r=>r.json());
+const $ = id => document.getElementById(id);
+function seg(id, val) {
+  const g = $(id);
+  [...g.children].forEach(b => b.classList.toggle('active', b.dataset.v === val));
+  g.onclick = e => { if (e.target.dataset.v) { [...g.children].forEach(b=>b.classList.remove('active')); e.target.classList.add('active'); } };
+}
+let cfg = {};
+async function load() {
+  cfg = await api('/api/config');
+  seg('costart', cfg.costartMode); seg('approval', cfg.approvalPolicy);
+  $('idle').value = cfg.idleTimeoutMin; $('port').value = cfg.port;
+  $('whitelist').value = (cfg.whitelist||[]).join('\n');
+  $('overlay-en').checked = cfg.overlayEnabled;
+  $('overlay-title').value = cfg.overlayTitle || '';
+  $('cuabin').value = cfg.cuaBinPath || '';
+  $('costart-desc').textContent = {claude:'Claude Code 首次用 computer use 时自动拉起 daemon（默认）', login:'Windows 登录时自启，daemon 常驻', manual:'不自动拉起；需自己启动 daemon'}[cfg.costartMode];
+}
+async function refresh() {
+  let s; try { s = await api('/api/state'); } catch { $('dot').className='dot'; $('sub').textContent='daemon 未运行'; return; }
+  $('dot').className = 'dot on'; $('sub').textContent = 'daemon 运行中 · 端口 '+cfg.port;
+  $('s-clients').textContent = s.clients; $('s-binary').textContent = s.binaryPid? '运行':'已停'; $('s-approved').textContent = s.approvedApps.length; $('s-uptime').textContent = s.uptime;
+  $('approved').innerHTML = s.approvedApps.map(a=>'<span class="chip">'+a.replace(/</g,'&lt;')+'</span>').join('') || '<span class="sub">无</span>';
+  $('logs').innerHTML = s.recentLogs.map(l=>l.replace(/</g,'&lt;')).join('\n') || '—';
+  $('logs').scrollTop = $('logs').scrollHeight;
+}
+$('save').onclick = async () => {
+  const costart = [...$('costart').children].find(b=>b.classList.contains('active'))?.dataset.v;
+  const approval = [...$('approval').children].find(b=>b.classList.contains('active'))?.dataset.v;
+  const next = { costartMode:costart, approvalPolicy:approval, idleTimeoutMin:+$('idle').value, port:+$('port').value, whitelist:$('whitelist').value.split('\n').map(s=>s.trim()).filter(Boolean), bannerEnabled:cfg.bannerEnabled, overlayEnabled:$('overlay-en').checked, overlayTitle:$('overlay-title').value, cuaBinPath:$('cuabin').value.trim() };
+  cfg = await api('/api/config', next);
+  $('saved').classList.add('show'); setTimeout(()=>$('saved').classList.remove('show'), 1500);
+  refresh();
+};
+$('act-restart').onclick = () => api('/api/action',{action:'restart'}).then(refresh);
+$('act-killbin').onclick = () => api('/api/action',{action:'killBinary'}).then(refresh);
+$('act-clear').onclick = () => api('/api/action',{action:'clearApprovals'}).then(refresh);
+load().then(refresh); setInterval(refresh, 3000);
+</script>
+</body>
+</html>

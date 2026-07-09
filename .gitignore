@@ -1,0 +1,12 @@
+# Runtime logs
+*.log
+
+# Local test scripts
+_smoke*.mjs
+
+# Node
+node_modules/
+
+# OS junk
+Thumbs.db
+.DS_Store
