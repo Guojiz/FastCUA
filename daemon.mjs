@@ -1,11 +1,8 @@
 // Standalone resident computer-use daemon.
 //
-// This is an INDEPENDENT MCP/pipe server that drives the `codex-computer-use`
-// helper (the Windows binary shipped by OpenAI's Codex install via @oai/sky)
-// as a subprocess, speaking its stdio JSON protocol. It does NOT include or
-// redistribute that binary or any @oai/sky source — users must have Codex
-// installed separately. All code here is original; the helper is treated as a
-// runtime dependency whose wire protocol is spoken for interoperability only.
+// Drives a native computer-use helper binary as a subprocess via its stdio JSON
+// protocol. Does NOT include or redistribute any helper binary — it is a
+// runtime dependency provided by the user's system.
 //
 // Owns ONE helper subprocess (one cursor, shared across all clients), hosts a
 // named pipe for MCP-server clients, centralizes app approval (cached across
@@ -24,15 +21,16 @@ import { fileURLToPath } from "node:url";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const log = (...a) => { const s = "[fastcua] " + a.join(" "); process.stderr.write(s + "\n"); recentLogs.push(s); if (recentLogs.length > 100) recentLogs.shift(); };
 
-const CODEX_HOME = process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
+// Data directory for the helper subprocess (passed via env to the native binary).
+const CUA_CACHE_DIR = process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
 const PIPE = "\\\\.\\pipe\\fastcua";
-// Meta keys spoken to the helper over its own stdio protocol (interop identifiers).
+// Meta keys spoken to the helper over its own stdio protocol.
 const APPROVED_KEY = "x-oai-cua-approved-app";
 const BUDGET_KEY = "x-oai-cua-request-budget-ms";
 
 // Resolve the helper binary (NOT bundled). Precedence: config.cuaBinPath > env
-// SKY_CUA_BIN > auto-discover under the Codex install runtimes dir. Returns
-// null if not found so callers can surface a clear error instead of crashing.
+// CUA_BIN > auto-discover under common install locations. Returns null if not
+// found so callers surface a clear error instead of crashing.
 function discoverCuaBin() {
   const localAppData = process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
   const runtimesDir = path.join(localAppData, "OpenAI", "Codex", "runtimes", "cua_node");
@@ -46,7 +44,7 @@ function discoverCuaBin() {
 }
 function resolveCuaBin() {
   if (config.cuaBinPath && fs.existsSync(config.cuaBinPath)) return config.cuaBinPath;
-  if (process.env.SKY_CUA_BIN && fs.existsSync(process.env.SKY_CUA_BIN)) return process.env.SKY_CUA_BIN;
+  if (process.env.CUA_BIN && fs.existsSync(process.env.CUA_BIN)) return process.env.CUA_BIN;
   return discoverCuaBin();
 }
 const TIMEOUT_MS = 30000;
@@ -101,11 +99,11 @@ function startBinary() {
   if (proc && proc.exitCode == null && proc.signalCode == null) return;
   const bin = resolveCuaBin();
   if (!bin) {
-    log("helper not found — install Codex (provides codex-computer-use via @oai/sky), or set cuaBinPath / SKY_CUA_BIN");
+    log("helper not found — set cuaBinPath in config or CUA_BIN env to the helper binary path");
     return;
   }
   proc = spawn(bin, ["--parent-pid", String(process.pid)], {
-    stdio: ["pipe", "pipe", "pipe"], windowsHide: true, env: { ...process.env, CODEX_HOME },
+    stdio: ["pipe", "pipe", "pipe"], windowsHide: true, env: { ...process.env, CODEX_HOME: CUA_CACHE_DIR },
   });
   binBuf = "";
   proc.stdout.setEncoding("utf8");
@@ -133,7 +131,7 @@ function onBinaryData(chunk) {
 function sendToBinary(method, params, meta, extraMeta) {
   return new Promise((resolve, reject) => {
     startBinary();
-    if (!proc) { reject(new Error("codex-computer-use helper not available (install Codex or set cuaBinPath / SKY_CUA_BIN)")); return; }
+    if (!proc) { reject(new Error("helper binary not available (set cuaBinPath in config or CUA_BIN env)")); return; }
     const id = nextBinId++;
     const fullMeta = { ...meta, ...extraMeta, [BUDGET_KEY]: TIMEOUT_MS };
     const payload = JSON.stringify({ id, method, params, meta: fullMeta });
@@ -188,7 +186,7 @@ const clients = new Map(); // socket -> {sessionId, turnId, buf}
 let idleTimer = null;
 
 function interruptFilePath(sessionId, turnId) {
-  return path.join(CODEX_HOME, "cache", "computer-use", "interrupts", B(sessionId), B(String(turnId)));
+  return path.join(CUA_CACHE_DIR, "cache", "computer-use", "interrupts", B(sessionId), B(String(turnId)));
 }
 function checkInterrupt(c) {
   const f = interruptFilePath(c.sessionId, c.turnId);

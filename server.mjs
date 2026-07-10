@@ -1,9 +1,8 @@
 // Thin MCP server: connects to the resident FastCUA daemon over a named pipe
 // (spawns the daemon detached if it isn't running yet), and exposes the window2
 // API + a persistent js REPL. The daemon owns ONE shared helper subprocess (one
-// cursor) across all clients — the `codex-computer-use` binary is a runtime
-// dependency provided by the user's Codex install; this project does not
-// include or redistribute it.
+// cursor) across all clients. The helper binary is a runtime dependency — this
+// project does not include or redistribute it.
 import { spawn } from "node:child_process";
 import net from "node:net";
 import path from "node:path";
@@ -38,7 +37,11 @@ class DaemonClient {
         sock.once("connect", () => { this.sock = sock; this.attach(sock); log("connected to daemon"); resolve(); });
         sock.once("error", () => {
           if (attempt === 0 && readCostart() !== "manual") { this.spawnDaemon(); }
-          if (attempt < 6) { attempt++; setTimeout(tryConn, 350); }
+          // Cold-start budget: the daemon (esp. spawning the WPF overlay + bundled
+          // node cold start) can take several seconds to open the pipe. Retry for
+          // up to ~14s so the first call after a cold start succeeds instead of
+          // failing with "daemon unavailable".
+          if (attempt < 40) { attempt++; setTimeout(tryConn, 350); }
           else { log("daemon unavailable after retries"); resolve(); } // requests will reject "daemon unavailable"
         });
       };

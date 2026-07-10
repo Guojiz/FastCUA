@@ -72,8 +72,8 @@
     <h2>运行参数</h2>
     <div class="row"><label>空闲自动退出</label><input type="number" id="idle" min="0" max="120" style="width:90px"> 分钟（0=不自动退出）</div>
     <div class="row"><label>HTTP 端口</label><input type="number" id="port" min="1024" max="65535" style="width:120px"> <span class="sub" style="margin:0">改后重启 daemon 生效</span></div>
-    <div class="row"><label>Helper 路径</label><input type="text" id="cuabin" placeholder="留空=自动发现 Codex 的 codex-computer-use.exe"></div>
-    <div class="sub" style="margin-top:4px">留空则自动扫描 Codex 安装目录；也可用环境变量 <code>SKY_CUA_BIN</code> 覆盖。改后重启生效。</div>
+    <div class="row"><label>Helper 路径</label><input type="text" id="cuabin" placeholder="留空则自动发现系统安装的 helper 二进制"></div>
+    <div class="sub" style="margin-top:4px">留空则自动扫描常见安装位置；也可用环境变量 <code>CUA_BIN</code> 覆盖。改后重启生效。</div>
   </div>
 
   <div class="card">

@@ -2,7 +2,7 @@
 *.log
 
 # Local test scripts
-_smoke*.mjs
+_*.mjs
 
 # Node
 node_modules/
