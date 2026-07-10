@@ -19,17 +19,17 @@
         <RowDefinition Height="Auto"/>
       </Grid.RowDefinitions>
 
-      <!-- Row 0: "FastCUA is using your computer" -->
+      <!-- Row 0: title -->
       <TextBlock Grid.Row="0"
-                 Text="FastCUA is using your computer"
+                 Text="TITLE_PLACEHOLDER"
                  Foreground="#E0E0E0" FontSize="11.5"
                  FontWeight="Medium"
                  TextTrimming="CharacterEllipsis"
                  Margin="0,0,0,4"/>
 
-      <!-- Row 1: "Esc to quit" -->
+      <!-- Row 1: subtitle -->
       <TextBlock Grid.Row="1"
-                 Text="Esc to quit"
+                 Text="SUBTITLE_PLACEHOLDER"
                  Foreground="#888888" FontSize="10"
                  Margin="0,0,0,8"/>
 

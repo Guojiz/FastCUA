@@ -96,6 +96,7 @@ $borderWin.Add_SourceInitialized({
 # ============================================================
 $cardXaml = [System.IO.File]::ReadAllText([System.IO.Path]::Combine($scriptDir, "card.xaml"))
 $cardXaml = $cardXaml.Replace("TITLE_PLACEHOLDER", $Title)
+$cardXaml = $cardXaml.Replace("SUBTITLE_PLACEHOLDER", "Esc to quit / Esc 退出")
 $reader = [System.Xml.XmlReader]::Create([System.IO.StringReader]::new($cardXaml))
 $cardWin = [System.Windows.Markup.XamlReader]::Load($reader)
 $reader.Close()

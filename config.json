@@ -6,6 +6,6 @@
   "port": 8420,
   "bannerEnabled": false,
   "overlayEnabled": true,
-  "overlayTitle": "FastCUA",
+  "overlayTitle": "FastCUA is using your computer / 正在使用你的电脑",
   "cuaBinPath": "C:/Users/Administrator/.codex/sky-mcp/helper/cua-native-host.exe"
 }
