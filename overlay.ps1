@@ -25,6 +25,11 @@ public static class WinApi {
     public const int WS_EX_LAYERED = 0x80000;
     public const int WS_EX_TRANSPARENT = 0x20;
     public const uint LWA_COLORKEY = 1;
+    public const int WM_HOTKEY = 0x312;
+    public const int MOD_CONTROL = 2;
+    public const int MOD_SHIFT = 4;
+    [DllImport("user32.dll")] public static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
+    [DllImport("user32.dll")] public static extern bool UnregisterHotKey(IntPtr hWnd, int id);
 }
 "@
 
@@ -107,6 +112,54 @@ $inputBox = & $NF "InputBox"
 $cardWin.Add_MouseLeftButtonDown({ try { $cardWin.DragMove() } catch {} })
 
 # ============================================================
+# Global hotkeys: Ctrl+Shift+I = interjection, Ctrl+Shift+S = stop
+# ============================================================
+$cardWin.Add_SourceInitialized({
+    $helper = New-Object System.Windows.Interop.WindowInteropHelper($cardWin)
+    $hwndCard = $helper.Handle
+
+    # Register global hotkeys
+    $HOTKEY_INTERJECT = 1
+    $HOTKEY_STOP = 2
+    [WinApi]::RegisterHotKey($hwndCard, $HOTKEY_INTERJECT,
+        [WinApi]::MOD_CONTROL -bor [WinApi]::MOD_SHIFT, 0x49) | Out-Null  # Ctrl+Shift+I
+    [WinApi]::RegisterHotKey($hwndCard, $HOTKEY_STOP,
+        [WinApi]::MOD_CONTROL -bor [WinApi]::MOD_SHIFT, 0x53) | Out-Null  # Ctrl+Shift+S
+
+    # Hook WndProc for WM_HOTKEY
+    $source = [System.Windows.Interop.HwndSource]::FromHwnd($hwndCard)
+    $source.AddHook({
+        param($hwnd, $msg, $wParam, $lParam, $ref)
+        if ($msg -eq [WinApi]::WM_HOTKEY) {
+            switch ($wParam.ToInt32()) {
+                1 { # Ctrl+Shift+I: raise card + focus input
+                    $cardWin.Dispatcher.Invoke({
+                        $cardWin.Show()
+                        $cardWin.Activate()
+                        $inputBox.Focus()
+                        $script:visible = $true
+                        $script:lastActivity = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+                    })
+                    return 1
+                }
+                2 { # Ctrl+Shift+S: stop
+                    $cardWin.Dispatcher.Invoke({
+                        try { Invoke-RestMethod -Uri "$base/api/action" -Method Post -ContentType "application/json" -Body '{"action":"stopAll"}' -TimeoutSec 3 | Out-Null } catch {}
+                    })
+                    return 1
+                }
+            }
+        }
+        return 0
+    })
+})
+
+$borderWin.Add_Closed({
+    $timer.Stop()
+    try { [WinApi]::UnregisterHotKey($hwndCard, 1) | Out-Null } catch {}
+    try { [WinApi]::UnregisterHotKey($hwndCard, 2) | Out-Null } catch {}
+    $cardWin.Close()
+})
 # Helpers
 # ============================================================
 function Build-RainbowStops($t) {
