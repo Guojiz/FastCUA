@@ -8,23 +8,63 @@
         Topmost="True"
         ShowInTaskbar="False"
         ShowActivated="False"
-        Width="320" Height="52"
+        Width="300" Height="100"
         WindowStartupLocation="Manual">
-  <Border CornerRadius="12" Background="#FFFFFF" Padding="8,10">
+  <!-- Semi-transparent dark card -->
+  <Border CornerRadius="10" Background="#CC1C1C1E" Padding="14,10">
     <Grid>
-      <Grid.ColumnDefinitions>
-        <ColumnDefinition Width="*"/>
-        <ColumnDefinition Width="Auto"/>
-      </Grid.ColumnDefinitions>
-      <TextBox x:Name="InputBox"
-               Background="#F5F5F7" Foreground="#1D1D1F"
-               BorderBrush="#E5E5EA" BorderThickness="1"
-               Padding="8,4" FontSize="12" Height="28"
-               VerticalContentAlignment="Center"/>
-      <Button x:Name="StopBtn" Grid.Column="1"
-              Content="Stop" FontSize="12" Width="44" Height="28"
-              Background="#E5E5EA" Foreground="#FF3B30"
-              BorderBrush="Transparent" BorderThickness="0" Cursor="Hand" Margin="6,0,0,0"/>
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto"/>
+        <RowDefinition Height="Auto"/>
+        <RowDefinition Height="Auto"/>
+      </Grid.RowDefinitions>
+
+      <!-- Row 0: "FastCUA is using your computer" -->
+      <TextBlock Grid.Row="0"
+                 Text="FastCUA is using your computer"
+                 Foreground="#E0E0E0" FontSize="11.5"
+                 FontWeight="Medium"
+                 TextTrimming="CharacterEllipsis"
+                 Margin="0,0,0,4"/>
+
+      <!-- Row 1: "Esc to quit" -->
+      <TextBlock Grid.Row="1"
+                 Text="Esc to quit"
+                 Foreground="#888888" FontSize="10"
+                 Margin="0,0,0,8"/>
+
+      <!-- Row 2: interjection input + stop button -->
+      <Grid Grid.Row="2">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*"/>
+          <ColumnDefinition Width="Auto"/>
+        </Grid.ColumnDefinitions>
+        <TextBox x:Name="InputBox"
+                 Background="#FFFFFF" Foreground="#1D1D1F"
+                 BorderBrush="Transparent" BorderThickness="0"
+                 Padding="10,5" FontSize="11.5"
+                 Height="26"
+                 VerticalContentAlignment="Center">
+          <TextBox.Resources>
+            <Style TargetType="{x:Type Border}">
+              <Setter Property="CornerRadius" Value="6"/>
+            </Style>
+          </TextBox.Resources>
+        </TextBox>
+        <Button x:Name="StopBtn" Grid.Column="1"
+                Content="Stop" FontSize="11"
+                Width="44" Height="26"
+                Foreground="#E0E0E0"
+                Background="#33FFFFFF"
+                BorderBrush="Transparent" BorderThickness="0"
+                Cursor="Hand" Margin="6,0,0,0">
+          <Button.Resources>
+            <Style TargetType="{x:Type Border}">
+              <Setter Property="CornerRadius" Value="6"/>
+            </Style>
+          </Button.Resources>
+        </Button>
+      </Grid>
     </Grid>
   </Border>
 </Window>

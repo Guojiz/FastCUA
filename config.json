@@ -5,7 +5,7 @@
   "whitelist": ["mspaint.exe", "notepad.exe", "explorer.exe"],
   "port": 8420,
   "bannerEnabled": false,
-  "overlayEnabled": false,
+  "overlayEnabled": true,
   "overlayTitle": "FastCUA",
   "cuaBinPath": "C:/Users/Administrator/.codex/sky-mcp/helper/cua-native-host.exe"
 }
