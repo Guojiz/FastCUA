@@ -117,18 +117,18 @@ $cardWin.Add_MouseLeftButtonDown({ try { $cardWin.DragMove() } catch {} })
 # ============================================================
 $cardWin.Add_SourceInitialized({
     $helper = New-Object System.Windows.Interop.WindowInteropHelper($cardWin)
-    $hwndCard = $helper.Handle
+    $script:hwndCard = $helper.Handle
 
     # Register global hotkeys
     $HOTKEY_INTERJECT = 1
     $HOTKEY_STOP = 2
-    [WinApi]::RegisterHotKey($hwndCard, $HOTKEY_INTERJECT,
+    [WinApi]::RegisterHotKey($script:hwndCard, $HOTKEY_INTERJECT,
         [WinApi]::MOD_CONTROL -bor [WinApi]::MOD_SHIFT, 0x49) | Out-Null  # Ctrl+Shift+I
-    [WinApi]::RegisterHotKey($hwndCard, $HOTKEY_STOP,
+    [WinApi]::RegisterHotKey($script:hwndCard, $HOTKEY_STOP,
         [WinApi]::MOD_CONTROL -bor [WinApi]::MOD_SHIFT, 0x53) | Out-Null  # Ctrl+Shift+S
 
     # Hook WndProc for WM_HOTKEY
-    $source = [System.Windows.Interop.HwndSource]::FromHwnd($hwndCard)
+    $source = [System.Windows.Interop.HwndSource]::FromHwnd($script:hwndCard)
     $source.AddHook({
         param($hwnd, $msg, $wParam, $lParam, $ref)
         if ($msg -eq [WinApi]::WM_HOTKEY) {
@@ -155,12 +155,6 @@ $cardWin.Add_SourceInitialized({
     })
 })
 
-$borderWin.Add_Closed({
-    $timer.Stop()
-    try { [WinApi]::UnregisterHotKey($hwndCard, 1) | Out-Null } catch {}
-    try { [WinApi]::UnregisterHotKey($hwndCard, 2) | Out-Null } catch {}
-    $cardWin.Close()
-})
 # Helpers
 # ============================================================
 function Build-RainbowStops($t) {
@@ -262,7 +256,12 @@ $inputBox.Add_KeyDown({
     }
 })
 
-$borderWin.Add_Closed({ $timer.Stop(); $cardWin.Close() })
+$borderWin.Add_Closed({
+    $timer.Stop()
+    try { [WinApi]::UnregisterHotKey($script:hwndCard, 1) | Out-Null } catch {}
+    try { [WinApi]::UnregisterHotKey($script:hwndCard, 2) | Out-Null } catch {}
+    $cardWin.Close()
+})
 $cardWin.Add_Closed({ $timer.Stop(); $borderWin.Close() })
 
 # ============================================================
