@@ -1,0 +1,28 @@
+{
+  "formatVersion": 1,
+  "source": {
+    "file": "cua-native-host.exe",
+    "size": 1691648,
+    "sha256": "f2b2f56fcd1699b0fa32dec3214a56a1d36b937a2ecf58cc822ab4a904551e03"
+  },
+  "output": {
+    "file": "cua-native-host-no-display.exe",
+    "size": 1691648,
+    "sha256": "05a3c313a56679fcff79028856d7f20afc8256687d84bcf7aa45ed1a370e2bfd"
+  },
+  "patches": [
+    {
+      "virtualAddress": "0x14008B81B",
+      "fileOffset": "0x8AC1B",
+      "beforeHex": "FFD3",
+      "afterHex": "9090",
+      "meaning": "Disable ShowWindow(display, SW_SHOWNOACTIVATE); retain the following cursor ShowWindow call"
+    }
+  ],
+  "verification": {
+    "byteDifferenceCount": 2,
+    "cursorOverlayVisible": true,
+    "displayOverlayVisible": false,
+    "regressionChecksPassed": 15
+  }
+}

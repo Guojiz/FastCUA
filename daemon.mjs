@@ -174,11 +174,14 @@ async function handleBinaryMessage(msg) {
   else p.reject(new Error("unexpected helper response"));
 }
 
+function killProcessTree(pid) {
+  try { execFileSync("taskkill", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore", timeout: 5000 }); } catch {}
+}
 function resetBinary() {
   const p = proc; proc = null;
   for (const e of pendingBin.values()) { clearTimeout(e.timer); e.reject(new Error("helper reset")); }
   pendingBin.clear();
-  try { p && p.kill(); } catch {}
+  try { if (p) killProcessTree(p.pid); } catch {}
 }
 
 // ---- per-client state + named-pipe server ----
@@ -216,7 +219,7 @@ function onClientGone(socket) {
     if (ms > 0) {
       idleTimer = setTimeout(() => {
         log("idle for", ms / 1000, "s — shutting down helper + daemon");
-        if (proc) { try { proc.kill(); } catch {} }
+        resetBinary();
         if (overlayProc) { try { overlayProc.kill(); } catch {} }
         process.exit(0);
       }, ms);
@@ -398,10 +401,10 @@ launchOverlay();
 
 // ---- pipe server ----
 const server = net.createServer({ allowHalfOpen: false }, makeClient);
-server.on("error", (e) => { log("pipe server error:", e.message); process.exit(1); });
+server.on("error", (e) => { log("pipe server error:", e.message); resetBinary(); if (overlayProc) { try { overlayProc.kill(); } catch {} } process.exit(1); });
 server.listen(PIPE, () => log("listening on", PIPE));
 
-process.on("SIGINT", () => { if (proc) try { proc.kill(); } catch {}; if (overlayProc) try { overlayProc.kill(); } catch {}; process.exit(0); });
-process.on("SIGTERM", () => { if (proc) try { proc.kill(); } catch {}; if (overlayProc) try { overlayProc.kill(); } catch {}; process.exit(0); });
-process.on("SIGBREAK", () => { if (proc) try { proc.kill(); } catch {}; if (overlayProc) try { overlayProc.kill(); } catch {}; process.exit(0); });
+process.on("SIGINT", () => { resetBinary(); if (overlayProc) try { overlayProc.kill(); } catch {}; process.exit(0); });
+process.on("SIGTERM", () => { resetBinary(); if (overlayProc) try { overlayProc.kill(); } catch {}; process.exit(0); });
+process.on("SIGBREAK", () => { resetBinary(); if (overlayProc) try { overlayProc.kill(); } catch {}; process.exit(0); });
 log("fastcua daemon ready (one shared helper, pipe:", PIPE + ")");

@@ -1,5 +1,6 @@
 # FastCUA
 
+[自部署指南](docs/SELF_HOSTING_zh.md) | [Self-hosting guide](docs/SELF_HOSTING.md) | [逆向工程记录](re/ANALYSIS.md)
 > **The fastest open-source computer-use control for AI agents on Windows.**
 > [中文版 / Chinese](README_zh.md)
 

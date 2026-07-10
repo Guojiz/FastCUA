@@ -10,3 +10,4 @@ node_modules/
 # OS junk
 Thumbs.db
 .DS_Store
+helper/

@@ -100,8 +100,6 @@ $cardWin.Left = ($screenW - $cardWin.Width) / 2
 $cardWin.Top = 40
 
 $NF = { param($n) $cardWin.FindName($n) }
-$text0    = & $NF "Text0"
-$text1    = & $NF "Text1"
 $stopBtn  = & $NF "StopBtn"
 $inputBox = & $NF "InputBox"
 
@@ -129,25 +127,8 @@ function Build-RainbowStops($t) {
 $script:lastEventId = 0
 $script:inflight = $null
 $script:history = @()
-
-function Update-Display {
-    $now = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-    if ($script:inflight) {
-        $elapsed = $now - [long]$script:inflight.ts
-        $text0.Text       = $script:inflight.summary
-        $text0.Foreground = "#1D1D1F"  # Apple dark gray
-    } else {
-        $text0.Text       = "Idle"
-        $text0.Foreground = "#6E6E73"  # Apple medium gray
-    }
-    if ($script:history.Count -gt 0) {
-        $last = $script:history[-1]
-        $text1.Text       = $last.summary
-        $text1.Foreground = "#8E8E93"  # Apple light gray
-    } else {
-        $text1.Text = ""
-    }
-}
+$script:visible = $false
+$script:lastActivity = 0
 
 # ============================================================
 # Timer: animate rainbow + poll daemon + update display
@@ -167,17 +148,34 @@ $timer.Add_Tick({
     $borderBrush.GradientStops.Clear()
     foreach ($s in $newStops) { $borderBrush.GradientStops.Add($s) }
 
-    # update elapsed time every tick (smooth)
-    Update-Display
+    # Auto-hide when idle: no inflight for >2.5s → hide both windows.
+    # Auto-show when inflight appears or fresh activity arrives.
+    $nowMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    if ($script:inflight) {
+        $script:lastActivity = $nowMs
+        if (-not $script:visible) {
+            $borderWin.Dispatcher.Invoke({ $borderWin.Show() })
+            $cardWin.Dispatcher.Invoke({ $cardWin.Show() })
+            $script:visible = $true
+        }
+    } elseif ($script:visible -and ($nowMs - $script:lastActivity) -gt 2500) {
+        $borderWin.Dispatcher.Invoke({ $borderWin.Hide() })
+        $cardWin.Dispatcher.Invoke({ $cardWin.Hide() })
+        $script:visible = $false
+    }
 
-    # poll daemon every ~1.4s (every 20th tick)
-    if ($script:tickCount % 20 -eq 0) {
+    # poll daemon every ~700ms (every 10th tick) when visible, ~2.1s when hidden
+    $pollInterval = if ($script:visible) { 10 } else { 30 }
+    if ($script:tickCount % $pollInterval -eq 0) {
         try {
             $resp = Invoke-RestMethod -Uri "$base/api/events?since=$script:lastEventId" -Method Get -TimeoutSec 3
             if ($resp.inflight) { $script:inflight = $resp.inflight } else { $script:inflight = $null }
             foreach ($e in $resp.events) {
                 if ($e.id -gt $script:lastEventId) { $script:lastEventId = $e.id }
-                if ($e.type -eq "action_end") { $script:history += $e }
+                if ($e.type -eq "action_end") {
+                    $script:history += $e
+                    $script:lastActivity = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+                }
             }
             while ($script:history.Count -gt 5) { $script:history = $script:history[1..($script:history.Count-1)] }
         } catch {}
@@ -214,8 +212,6 @@ $borderWin.Add_Closed({ $timer.Stop(); $cardWin.Close() })
 $cardWin.Add_Closed({ $timer.Stop(); $borderWin.Close() })
 
 # ============================================================
-# Run both windows
+# Run the WPF dispatcher (windows start hidden, shown on first action)
 # ============================================================
-$borderWin.Show()
-$cardWin.Show()
 [System.Windows.Threading.Dispatcher]::Run()

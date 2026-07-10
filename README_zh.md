@@ -1,5 +1,6 @@
 # FastCUA
 
+[自部署指南](docs/SELF_HOSTING_zh.md) | [Self-hosting guide](docs/SELF_HOSTING.md) | [逆向工程记录](re/ANALYSIS.md)
 > **Windows 上最快的开源 AI computer-use 控件。**
 > [English](README.md)
 
