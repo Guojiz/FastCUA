@@ -1,5 +1,5 @@
 Exit code: 0
-Wall time: 1.9 seconds
+Wall time: 1.7 seconds
 Output:
 name: Release native host
 
@@ -15,7 +15,6 @@ permissions:
 
 jobs:
   windows-release:
-    if: startsWith(github.ref, 'refs/tags/v') || (github.ref == 'refs/heads/main' && github.event.head_commit.message == 'Release v0.1.0')
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -31,7 +30,7 @@ jobs:
       - name: Publish release assets
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v0.1.0' }}
+          tag_name: v0.1.0
           name: FastCUA v0.1.0
           files: |
             cua-native-host.exe
