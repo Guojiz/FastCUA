@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-const binary = path.resolve(process.argv[2] || "cua-native-host-no-display.exe");
+const binary = path.resolve(process.argv[2] || "native-host/target/release/cua-native-host.exe");
 const fixture = path.resolve(process.argv[3] || "tests/FastCuaFixture.exe");
 const python = process.argv[4] || process.env.CODEX_PYTHON;
 const codexHome = fs.mkdtempSync(path.join(os.tmpdir(), "fastcua-regression-"));
@@ -158,7 +158,7 @@ try {
   state = await request("get_window_state", { window, include_screenshot: false, include_text: true });
   const currentTree = state.accessibility.tree;
   if (setValueWorked) assert.ok(currentTree.includes("Text: set-value-ok"), "set_value effect missing from fixture status");
-  await request("click", { window, x: 250, y: 65, mouse_button: "left", click_count: 1 });
+  await request("click", { window, element_index: textIndex, mouse_button: "left", click_count: 1 });
   await request("press_key", { window, key: "Control_L+a" });
   await request("type_text", { window, text: "typed-ok" });
   passed("press_key/type_text");
@@ -207,11 +207,9 @@ try {
       [path.resolve("scripts/list-process-windows.py"), String(child.pid)],
       { encoding: "utf8" },
     ));
-    const cursor = overlayWindows.find((item) => item.title === "Codex Computer Use Cursor Overlay");
-    const display = overlayWindows.find((item) => item.title === "Codex is using your computer. Esc to cancel");
+    const cursor = overlayWindows.find((item) => item.title === "FastCUA Cursor Overlay");
     assert.equal(cursor?.visible, true, "cursor overlay is not visible");
-    assert.equal(display?.visible, false, "display overlay is still visible");
-    passed("overlay visibility", "cursor=true, display=false");
+    passed("overlay visibility", "cursor=true");
   }
 
   const unknown = await rawRequest("not_a_real_method", {}, {

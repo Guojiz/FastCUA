@@ -1,53 +1,58 @@
 # FastCUA
 
-[自部署指南](docs/SELF_HOSTING_zh.md) | [Self-hosting guide](docs/SELF_HOSTING.md) | [逆向工程记录](re/ANALYSIS.md)
-> **The fastest open-source computer-use control for AI agents on Windows.**
-> [中文版 / Chinese](README_zh.md)
+**A local-first computer-use control plane for Windows AI agents.**
 
-FastCUA gives any AI agent — Claude Desktop, Claude CLI, Cursor, or your own software — real control of a Windows desktop: click, type, scroll, drag, screenshot, and drive native apps, all through one resident helper that stays warm across every request.
+[中文](README_zh.md) · [Self-hosting](docs/SELF_HOSTING.md) · [中文部署指南](docs/SELF_HOSTING_zh.md)
 
----
+FastCUA gives an AI agent controlled access to your Windows desktop while keeping the user visibly in charge. One resident native host is shared by connected clients, so desktop context, cursor ownership, approvals, pause state, and interrupts stay coherent across a task.
 
-## Why FastCUA
+## Why it feels different
 
-**Up to ~10× lower latency than per-request computer-use runners.**
+| Capability | User experience |
+|---|---|
+| **Compact Dynamic Island** | A small translucent status island stays out of the way. `F9` expands the interjection field only when needed. |
+| **Full-screen state border** | A click-through rainbow edge means control is active; amber requests approval; red means paused or offline. |
+| **Safe access by default** | Trusted executables run directly. Unknown apps open the island with Allow once, Add to trusted apps, and Deny. |
+| **Explicit full access** | A separate no-prompt mode stays visibly purple/pink until disabled. |
+| **Human and machine pause** | Pause immediately blocks new desktop actions. Approval waiting also pauses the control plane. One action resumes it. |
+| **Shared warm host** | One resident helper serves all clients instead of rebuilding desktop state for every action. |
+| **Local control center** | A bilingual, responsive console at `127.0.0.1:8420` shows state, activity, approvals, policy, and deployment help. |
 
-Most computer-use setups spawn a fresh native helper on **every request** (or every agent process). Each cold start costs hundreds of milliseconds to several seconds (process init + accessibility/subsystem warmup). N actions = N cold starts paid in full.
+## Keyboard controls
 
-FastCUA spawns the helper **once** and keeps it resident. Every subsequent action skips the spawn — per-action latency drops to just the action itself (~100–900 ms). A 30-step task goes from "30 cold starts + 30 actions" to "1 spawn + 30 actions", eliminating roughly an order of magnitude of overhead.
+| Shortcut | Action |
+|---|---|
+| `F7` | Pause control and open local settings |
+| `F8` | Toggle pause / resume |
+| `F9` | Expand the island and interject |
+| `F10` | Exit FastCUA completely |
 
-- **One cursor, shared state** — all clients/agent processes share one helper, so focus & state stay consistent.
-- **Stop returns control to the AI instantly** — Stop button or interjection immediately rejects in-flight actions.
-- **Desktop overlay** — soft pastel rainbow screen-edge glow + top-center white status card showing live actions; click-through, auto-hides when idle.
-- **Web config + centralized approval** — `http://127.0.0.1:8420` live status; app approvals cached across clients; optional whitelist gate.
-- **Host-agnostic** — any MCP client, or any process that speaks newline-delimited JSON over a Windows named pipe.
+## Architecture
 
----
-
-## Prerequisites
-
-1. **Windows 11**
-2. **Node.js 18+**
-3. **A compatible native computer-use helper** — FastCUA auto-discovers it from common install locations. Use `cuaBinPath` in config or the `CUA_BIN` env var to point to it explicitly if needed.
-
-## Get FastCUA
-
-```bash
-git clone https://github.com/Guojiz/FastCUA.git
-cd FastCUA
+```mermaid
+flowchart LR
+  A["AI client"] -->|"MCP stdio"| B["server.mjs"]
+  B -->|"Named pipe"| C["daemon.mjs"]
+  C --> D["One native host"]
+  C --> E["Dynamic Island + screen border"]
+  C --> F["Local web control center"]
+  C --> G["Safe / full / pause state"]
 ```
 
-No build step. The daemon auto-discovers the helper on first use.
+The daemon listens only on loopback for HTTP and uses `\\.\pipe\fastcua` for clients. The native host validates window ownership before approval, restricts application launch to existing absolute `.exe` paths, and keeps approval decisions centralized.
 
----
+## Quick start
 
-## Deploy
+Requirements: Windows 11, Node.js 18+, and Rust stable when building the included native host.
 
-FastCUA is host-agnostic. Pick your AI software below. The daemon co-starts on first connect and idle-exits after 5 min.
+```powershell
+git clone https://github.com/Guojiz/FastCUA.git
+cd FastCUA
+./native-host/build.ps1
+node daemon.mjs
+```
 
-### Option A — Claude Desktop (MCP)
-
-Add to `claude_desktop_config.json` (Settings → Developer → Edit Config):
+Then open `http://127.0.0.1:8420` and connect an MCP client to the absolute path of `server.mjs`:
 
 ```json
 {
@@ -60,139 +65,31 @@ Add to `claude_desktop_config.json` (Settings → Developer → Edit Config):
 }
 ```
 
-Restart Claude Desktop — `fastcua` appears under MCP tools.
+The daemon automatically finds `native-host/target/release/cua-native-host.exe`. You can also use `CUA_BIN` or `cuaBinPath` for a different compatible host.
 
-### Option B — Claude CLI (MCP)
+## Safety model
 
-```bash
-claude mcp add fastcua -- node /absolute/path/to/FastCUA/server.mjs
-```
+- `safe` is the default policy. Trusted entries are exact executable basenames or exact canonical paths—not substrings; unknown apps ask for Allow once, Add to trusted apps, or Deny. Approval expires after 60 seconds.
+- `full` is an explicit no-prompt mode and remains visibly purple/pink while enabled.
+- Changing policy or whitelist clears the in-memory approval cache.
+- Pause resets the native host, rejects pending work, and blocks new desktop requests.
+- Stop and interjection reject in-flight work and write an interrupt marker for connected clients. Exit releases the helper, overlay, pipe, and HTTP server.
+- The control API binds to `127.0.0.1`; browser framing and cross-origin access are restricted.
+- Local helper binaries, logs, build output, and machine-specific paths are excluded from Git.
 
-### Option C — Other MCP clients (Cursor, Cline, etc.)
+See [SELF_HOSTING.md](docs/SELF_HOSTING.md) for build, verification, troubleshooting, and protocol details.
 
-Same JSON shape as Option A under that client's MCP config. The server reports `serverInfo.name = "fastcua"`, `protocolVersion = 2024-11-05`.
+## Repository map
 
-### Option D — Direct named pipe (any AI software / custom agent)
-
-Connect to `\\.\pipe\fastcua` and exchange newline-delimited JSON.
-
-**Node:**
-```js
-import net from "node:net";
-const s = net.connect("\\\\.\\pipe\\fastcua", () => {
-  s.write(JSON.stringify({ id: 1, method: "list_apps", params: {} }) + "\n");
-});
-```
-
-**Python:**
-```python
-import json, win32file, pywintypes
-h = win32file.CreateFile(r"\\.\pipe\fastcua",
-    win32file.GENERIC_READ | win32file.GENERIC_WRITE, 0, None,
-    pywintypes.OPEN_EXISTING, 0, None)
-win32file.WriteFile(h, (json.dumps({"id":1,"method":"list_apps","params":{}}) + "\n").encode())
-```
-
-See **Pipe protocol** below for the full spec.
-
----
-
-## AI self-deploy guide
-
-Deterministic steps — an AI agent can execute them verbatim:
-
-1. `git clone https://github.com/Guojiz/FastCUA.git && cd FastCUA`
-2. `node --version` (≥ 18). Install Node.js if missing.
-3. Verify the helper binary is discoverable (auto-scan covers common install locations). If not found, set `CUA_BIN` env to its path.
-4. Register with your host (Option A/B/C above) using the absolute path to `server.mjs`.
-5. Smoke test:
-   ```bash
-   node daemon.mjs &
-   curl http://127.0.0.1:8420/api/state   # expect JSON with uptime
-   ```
-6. Open `http://127.0.0.1:8420` — the web config page should load.
-7. Invoke any `fastcua` tool (e.g. `list_apps`) from your host. The overlay should pop up showing the action.
-
----
-
-## Configuration
-
-`config.json` (also editable via the web page):
-
-```json
-{
-  "costartMode": "claude",
-  "idleTimeoutMin": 5,
-  "approvalPolicy": "auto",
-  "whitelist": ["mspaint.exe", "notepad.exe", "explorer.exe"],
-  "port": 8420,
-  "overlayEnabled": true,
-  "overlayTitle": "FastCUA · using your computer",
-  "cuaBinPath": ""
-}
-```
-
-| Key | Meaning |
+| Path | Purpose |
 |---|---|
-| `costartMode` | `claude` (co-start on first action) / `login` (Windows auto-start) / `manual` |
-| `idleTimeoutMin` | minutes idle before daemon exits (0 = never) |
-| `approvalPolicy` | `auto` (approve all) / `whitelist` (reject non-listed apps) |
-| `whitelist` | app names/substrings allowed under whitelist policy |
-| `port` | HTTP config API port (restart to apply) |
-| `overlayEnabled` | show the desktop overlay |
-| `overlayTitle` | text on the overlay card |
-| `cuaBinPath` | explicit helper path; empty = auto-discover, also settable via `CUA_BIN` env |
-
----
-
-## Architecture
-
-```
-AI host (Claude Desktop / CLI / Cursor / custom)
-        │  MCP (stdio)         or   named pipe (newline JSON)
-        ▼
-server.mjs  ──(spawns if down)──►  daemon.mjs  ──(one resident subprocess)──►  helper binary
-                                       │
-                                       ├── HTTP config + events  (127.0.0.1:8420)
-                                       └── overlay.ps1 (WPF border + card)
-```
-
-| File | Role |
-|---|---|
-| `daemon.mjs` | resident daemon: shared helper, named pipe, HTTP API, approval cache, interrupts, overlay lifecycle |
-| `server.mjs` | MCP server (thin pipe client, spawns daemon on first use) |
-| `overlay.ps1` | WPF overlay driver: rainbow edge + status card, polls daemon events, auto-hides when idle |
-| `card.xaml` | overlay card UI (white Apple-style) |
-| `web.html` | web config/status page |
-| `config.json` | runtime config (web-editable) |
-
----
-
-## Pipe protocol
-
-For direct integrators (Option D). Newline-delimited JSON over `\\.\pipe\fastcua`.
-
-**Request:** `{ "id": <int>, "method": <string>, "params": <object> }`
-**Response:** `{ "id": <int>, "result": <object> }` or `{ "id": <int>, "error": <string> }`
-
-| Method | Summary |
-|---|---|
-| `list_apps` | enumerate open apps + their targetable windows |
-| `launch_app` | launch an app by id or `.exe` path |
-| `get_window` | rehydrate a window by id |
-| `get_window_state` | capture accessibility tree + screenshot |
-| `click` / `drag` / `scroll` | pointer actions (by element index or x,y) |
-| `type_text` / `press_key` | keyboard input |
-| `set_value` | replace an editable element's value |
-| `perform_secondary_action` | invoke a secondary a11y action |
-| `activate_window` | bring a window to the foreground |
-| `end_turn` | advance turn id (interrupt bookkeeping) |
-| `close` | disconnect this client |
-
-**Interrupt / Stop:** `POST /api/action {"action":"stopAll"}` immediately rejects in-flight helper actions. `POST /api/interject {"text":"..."}` queues a message injected as the next interrupt.
-
----
+| `daemon.mjs` | Resident control plane, policy, interrupts, web API, overlay lifecycle |
+| `server.mjs` | MCP-to-named-pipe bridge |
+| `native-host/` | Open-source Windows native computer-use host |
+| `overlay.ps1`, `card.xaml` | Dynamic Island and click-through full-screen border |
+| `web.html` | Bilingual local control center and self-host guide |
+| `tests/` | Protocol and approval regression fixtures |
 
 ## License
 
-Apache License 2.0 — see [LICENSE](./LICENSE).
+Apache-2.0. See [LICENSE](LICENSE).

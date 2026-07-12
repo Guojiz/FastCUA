@@ -12,3 +12,6 @@ Thumbs.db
 .DS_Store
 helper/
 native-host/target/
+native-host/.cargo-home/
+native-host/.rustup-home/
+tests/*.exe

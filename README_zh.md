@@ -1,53 +1,58 @@
 # FastCUA
 
-[自部署指南](docs/SELF_HOSTING_zh.md) | [Self-hosting guide](docs/SELF_HOSTING.md) | [逆向工程记录](re/ANALYSIS.md)
-> **Windows 上最快的开源 AI computer-use 控件。**
-> [English](README.md)
+**面向 Windows AI Agent 的本地优先 Computer Use 控制平面。**
 
-FastCUA 让任意 AI agent（Claude Desktop、Claude CLI、Cursor 或你自己的程序）真正操控 Windows 桌面：点击、输入、滚动、拖拽、截图、驱动原生应用——所有动作经由**一个常驻、跨请求复用的** helper 完成。
+[English](README.md) · [中文自部署](docs/SELF_HOSTING_zh.md) · [Self-hosting](docs/SELF_HOSTING.md)
 
----
+FastCUA 让 AI 可以受控地操作 Windows 桌面，同时始终把最终控制权留给用户。所有客户端共享一个常驻原生 Host，因此光标、桌面上下文、授权、暂停和中断在整个任务中保持一致。
 
-## 为什么是 FastCUA
+## 它为什么更顺手
 
-**比其他方案快约 10 倍。**
+| 能力 | 用户体验 |
+|---|---|
+| **小型 Dynamic Island** | 正常状态只显示一个透明小岛，不遮挡内容。仅在按下 `F9` 时展开插话输入框。 |
+| **全屏状态彩边** | 不拦截点击的彩虹边框表示正在接管；琥珀色表示等待授权；红色表示暂停或离线。 |
+| **白名单优先** | 精确匹配可执行文件名或规范路径。白名单应用无需授权，未知应用默认拒绝。 |
+| **独立询问模式** | 可切换为“未知应用询问”，岛会展示仅允许一次、信任应用、拒绝三个选择。 |
+| **人机双暂停** | 用户暂停会立即拦截新操作；等待授权也是机器暂停。一键即可恢复。 |
+| **共享热 Host** | 多个客户端共用一个常驻 Host，不必为每个动作重新建立桌面状态。 |
+| **现代双语控制台** | `127.0.0.1:8420` 可查看状态、时间线、授权、策略与自部署说明。 |
 
-大多数 computer-use 方案在**每次请求**（或每个 agent 进程）都重新 spawn 一个原生 helper——每次冷启动要几百毫秒到几秒。N 步任务就要付 N 次冷启动成本。
+## 全局快捷键
 
-FastCUA 只 spawn **一次**，helper 常驻 daemon，后续每个动作跳过 spawn 直奔热二进制——单动作延迟降到动作本身（约 100–900 ms）。30 步任务从「30 次冷启动 + 30 个动作」变成「1 次 spawn + 30 个动作」，省掉约一个数量级的开销。
+| 快捷键 | 功能 |
+|---|---|
+| `F7` | 暂停控制并打开本地设置 |
+| `F8` | 暂停 / 恢复切换 |
+| `F9` | 展开小岛并插话 |
+| `F10` | 完全退出 FastCUA |
 
-- **一个光标、共享状态**——所有客户端共享一个 helper，焦点与状态一致。
-- **Stop 立即交还 AI**——Stop 按钮或打断立即中断当前动作，控制权立刻交还 AI。
-- **桌面浮窗**——柔和粉彩彩虹屏幕边框 + 顶部居中白色状态卡，实时显示动作；点击穿透，空闲自动隐藏。
-- **Web 配置页 + 集中审批**——`http://127.0.0.1:8420` 实时状态，应用审批跨客户端缓存，可选白名单关卡。
-- **不绑宿主**——任何 MCP 客户端，或任何能经 Windows 命名管道讲换行 JSON 的进程。
+## 架构
 
----
-
-## 前置条件
-
-1. **Windows 11**
-2. **Node.js 18+**
-3. **兼容的原生 computer-use helper**——FastCUA 自动从常见安装位置发现它。如需手动指定，在 config 里设 `cuaBinPath` 或用 `CUA_BIN` 环境变量。
-
-## 获取
-
-```bash
-git clone https://github.com/Guojiz/FastCUA.git
-cd FastCUA
+```mermaid
+flowchart LR
+  A["AI 客户端"] -->|"MCP stdio"| B["server.mjs"]
+  B -->|"命名管道"| C["daemon.mjs"]
+  C --> D["单一常驻原生 Host"]
+  C --> E["Dynamic Island + 全屏彩边"]
+  C --> F["本地 Web 控制台"]
+  C --> G["白名单 / 询问 / 暂停状态机"]
 ```
 
-无需构建。首次使用时 daemon 自动发现 helper。
+HTTP 只监听回环地址，客户端通过 `\\.\pipe\fastcua` 连接。原生 Host 会在授权前核验窗口与进程归属，启动应用只接受真实存在的绝对 `.exe` 路径。
 
----
+## 快速开始
 
-## 部署
+需要 Windows 11、Node.js 18+；编译内置原生 Host 还需要 Rust stable。
 
-FastCUA 不绑定宿主。以下选你的 AI 软件对应的接入方式。daemon 首次连接时自启动，空闲 5 分钟后自动退出。
+```powershell
+git clone https://github.com/Guojiz/FastCUA.git
+cd FastCUA
+./native-host/build.ps1
+node daemon.mjs
+```
 
-### 方式 A —— Claude Desktop (MCP)
-
-在 `claude_desktop_config.json` 中添加（Settings → Developer → Edit Config）：
+打开 `http://127.0.0.1:8420`，再把 MCP 客户端指向 `server.mjs` 的绝对路径：
 
 ```json
 {
@@ -60,139 +65,31 @@ FastCUA 不绑定宿主。以下选你的 AI 软件对应的接入方式。daemo
 }
 ```
 
-重启 Claude Desktop —— MCP 工具中出现 `fastcua`。
+daemon 会自动发现 `native-host/target/release/cua-native-host.exe`。也可以用 `CUA_BIN` 或 `cuaBinPath` 指定其他兼容 Host。
 
-### 方式 B —— Claude CLI (MCP)
+## 安全模型
 
-```bash
-claude mcp add fastcua -- node /absolute/path/to/FastCUA/server.mjs
-```
+- 默认策略为 `safe`：可信条目按可执行文件名或规范绝对路径精确匹配；未知应用可选择仅允许一次、加入可信名单或拒绝，授权请求 60 秒后自动失效。
+- `full` 是独立的免询问模式，启用期间始终以紫粉色明确提示。
+- 修改白名单或授权策略会清空内存中的历史放行缓存。
+- 暂停会重置原生 Host、拒绝待处理工作，并拦截新的桌面请求。
+- 停止与插话会拒绝进行中的操作，并为所有连接客户端写入中断标记；退出会释放 Helper、浮窗、命名管道和 HTTP 服务。
+- 控制 API 仅绑定 `127.0.0.1`，同时限制网页嵌入与跨域访问。
+- 本机 Helper、日志、构建产物和机器专属路径不会进入 Git。
 
-### 方式 C —— 其他 MCP 客户端（Cursor、Cline 等）
+完整构建、验证、故障排查与协议说明见 [SELF_HOSTING_zh.md](docs/SELF_HOSTING_zh.md)。
 
-使用和方式 A 相同的 JSON，填入该客户端的 MCP 配置。服务端报告 `serverInfo.name = "fastcua"`，`protocolVersion = 2024-11-05`。
+## 仓库结构
 
-### 方式 D —— 直连命名管道（任意 AI 软件 / 自定义 agent）
-
-连接 `\\.\pipe\fastcua`，收发换行分隔的 JSON。
-
-**Node：**
-```js
-import net from "node:net";
-const s = net.connect("\\\\.\\pipe\\fastcua", () => {
-  s.write(JSON.stringify({ id: 1, method: "list_apps", params: {} }) + "\n");
-});
-```
-
-**Python：**
-```python
-import json, win32file, pywintypes
-h = win32file.CreateFile(r"\\.\pipe\fastcua",
-    win32file.GENERIC_READ | win32file.GENERIC_WRITE, 0, None,
-    pywintypes.OPEN_EXISTING, 0, None)
-win32file.WriteFile(h, (json.dumps({"id":1,"method":"list_apps","params":{}}) + "\n").encode())
-```
-
-完整协议见下方「管道协议」。
-
----
-
-## AI 自部署指引
-
-确定性步骤，AI agent 可照搬执行：
-
-1. `git clone https://github.com/Guojiz/FastCUA.git && cd FastCUA`
-2. `node --version`（≥ 18）。如未安装，先装 Node.js。
-3. 检查 helper 二进制是否可被发现（自动扫描覆盖常见安装位置）。若发现不到，用 `CUA_BIN` 环境变量指定路径。
-4. 按你的宿主注册（上面 A/B/C），使用 `server.mjs` 的绝对路径。
-5. 冒烟测试：
-   ```bash
-   node daemon.mjs &
-   curl http://127.0.0.1:8420/api/state   # 预期返回含 uptime 的 JSON
-   ```
-6. 打开 `http://127.0.0.1:8420` —— Web 配置页应正常加载。
-7. 从宿主调用任意 `fastcua` 工具（如 `list_apps`）——浮窗应弹出并显示动作。
-
----
-
-## 配置
-
-`config.json`（也可通过 Web 配置页编辑）：
-
-```json
-{
-  "costartMode": "claude",
-  "idleTimeoutMin": 5,
-  "approvalPolicy": "auto",
-  "whitelist": ["mspaint.exe", "notepad.exe", "explorer.exe"],
-  "port": 8420,
-  "overlayEnabled": true,
-  "overlayTitle": "FastCUA · using your computer",
-  "cuaBinPath": ""
-}
-```
-
-| 项 | 说明 |
+| 路径 | 用途 |
 |---|---|
-| `costartMode` | `claude`（首次动作时自启）/ `login`（Windows 登录自启）/ `manual`（手动） |
-| `idleTimeoutMin` | 无客户端多少分钟后自动退出（0 = 不退出） |
-| `approvalPolicy` | `auto`（全部放行）/ `whitelist`（仅白名单） |
-| `whitelist` | 白名单策略下允许的应用名/子串 |
-| `port` | HTTP 配置 API 端口（重启生效） |
-| `overlayEnabled` | 是否显示桌面浮窗 |
-| `overlayTitle` | 浮窗卡片标题文字 |
-| `cuaBinPath` | 显式指定 helper 路径；留空 = 自动发现，也可用 `CUA_BIN` 环境变量设置 |
+| `daemon.mjs` | 常驻控制平面、策略、中断、Web API 与浮窗生命周期 |
+| `server.mjs` | MCP 到命名管道的薄桥接层 |
+| `native-host/` | 开源 Windows 原生 Computer Use Host |
+| `overlay.ps1`、`card.xaml` | Dynamic Island 与全屏穿透状态彩边 |
+| `web.html` | 双语本地控制台与自部署页面 |
+| `tests/` | 协议、授权和回归测试 |
 
----
+## 许可
 
-## 架构
-
-```
-AI 宿主（Claude Desktop / CLI / Cursor / 自定义）
-        │  MCP (stdio)           或   命名管道 (换行 JSON)
-        ▼
-server.mjs  ──(down 则拉起)──►  daemon.mjs  ──(一个常驻子进程)──►  helper 二进制
-                                      │
-                                      ├── HTTP 配置 + 事件  (127.0.0.1:8420)
-                                      └── overlay.ps1 (WPF 边框 + 卡片)
-```
-
-| 文件 | 作用 |
-|---|---|
-| `daemon.mjs` | 常驻 daemon：共享 helper、命名管道、HTTP API、审批缓存、中断、浮窗生命周期 |
-| `server.mjs` | MCP server（薄层管道客户端，首次使用时拉起 daemon） |
-| `overlay.ps1` | WPF 浮窗驱动：彩虹边框 + 状态卡，轮询 daemon 事件，空闲自动隐藏 |
-| `card.xaml` | 浮窗卡片界面（白色 Apple 风格） |
-| `web.html` | Web 配置/状态页面 |
-| `config.json` | 运行配置（可通过 Web 页面编辑） |
-
----
-
-## 管道协议
-
-适用于直连方式（方式 D）。经 `\\.\pipe\fastcua` 收发换行分隔 JSON。
-
-**请求：** `{ "id": <int>, "method": <string>, "params": <object> }`
-**响应：** `{ "id": <int>, "result": <object> }` 或 `{ "id": <int>, "error": <string> }`
-
-| 方法 | 说明 |
-|---|---|
-| `list_apps` | 枚举已安装应用及其可定位窗口 |
-| `launch_app` | 通过 id 或 `.exe` 路径启动应用 |
-| `get_window` | 通过 id 重新获取窗口 |
-| `get_window_state` | 捕获无障碍树 + 截图 |
-| `click` / `drag` / `scroll` | 指针动作（按元素索引或 x,y 坐标） |
-| `type_text` / `press_key` | 键盘输入 |
-| `set_value` | 替换可编辑元素的值 |
-| `perform_secondary_action` | 调用辅助无障碍动作 |
-| `activate_window` | 将窗口提到前台 |
-| `end_turn` | 递增客户端 turn id（中断记账用） |
-| `close` | 断开本客户端 |
-
-**中断 / 停止：** 每次请求前 daemon 检查中断文件；`POST /api/action {"action":"stopAll"}` 写入该文件并立即拒绝所有进行中的 helper 动作，AI 立刻恢复。`POST /api/interject {"text":"..."}` 将文本排入下一条中断提示。
-
----
-
-## 许可证
-
-Apache License 2.0 —— 见 [LICENSE](./LICENSE)。
+Apache-2.0，见 [LICENSE](LICENSE)。
