@@ -91,6 +91,12 @@ try {
   Move-Item -LiteralPath $source.FullName -Destination $appDir
   if ($savedConfig) { [System.IO.File]::WriteAllText((Join-Path $appDir 'config.json'), $savedConfig, [System.Text.UTF8Encoding]::new($false)) }
 
+  $desktop = [Environment]::GetFolderPath([Environment+SpecialFolder]::DesktopDirectory)
+  if (-not $desktop) { throw 'Unable to locate the current user desktop.' }
+  $consoleShortcut = Join-Path $desktop 'FastCUA Console.url'
+  $shortcutContents = "[InternetShortcut]`r`nURL=http://127.0.0.1:8420`r`nIconFile=$env:SystemRoot\System32\shell32.dll`r`nIconIndex=14`r`n"
+  [System.IO.File]::WriteAllText($consoleShortcut, $shortcutContents, [System.Text.UTF8Encoding]::new($false))
+
   $skillTarget = Join-Path $HOME '.claude\skills\computer-use'
   New-Item -ItemType Directory -Path $skillTarget -Force | Out-Null
   Copy-Item -LiteralPath (Join-Path $appDir 'skills\computer-use\SKILL.md') -Destination (Join-Path $skillTarget 'SKILL.md') -Force
@@ -106,6 +112,7 @@ try {
 
   Write-Host ''
   Write-Host 'FastCUA is ready.' -ForegroundColor Green
+  Write-Host "Desktop shortcut created: $consoleShortcut"
   Write-Host 'Open a new PowerShell window, configure your model provider, then run: claude'
   Write-Host 'Inside Claude Code, start with: /computer-use'
 } finally {

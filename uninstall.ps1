@@ -20,4 +20,9 @@ if ((Test-Path $skill) -and $PSCmdlet.ShouldProcess($skill, 'Remove FastCUA skil
 if ((Test-Path $InstallRoot) -and $PSCmdlet.ShouldProcess($InstallRoot, 'Remove FastCUA application files')) {
   Remove-Item -LiteralPath $InstallRoot -Recurse -Force
 }
+$desktop = [Environment]::GetFolderPath([Environment+SpecialFolder]::DesktopDirectory)
+$consoleShortcut = if ($desktop) { Join-Path $desktop 'FastCUA Console.url' } else { $null }
+if ($consoleShortcut -and (Test-Path $consoleShortcut) -and $PSCmdlet.ShouldProcess($consoleShortcut, 'Remove FastCUA Console shortcut')) {
+  Remove-Item -LiteralPath $consoleShortcut -Force
+}
 Write-Host 'FastCUA was removed. Claude Code itself was left installed.' -ForegroundColor Green
