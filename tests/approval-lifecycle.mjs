@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import path from "node:path";
 
-const binary = path.resolve(process.argv[2] || "target/release/cua-native-host.exe");
+const binary = path.resolve(process.argv[2] || "native-host/target/release/cua-native-host.exe");
 const fixture = path.resolve(process.argv[3] || "tests/FastCuaFixture.exe");
 const host = spawn(binary, ["--parent-pid", String(process.pid)], {
   stdio: ["pipe", "pipe", "pipe"],
@@ -38,10 +38,11 @@ function request(method, params, meta = {}) {
 try {
   const approval = await request("launch_app", { app: fixture });
   assert.equal(approval.ok, false);
-  assert.equal(approval.approvalRequest?.app, fixture);
+  const approvedApp = approval.approvalRequest?.app;
+  assert.equal(path.resolve(approvedApp.replace(/^\\\\\?\\/, "")), fixture);
 
   const launched = await request("launch_app", { app: fixture }, {
-    "x-oai-cua-approved-app": fixture,
+    "x-oai-cua-approved-app": approvedApp,
   });
   assert.equal(launched.ok, true);
   await new Promise((resolve) => setTimeout(resolve, 400));

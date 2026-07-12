@@ -1,11 +1,16 @@
 {
   "costartMode": "claude",
   "idleTimeoutMin": 5,
-  "approvalPolicy": "auto",
-  "whitelist": ["mspaint.exe", "notepad.exe", "explorer.exe"],
+  "approvalPolicy": "safe",
+  "whitelist": [
+    "mspaint.exe",
+    "notepad.exe",
+    "explorer.exe"
+  ],
   "port": 8420,
   "bannerEnabled": false,
   "overlayEnabled": true,
-  "overlayTitle": "FastCUA is using your computer / 正在使用你的电脑",
-  "cuaBinPath": "C:/Users/Administrator/.codex/sky-mcp/helper/cua-native-host.exe"
+  "overlayTitle": "FastCUA is using your computer",
+  "overlayLanguage": "auto",
+  "cuaBinPath": ""
 }

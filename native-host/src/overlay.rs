@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::win32::*;
-use std::{mem, ptr, thread};
+use std::{mem, ptr, thread, sync::atomic::{AtomicU32, Ordering}};
 
 const COLOR_KEY: DWORD = 0x00ff_00ff;
+static PULSE_PHASE: AtomicU32 = AtomicU32::new(0);
 
 pub fn start_cursor_overlay() {
     thread::Builder::new()
@@ -14,8 +15,7 @@ pub fn start_cursor_overlay() {
 
 unsafe fn overlay_thread() {
     let class_name = wide("OpenCuaCursorOverlayWindow");
-    let title = wide("Codex Computer Use Cursor Overlay");
-    let hidden_compatibility_title = wide("Codex is using your computer. Esc to cancel");
+    let title = wide("FastCUA Cursor Overlay");
     let instance = unsafe { GetModuleHandleW(ptr::null()) };
     let window_class = WNDCLASSEXW {
         cbSize: mem::size_of::<WNDCLASSEXW>() as UINT,
@@ -60,25 +60,6 @@ unsafe fn overlay_thread() {
     if hwnd.is_null() {
         return;
     }
-    // The supplied regression suite requires this exact title to enumerate as
-    // `visible=false`.  This is a zero-sized, never-shown compatibility
-    // sentinel: it has no compositor, paint path, text card, border or UI.
-    let _hidden_compatibility_sentinel = unsafe {
-        CreateWindowExW(
-            WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
-            class_name.as_ptr(),
-            hidden_compatibility_title.as_ptr(),
-            WS_POPUP,
-            0,
-            0,
-            0,
-            0,
-            ptr::null_mut(),
-            ptr::null_mut(),
-            instance,
-            ptr::null_mut(),
-        )
-    };
     unsafe {
         SetLayeredWindowAttributes(hwnd, COLOR_KEY, 255, LWA_COLORKEY);
         ShowWindow(hwnd, SW_SHOWNOACTIVATE);
@@ -112,6 +93,7 @@ unsafe extern "system" fn window_proc(
     match message {
         WM_NCHITTEST => HTTRANSPARENT,
         WM_TIMER => {
+            PULSE_PHASE.fetch_add(1, Ordering::Relaxed);
             unsafe { InvalidateRect(hwnd, ptr::null(), FALSE) };
             0
         }
@@ -131,18 +113,31 @@ unsafe extern "system" fn window_proc(
                 point.x -= unsafe { GetSystemMetrics(SM_XVIRTUALSCREEN) };
                 point.y -= unsafe { GetSystemMetrics(SM_YVIRTUALSCREEN) };
 
-                let pen = unsafe { CreatePen(PS_SOLID, 4, rgb(34, 211, 238)) };
+                // Visual inspiration: QwenLM/open-computer-use CursorMotion experiment.
+                // This is an independent Windows/GDI implementation: a restrained
+                // cyan-violet pulse keeps the real hardware cursor easy to follow.
+                let phase = PULSE_PHASE.load(Ordering::Relaxed) % 30;
+                let pulse = 17 + (phase.min(30 - phase) as i32 / 3);
+                let halo = unsafe { CreatePen(PS_SOLID, 2, rgb(139, 92, 246)) };
+                let old_halo = unsafe { SelectObject(hdc, halo) };
+                let hollow = unsafe { SelectObject(hdc, GetStockObject(HOLLOW_BRUSH)) };
+                unsafe {
+                    Ellipse(hdc, point.x - pulse, point.y - pulse, point.x + pulse, point.y + pulse);
+                    SelectObject(hdc, old_halo);
+                    DeleteObject(halo);
+                }
+
+                let pen = unsafe { CreatePen(PS_SOLID, 3, rgb(34, 211, 238)) };
                 let old_pen = unsafe { SelectObject(hdc, pen) };
-                let old_brush = unsafe { SelectObject(hdc, GetStockObject(HOLLOW_BRUSH)) };
                 unsafe {
                     Ellipse(
                         hdc,
-                        point.x - 14,
-                        point.y - 14,
-                        point.x + 14,
-                        point.y + 14,
+                        point.x - 12,
+                        point.y - 12,
+                        point.x + 12,
+                        point.y + 12,
                     );
-                    SelectObject(hdc, old_brush);
+                    SelectObject(hdc, hollow);
                     SelectObject(hdc, old_pen);
                     DeleteObject(pen);
                 }

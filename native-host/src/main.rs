@@ -29,6 +29,12 @@ struct Request {
 }
 
 fn main() {
+    // Keep captured bitmap pixels and absolute input coordinates in the same
+    // per-monitor coordinate space. Without this, Windows virtualizes
+    // GetWindowRect at 125%/150% DPI while PrintWindow returns physical pixels.
+    unsafe {
+        win32::SetProcessDpiAwarenessContext((-4isize) as win32::HANDLE);
+    }
     if let Some(parent_pid) = parent_pid_from_args() {
         monitor_parent(parent_pid);
     }
@@ -77,7 +83,11 @@ fn handle_request(request: &Request) -> Value {
         return error_response(request, INTERRUPT_MESSAGE);
     }
 
-    if let Some(app) = request_app(&request.method, &request.params) {
+    let approval_app = match request_app(request) {
+        Ok(app) => app,
+        Err(error) => return error_response(request, &error),
+    };
+    if let Some(app) = approval_app.as_deref() {
         let approved = request
             .meta
             .get("x-oai-cua-approved-app")
@@ -142,7 +152,7 @@ fn dispatch(method: &str, params: &Value) -> Result<Value, String> {
                 .unwrap_or(true);
             desktop::get_window_state(window, include_screenshot, include_text)
         }
-        "click" => {
+        "click" | "click_element" => {
             desktop::click(params)?;
             Ok(json!({}))
         }
@@ -154,7 +164,7 @@ fn dispatch(method: &str, params: &Value) -> Result<Value, String> {
             desktop::press_key(params)?;
             Ok(json!({}))
         }
-        "scroll" => {
+        "scroll" | "scroll_element" => {
             desktop::scroll(params)?;
             Ok(json!({}))
         }
@@ -179,15 +189,22 @@ fn error_response(request: &Request, message: &str) -> Value {
     json!({"id": request.id, "ok": false, "error": message})
 }
 
-fn request_app<'a>(method: &str, params: &'a Value) -> Option<&'a str> {
-    if matches!(method, "list_apps" | "list_windows" | "end_turn" | "close") {
-        return None;
+fn request_app(request: &Request) -> Result<Option<String>, String> {
+    if matches!(request.method.as_str(), "list_apps" | "list_windows" | "end_turn" | "close") {
+        return Ok(None);
     }
-    params
-        .get("window")
-        .and_then(|window| window.get("app"))
-        .and_then(Value::as_str)
-        .or_else(|| params.get("app").and_then(Value::as_str))
+    if request.method == "launch_app" {
+        let app = request
+            .params
+            .get("app")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "missing field `app`".to_string())?;
+        return desktop::validate_launch_app(app).map(Some);
+    }
+    if request.params.get("window").is_some() {
+        return desktop::params_window(&request.params).map(|window| Some(window.app));
+    }
+    Ok(None)
 }
 
 fn interrupt_path(meta: &Value) -> Option<PathBuf> {

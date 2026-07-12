@@ -1,94 +1,31 @@
-// Standalone resident computer-use daemon.
-//
-// Drives a native computer-use helper binary as a subprocess via its stdio JSON
-// protocol. Does NOT include or redistribute any helper binary — it is a
-// runtime dependency provided by the user's system.
-//
-// Owns ONE helper subprocess (one cursor, shared across all clients), hosts a
-// named pipe for MCP-server clients, centralizes app approval (cached across
-// clients), turn metadata + Esc interrupt (per client), overlay lifecycle
-// (idle-shutdown). Persistent-helper-shared-by-clients model (no per-process
-// spawn).
-import { spawn, execFileSync } from "node:child_process";
+// SPDX-License-Identifier: Apache-2.0
+
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import net from "node:net";
-import http from "node:http";
 import path from "node:path";
-import fs from "node:fs";
-import os from "node:os";
-import crypto from "node:crypto";
-import { fileURLToPath } from "node:url";
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const log = (...a) => { const s = "[fastcua] " + a.join(" "); process.stderr.write(s + "\n"); recentLogs.push(s); if (recentLogs.length > 100) recentLogs.shift(); };
+const base = process.argv[2] || "http://127.0.0.1:8420";
+const fixture = path.resolve(process.argv[3] || "tests/FastCuaFixture.exe");
 
-// Data directory for the helper subprocess (passed via env to the native binary).
-const CUA_CACHE_DIR = process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
-const PIPE = "\\\\.\\pipe\\fastcua";
-// Meta keys spoken to the helper over its own stdio protocol.
-const APPROVED_KEY = "x-oai-cua-approved-app";
-const BUDGET_KEY = "x-oai-cua-request-budget-ms";
-
-// Resolve the helper binary (NOT bundled). Precedence: config.cuaBinPath > env
-// CUA_BIN > auto-discover under common install locations. Returns null if not
-// found so callers surface a clear error instead of crashing.
-function discoverCuaBin() {
-  const localCandidates = [
-    path.join(HERE, "native-host", "target", "release", "cua-native-host.exe"),
-    path.join(HERE, "helper", "cua-native-host.exe"),
-  ];
-  for (const candidate of localCandidates) if (fs.existsSync(candidate)) return candidate;
-  const localAppData = process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
-  const runtimesDir = path.join(localAppData, "OpenAI", "Codex", "runtimes", "cua_node");
-  let entries;
-  try { entries = fs.readdirSync(runtimesDir); } catch { return null; }
-  for (const entry of entries) {
-    const cand = path.join(runtimesDir, entry, "bin", "node_modules", "@oai", "sky", "bin", "windows", "codex-computer-use.exe");
-    if (fs.existsSync(cand)) return cand;
-  }
-  return null;
-}
-function resolveCuaBin() {
-  if (config.cuaBinPath && fs.existsSync(config.cuaBinPath)) return config.cuaBinPath;
-  if (process.env.CUA_BIN && fs.existsSync(process.env.CUA_BIN)) return process.env.CUA_BIN;
-  return discoverCuaBin();
-}
-const TIMEOUT_MS = 30000;
-const ESC_MSG = "Computer Use was stopped by the user with the physical Escape key. Stop your work, do not call further Computer Use tools in this turn, and send a final message noting that the user stopped Computer Use.";
-const B = (t) => String(t).replace(/[^A-Za-z0-9._-]/g, "_");
-const recentLogs = [];
-const events = []; // structured events for overlay [{id,ts,type,action,client,duration_ms,summary}]
-let nextEventId = 1;
-const startedAt = Date.now();
-let currentAction = null; // in-flight: {action, summary, startedAt, client}
-let pendingInterjection = null; // text from overlay interjection input
-function emitEvent(type, data) {
-  const e = { id: nextEventId++, ts: Date.now(), type, ...data };
-  events.push(e);
-  if (events.length > 200) events.shift();
-}
-function actionSummary(method, params) {
-  if (!params) return "";
-  if (params.window) {
-    const app = params.window.app || "?";
-    const short = app.includes("\\") ? app.split("\\").pop() : app;
-    if (method === "click") return `${short} · click(${params.element_index ?? (params.x+','+params.y)})`;
-    if (method === "drag") return `${short} · drag(${params.from_x},${params.from_y})→(${params.to_x},${params.to_y})`;
-    if (method === "type_text") return `${short} · type "${params.text?.slice(0,20)||''}"`;
-    if (method === "press_key") return `${short} · press ${params.key}`;
-    if (method === "scroll") return `${short} · scroll(${params.scrollX||0},${params.scrollY||0})`;
-    if (method === "set_value") return `${short} · set[${params.element_index}]="${params.value?.slice(0,20)||''}"`;
-    return `${short} · ${method}`;
-  }
-  if (method === "list_apps") return "列出应用";
-  if (method === "launch_app") return `启动 ${params.app?.split("\\").pop()||params.app}`;
-  if (method === "get_window_state") return `截图 ${(params.window?.app||"").split("\\").pop()||"?"}`;
-  return method;
+async function api(route, body) {
+  const response = await fetch(base + route, body === undefined ? {} : {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const text = await response.text();
+  const parsed = text ? JSON.parse(text) : {};
+  if (!response.ok) throw new Error(parsed.error || text || response.statusText);
+  return parsed;
 }
 
-// ---- config (web UI editable) ----
-const CONFIG_PATH = path.join(HERE, "config.json");
-const DEFAULT_CONFIG = { costartMode: "claude", idleTimeoutMin: 5, approvalPolicy: "safe", whitelist: ["mspaint.exe", "notepad.exe", "explorer.exe"], port: 8420, bannerEnabled: false, overlayEnabled: true, overlayTitle: "FastCUA is using your computer", overlayLanguage: "auto", cuaBinPath: "" };
-const APPROVAL_WAIT_MS …50184 tokens truncated…e, 100));
+async function waitFor(predicate, message, timeout = 8_000) {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    const state = await api("/api/state");
+    if (predicate(state)) return state;
+    await new Promise(resolve => setTimeout(resolve, 100));
   }
   throw new Error(`timeout: ${message}`);
 }
