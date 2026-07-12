@@ -6,13 +6,7 @@
 //! release self-contained on both MSVC and GNU Rust toolchains.
 
 use crate::win32::{GetWindowRect, HWND, POINT, RECT};
-use std::{
-    ffi::c_void,
-    mem, ptr, slice,
-    sync::mpsc,
-    thread,
-    time::Duration,
-};
+use std::{ffi::c_void, mem, ptr, slice, sync::mpsc, thread, time::Duration};
 
 type HRESULT = i32;
 type ComPtr = *mut c_void;
@@ -107,6 +101,15 @@ pub struct Snapshot {
     pub tree: String,
     pub focused_element: String,
     pub document_text: String,
+    pub elements: Vec<ElementSnapshot>,
+}
+
+#[derive(Clone)]
+pub struct ElementSnapshot {
+    pub index: u64,
+    pub name: String,
+    pub role: String,
+    pub bounds: Option<RECT>,
 }
 
 pub fn snapshot(hwnd: HWND, title: &str, app_name: &str) -> Result<Snapshot, String> {
@@ -147,7 +150,10 @@ unsafe fn snapshot_inner(hwnd: HWND, title: &str, app_name: &str) -> Result<Snap
         if should_uninitialize {
             unsafe { CoUninitialize() };
         }
-        return Err(format!("create UI Automation failed: 0x{:08x}", created as u32));
+        return Err(format!(
+            "create UI Automation failed: 0x{:08x}",
+            created as u32
+        ));
     }
     let mut desktop_root = ptr::null_mut();
     let get_root: unsafe extern "system" fn(ComPtr, *mut ComPtr) -> HRESULT =
@@ -189,7 +195,10 @@ unsafe fn snapshot_inner(hwnd: HWND, title: &str, app_name: &str) -> Result<Snap
         if should_uninitialize {
             unsafe { CoUninitialize() };
         }
-        return Err(format!("UIA ElementFromPoint failed: 0x{:08x}", root_result as u32));
+        return Err(format!(
+            "UIA ElementFromPoint failed: 0x{:08x}",
+            root_result as u32
+        ));
     }
     if walker_result >= 0 && !walker.is_null() {
         let get_parent: unsafe extern "system" fn(ComPtr, ComPtr, *mut ComPtr) -> HRESULT =
@@ -209,6 +218,7 @@ unsafe fn snapshot_inner(hwnd: HWND, title: &str, app_name: &str) -> Result<Snap
 
     let mut tree = format!("Window: \"{title}\", App: {app_name}.\n");
     let mut document_parts = Vec::new();
+    let mut elements = Vec::new();
     let mut next_index = 0usize;
     let mut visited = 0usize;
     if walker_result >= 0 && !walker.is_null() {
@@ -221,6 +231,7 @@ unsafe fn snapshot_inner(hwnd: HWND, title: &str, app_name: &str) -> Result<Snap
                 &mut visited,
                 &mut tree,
                 &mut document_parts,
+                &mut elements,
             )
         };
     }
@@ -243,6 +254,7 @@ unsafe fn snapshot_inner(hwnd: HWND, title: &str, app_name: &str) -> Result<Snap
         tree,
         focused_element,
         document_text: document_parts.join("\n"),
+        elements,
     })
 }
 
@@ -254,6 +266,7 @@ unsafe fn walk_element(
     visited: &mut usize,
     tree: &mut String,
     document_parts: &mut Vec<String>,
+    elements: &mut Vec<ElementSnapshot>,
 ) {
     if element.is_null() || depth > 12 || *visited >= 300 {
         return;
@@ -264,6 +277,12 @@ unsafe fn walk_element(
     let name = unsafe { element_bstr(element, 23) }.unwrap_or_default();
     let control_type = unsafe { element_i32(element, 21) }.unwrap_or(UIA_CUSTOM);
     let role = role_name(control_type);
+    elements.push(ElementSnapshot {
+        index: index as u64,
+        name: name.clone(),
+        role: role.to_string(),
+        bounds: unsafe { element_bounds(element) },
+    });
     tree.push_str(&"\t".repeat(depth + 1));
     tree.push_str(&format!("{index} {role}"));
     if !name.is_empty() {
@@ -297,6 +316,7 @@ unsafe fn walk_element(
                 visited,
                 tree,
                 document_parts,
+                elements,
             )
         };
         let mut next = ptr::null_mut();
@@ -304,6 +324,19 @@ unsafe fn walk_element(
         unsafe { release(child) };
         child = next;
     }
+}
+
+unsafe fn element_bounds(element: ComPtr) -> Option<RECT> {
+    let getter: unsafe extern "system" fn(ComPtr, *mut RECT) -> HRESULT =
+        unsafe { method(element, 43) };
+    let mut value = RECT::default();
+    if unsafe { getter(element, &mut value) } < 0
+        || value.right <= value.left
+        || value.bottom <= value.top
+    {
+        return None;
+    }
+    Some(value)
 }
 
 unsafe fn focused_description(automation: ComPtr) -> String {

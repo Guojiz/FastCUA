@@ -118,6 +118,20 @@ try {
   let state = await request("get_window_state", {
     window,
     include_screenshot: true,
+    include_text: false,
+  });
+  assert.deepEqual(state.accessibility, {});
+  assert.equal(state.cacheDiagnostics.accessibilitySnapshotCount, 0);
+  assert.match(state.screenshots?.[0]?.url || "", /^data:image\/jpeg;base64,/);
+  await assert.rejects(
+    request("click", { window, element_index: 999_999, mouse_button: "left", click_count: 1 }),
+    /UIA element index is unavailable or stale.*include_text: true/i,
+  );
+  passed("screenshot-only skips UIA", "accessibilitySnapshotCount=0");
+
+  state = await request("get_window_state", {
+    window,
+    include_screenshot: true,
     include_text: true,
   });
   assert.ok(state.accessibility?.tree.includes("Fixture Text"), state.accessibility?.tree);
@@ -143,17 +157,14 @@ try {
     passed("set_value provider parity", "same provider limitation as unmodified host");
   }
 
-  let elementClickWorked = true;
-  try {
-    await request("click", { window, element_index: buttonIndex, mouse_button: "left", click_count: 1 });
-  } catch (error) {
-    if (!/(?:element \d+ no longer exists|missing field `x`)/i.test(error.message)) throw error;
-    elementClickWorked = false;
-  }
-  if (!elementClickWorked) {
-    await request("click", { window, x: 555, y: 65, mouse_button: "left", click_count: 1 });
-  }
-  passed("click", elementClickWorked ? "element index" : "coordinate fallback");
+  await request("click", { window, element_index: buttonIndex, mouse_button: "left", click_count: 1 });
+  passed("click", "UIA element index without coordinate fallback");
+
+  await assert.rejects(
+    request("click", { window, element_index: 999_999, mouse_button: "left", click_count: 1 }),
+    /UIA element index is unavailable or stale.*include_text: true/i,
+  );
+  passed("invalid UIA element index", "explicit stale error; no click fallback");
 
   state = await request("get_window_state", { window, include_screenshot: false, include_text: true });
   const currentTree = state.accessibility.tree;

@@ -12,6 +12,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $repo = 'https://github.com/Guojiz/FastCUA'
+$Version = 'v0.1.1'
 $appDir = Join-Path $InstallRoot 'app'
 $tempDir = Join-Path ([System.IO.Path]::GetTempPath()) ('fastcua-install-' + [guid]::NewGuid().ToString('N'))
 
@@ -55,7 +56,7 @@ try {
   } else {
     $archive = Join-Path $tempDir 'FastCUA.zip'
     Write-Host 'Downloading FastCUA...' -ForegroundColor Cyan
-    Invoke-WebRequest -UseBasicParsing -Uri "$repo/archive/refs/heads/main.zip" -OutFile $archive
+    Invoke-WebRequest -UseBasicParsing -Uri "$repo/archive/refs/tags/$Version.zip" -OutFile $archive
     Expand-Archive -LiteralPath $archive -DestinationPath $tempDir -Force
     $source = Get-ChildItem $tempDir -Directory | Where-Object Name -Like 'FastCUA-*' | Select-Object -First 1
     if (-not $source) { throw 'Downloaded archive did not contain the FastCUA source directory.' }
@@ -67,7 +68,7 @@ try {
     $resolvedHost = (Resolve-Path -LiteralPath $NativeHostPath).Path
     Copy-Item -LiteralPath $resolvedHost -Destination $hostTarget -Force
   } else {
-    $releaseBase = "$repo/releases/latest/download"
+    $releaseBase = "$repo/releases/download/$Version"
     $downloadedHost = Join-Path $tempDir 'cua-native-host.exe'
     $checksums = Join-Path $tempDir 'SHA256SUMS.txt'
     Write-Host 'Downloading the verified native host...' -ForegroundColor Cyan

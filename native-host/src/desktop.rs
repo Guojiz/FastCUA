@@ -6,15 +6,29 @@ use jpeg_encoder::{ColorType, Encoder};
 use serde::Serialize;
 use serde_json::{Value, json};
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     mem,
     path::Path,
     ptr,
-    sync::{Mutex, OnceLock, atomic::{AtomicUsize, Ordering}},
+    sync::{
+        Mutex, OnceLock,
+        atomic::{AtomicUsize, Ordering},
+    },
 };
 
 static LAST_INPUT_HWND: AtomicUsize = AtomicUsize::new(0);
 static UIA_TIMEOUT_APPS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+static UIA_ELEMENT_MAPS: OnceLock<Mutex<HashMap<u64, HashMap<u64, UiaElementTarget>>>> =
+    OnceLock::new();
+
+#[derive(Clone)]
+struct UiaElementTarget {
+    name: String,
+    role: String,
+    bounds: RECT,
+}
+
+const STALE_UIA_ELEMENT: &str = "UIA element index is unavailable or stale. Call get_window_state with include_text: true again.";
 
 #[derive(Clone, Debug, Serialize)]
 pub struct WindowRef {
@@ -206,7 +220,12 @@ fn element_hwnd(window: &WindowRef, index: u64) -> Result<HWND, String> {
     child_elements(window.id as usize as HWND)
         .get(index.saturating_sub(1) as usize)
         .copied()
-        .ok_or_else(|| format!("element {index} no longer exists in {}", app_name(&window.app)))
+        .ok_or_else(|| {
+            format!(
+                "element {index} no longer exists in {}",
+                app_name(&window.app)
+            )
+        })
 }
 
 fn accessibility_tree(window: &WindowRef) -> (String, String, Vec<HWND>) {
@@ -216,8 +235,15 @@ fn accessibility_tree(window: &WindowRef) -> (String, String, Vec<HWND>) {
     elements.push(root);
     elements.extend(children.iter().copied());
 
-    let mut tree = format!("Window: \"{}\", App: {}.\n", window.title, app_name(&window.app));
-    tree.push_str(&format!("\t0 Window {} Secondary Actions: Raise\n", window.title));
+    let mut tree = format!(
+        "Window: \"{}\", App: {}.\n",
+        window.title,
+        app_name(&window.app)
+    );
+    tree.push_str(&format!(
+        "\t0 Window {} Secondary Actions: Raise\n",
+        window.title
+    ));
     let mut document_parts = Vec::new();
     for (index, hwnd) in children.iter().enumerate() {
         let name = window_text(*hwnd);
@@ -243,18 +269,22 @@ pub fn get_window_state(
     include_text: bool,
 ) -> Result<Value, String> {
     activate_window(window.id)?;
-    let (tree, focused_element, document_text) = match uia_snapshot(&window) {
-        Ok(snapshot) => (
-            snapshot.tree,
-            snapshot.focused_element,
-            snapshot.document_text,
-        ),
-        Err(_) => {
-            let (tree, document_text, _) = accessibility_tree(&window);
-            (tree, String::new(), document_text)
-        }
-    };
     let accessibility = if include_text {
+        let (tree, focused_element, document_text) = match uia_snapshot(&window) {
+            Ok(snapshot) => {
+                cache_uia_elements(&window, &snapshot)?;
+                (
+                    snapshot.tree,
+                    snapshot.focused_element,
+                    snapshot.document_text,
+                )
+            }
+            Err(_) => {
+                clear_uia_elements(window.id)?;
+                let (tree, document_text, _) = accessibility_tree(&window);
+                (tree, String::new(), document_text)
+            }
+        };
         json!({
             "tree": tree,
             "focused_element": focused_element,
@@ -275,10 +305,55 @@ pub fn get_window_state(
         "screenshots": screenshots,
         "cacheDiagnostics": {
             "accessibilityRevision": 1,
-            "accessibilitySnapshotCount": 1,
+            "accessibilitySnapshotCount": if include_text { 1 } else { 0 },
             "captureCachedSessionCount": 0
         }
     }))
+}
+
+fn cache_uia_elements(window: &WindowRef, snapshot: &uia::Snapshot) -> Result<(), String> {
+    let elements = snapshot
+        .elements
+        .iter()
+        .filter_map(|element| {
+            element.bounds.map(|bounds| {
+                (
+                    element.index,
+                    UiaElementTarget {
+                        name: element.name.clone(),
+                        role: element.role.clone(),
+                        bounds,
+                    },
+                )
+            })
+        })
+        .collect();
+    UIA_ELEMENT_MAPS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .map_err(|_| "UIA element map cache poisoned".to_string())?
+        .insert(window.id, elements);
+    Ok(())
+}
+
+fn clear_uia_elements(window_id: u64) -> Result<(), String> {
+    UIA_ELEMENT_MAPS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .map_err(|_| "UIA element map cache poisoned".to_string())?
+        .remove(&window_id);
+    Ok(())
+}
+
+fn uia_element_target(window: &WindowRef, index: u64) -> Result<UiaElementTarget, String> {
+    UIA_ELEMENT_MAPS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .map_err(|_| "UIA element map cache poisoned".to_string())?
+        .get(&window.id)
+        .and_then(|elements| elements.get(&index))
+        .cloned()
+        .ok_or_else(|| STALE_UIA_ELEMENT.to_string())
 }
 
 fn uia_snapshot(window: &WindowRef) -> Result<uia::Snapshot, String> {
@@ -296,7 +371,9 @@ fn uia_snapshot(window: &WindowRef) -> Result<uia::Snapshot, String> {
         &app_name(&window.app),
     );
     if matches!(&result, Err(message) if message.contains("timed out")) {
-        let _ = timed_out.lock().map(|mut apps| apps.insert(window.app.clone()));
+        let _ = timed_out
+            .lock()
+            .map(|mut apps| apps.insert(window.app.clone()));
     }
     result
 }
@@ -391,33 +468,46 @@ pub fn click(params: &Value) -> Result<(), String> {
     let window = params_window(params)?;
     let element_index = params.get("element_index").and_then(Value::as_u64);
     activate_window(window.id)?;
-    let (x, y, direct_target) = match (params.get("x"), params.get("y")) {
+    let (x, y) = match (params.get("x"), params.get("y")) {
         (Some(_), Some(_)) => {
             let (x, y) = screen_point(&window, number(params, "x")?, number(params, "y")?)?;
-            (x, y, ptr::null_mut())
+            (x, y)
         }
         _ => {
-            let index = element_index.ok_or_else(|| "parse click params: missing field `x`".to_string())?;
-            let target = element_hwnd(&window, index)?;
-            let mut rect = RECT::default();
-            if unsafe { GetWindowRect(target, &mut rect) } == 0 {
-                return Err(format!("GetWindowRect failed for element {index}"));
+            let index =
+                element_index.ok_or_else(|| "parse click params: missing field `x`".to_string())?;
+            let target = uia_element_target(&window, index)?;
+            let rect = target.bounds;
+            if rect.right <= rect.left || rect.bottom <= rect.top {
+                return Err(STALE_UIA_ELEMENT.into());
             }
-            ((rect.left + rect.right) / 2, (rect.top + rect.bottom) / 2, target)
+            let mut window_rect = RECT::default();
+            if unsafe { GetWindowRect(window.id as usize as HWND, &mut window_rect) } == 0 {
+                return Err(STALE_UIA_ELEMENT.into());
+            }
+            let x = rect.left + (rect.right - rect.left) / 2;
+            let y = rect.top + (rect.bottom - rect.top) / 2;
+            if x < window_rect.left
+                || x >= window_rect.right
+                || y < window_rect.top
+                || y >= window_rect.bottom
+            {
+                return Err(STALE_UIA_ELEMENT.into());
+            }
+            let _description = (&target.name, &target.role);
+            (x, y)
         }
     };
     let parent = window.id as usize as HWND;
     let mut client_point = POINT { x, y };
     unsafe { ScreenToClient(parent, &mut client_point) };
-    let child = if !direct_target.is_null() {
-        direct_target
-    } else { unsafe {
+    let child = unsafe {
         ChildWindowFromPointEx(
             parent,
             client_point,
             CWP_SKIPINVISIBLE | CWP_SKIPDISABLED | CWP_SKIPTRANSPARENT,
         )
-    }};
+    };
     LAST_INPUT_HWND.store(
         if child.is_null() { parent } else { child } as usize,
         Ordering::SeqCst,
@@ -440,7 +530,12 @@ pub fn click(params: &Value) -> Result<(), String> {
     Ok(())
 }
 
-fn dispatch_window_click(target: HWND, screen_x: i32, screen_y: i32, button: &str) -> Result<(), String> {
+fn dispatch_window_click(
+    target: HWND,
+    screen_x: i32,
+    screen_y: i32,
+    button: &str,
+) -> Result<(), String> {
     if class_name(target).eq_ignore_ascii_case("button") && matches!(button, "left" | "l") {
         unsafe { SendMessageW(target, BM_CLICK, 0, 0) };
         return Ok(());
@@ -523,11 +618,7 @@ pub fn drag(params: &Value) -> Result<(), String> {
         number(params, "from_x")?,
         number(params, "from_y")?,
     )?;
-    let (to_x, to_y) = screen_point(
-        &window,
-        number(params, "to_x")?,
-        number(params, "to_y")?,
-    )?;
+    let (to_x, to_y) = screen_point(&window, number(params, "to_x")?, number(params, "to_y")?)?;
     unsafe { SetCursorPos(from_x, from_y) };
     send_mouse(MOUSEEVENTF_LEFTDOWN, 0)?;
     for step in 1..=20 {
@@ -571,10 +662,7 @@ pub fn perform_secondary_action(params: &Value) -> Result<(), String> {
         .get("element_index")
         .and_then(Value::as_u64)
         .unwrap_or(0);
-    let action = params
-        .get("action")
-        .and_then(Value::as_str)
-        .unwrap_or("");
+    let action = params.get("action").and_then(Value::as_str).unwrap_or("");
     if index == 0 && action.eq_ignore_ascii_case("raise") {
         activate_window(window.id)
     } else {
