@@ -283,6 +283,7 @@ unsafe extern "system" {
     pub fn GetWindowThreadProcessId(hwnd: HWND, process_id: *mut DWORD) -> DWORD;
     pub fn GetWindowRect(hwnd: HWND, rect: *mut RECT) -> BOOL;
     pub fn GetClientRect(hwnd: HWND, rect: *mut RECT) -> BOOL;
+    pub fn SetProcessDpiAwarenessContext(value: HANDLE) -> BOOL;
     pub fn ShowWindow(hwnd: HWND, command: i32) -> BOOL;
     pub fn SetForegroundWindow(hwnd: HWND) -> BOOL;
     pub fn BringWindowToTop(hwnd: HWND) -> BOOL;
