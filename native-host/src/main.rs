@@ -8,12 +8,10 @@ mod win32;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{
-    env,
-    fs,
+    env, fs,
     io::{self, BufRead, Write},
     path::{Path, PathBuf},
-    process,
-    thread,
+    process, thread,
 };
 
 const INTERRUPT_MESSAGE: &str = "Computer Use was stopped by the user with the physical Escape key. Stop your work, do not call further Computer Use tools in this turn, and send a final message noting that the user stopped Computer Use.";
@@ -114,7 +112,9 @@ fn handle_request(request: &Request) -> Value {
 
 fn dispatch(method: &str, params: &Value) -> Result<Value, String> {
     match method {
-        "list_apps" => serde_json::to_value(desktop::list_apps()).map_err(|error| error.to_string()),
+        "list_apps" => {
+            serde_json::to_value(desktop::list_apps()).map_err(|error| error.to_string())
+        }
         "list_windows" => {
             serde_json::to_value(desktop::list_windows()).map_err(|error| error.to_string())
         }
@@ -124,8 +124,7 @@ fn dispatch(method: &str, params: &Value) -> Result<Value, String> {
                 .and_then(Value::as_u64)
                 .ok_or_else(|| "missing field `id`".to_string())?;
             let app = params.get("app").and_then(Value::as_str);
-            serde_json::to_value(desktop::get_window(id, app)?)
-                .map_err(|error| error.to_string())
+            serde_json::to_value(desktop::get_window(id, app)?).map_err(|error| error.to_string())
         }
         "launch_app" => {
             let app = params
@@ -190,7 +189,10 @@ fn error_response(request: &Request, message: &str) -> Value {
 }
 
 fn request_app(request: &Request) -> Result<Option<String>, String> {
-    if matches!(request.method.as_str(), "list_apps" | "list_windows" | "end_turn" | "close") {
+    if matches!(
+        request.method.as_str(),
+        "list_apps" | "list_windows" | "end_turn" | "close"
+    ) {
         return Ok(None);
     }
     if request.method == "launch_app" {

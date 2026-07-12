@@ -328,7 +328,12 @@ unsafe extern "system" {
     pub fn BeginPaint(hwnd: HWND, paint: *mut PAINTSTRUCT) -> HDC;
     pub fn EndPaint(hwnd: HWND, paint: *const PAINTSTRUCT) -> BOOL;
     pub fn FillRect(hdc: HDC, rect: *const RECT, brush: HBRUSH) -> i32;
-    pub fn SetLayeredWindowAttributes(hwnd: HWND, color_key: DWORD, alpha: u8, flags: DWORD) -> BOOL;
+    pub fn SetLayeredWindowAttributes(
+        hwnd: HWND,
+        color_key: DWORD,
+        alpha: u8,
+        flags: DWORD,
+    ) -> BOOL;
     pub fn SetWindowPos(
         hwnd: HWND,
         insert_after: HWND,

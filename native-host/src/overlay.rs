@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::win32::*;
-use std::{mem, ptr, thread, sync::atomic::{AtomicU32, Ordering}};
+use std::{
+    mem, ptr,
+    sync::atomic::{AtomicU32, Ordering},
+    thread,
+};
 
 const COLOR_KEY: DWORD = 0x00ff_00ff;
 static PULSE_PHASE: AtomicU32 = AtomicU32::new(0);
@@ -39,11 +43,7 @@ unsafe fn overlay_thread() {
     let height = unsafe { GetSystemMetrics(SM_CYVIRTUALSCREEN) };
     let hwnd = unsafe {
         CreateWindowExW(
-            WS_EX_LAYERED
-                | WS_EX_TRANSPARENT
-                | WS_EX_TOPMOST
-                | WS_EX_TOOLWINDOW
-                | WS_EX_NOACTIVATE,
+            WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
             class_name.as_ptr(),
             title.as_ptr(),
             WS_POPUP,
@@ -122,7 +122,13 @@ unsafe extern "system" fn window_proc(
                 let old_halo = unsafe { SelectObject(hdc, halo) };
                 let hollow = unsafe { SelectObject(hdc, GetStockObject(HOLLOW_BRUSH)) };
                 unsafe {
-                    Ellipse(hdc, point.x - pulse, point.y - pulse, point.x + pulse, point.y + pulse);
+                    Ellipse(
+                        hdc,
+                        point.x - pulse,
+                        point.y - pulse,
+                        point.x + pulse,
+                        point.y + pulse,
+                    );
                     SelectObject(hdc, old_halo);
                     DeleteObject(halo);
                 }
@@ -130,13 +136,7 @@ unsafe extern "system" fn window_proc(
                 let pen = unsafe { CreatePen(PS_SOLID, 3, rgb(34, 211, 238)) };
                 let old_pen = unsafe { SelectObject(hdc, pen) };
                 unsafe {
-                    Ellipse(
-                        hdc,
-                        point.x - 12,
-                        point.y - 12,
-                        point.x + 12,
-                        point.y + 12,
-                    );
+                    Ellipse(hdc, point.x - 12, point.y - 12, point.x + 12, point.y + 12);
                     SelectObject(hdc, hollow);
                     SelectObject(hdc, old_pen);
                     DeleteObject(pen);
@@ -145,13 +145,7 @@ unsafe extern "system" fn window_proc(
                 let dot = unsafe { CreateSolidBrush(rgb(255, 255, 255)) };
                 let old_dot = unsafe { SelectObject(hdc, dot) };
                 unsafe {
-                    Ellipse(
-                        hdc,
-                        point.x - 4,
-                        point.y - 4,
-                        point.x + 4,
-                        point.y + 4,
-                    );
+                    Ellipse(hdc, point.x - 4, point.y - 4, point.x + 4, point.y + 4);
                     SelectObject(hdc, old_dot);
                     DeleteObject(dot);
                 }
