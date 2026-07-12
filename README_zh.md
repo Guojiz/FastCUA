@@ -1,95 +1,94 @@
 # FastCUA
 
-**面向 Windows AI Agent 的本地优先 Computer Use 控制平面。**
+**让 AI 操作你的 Windows，同时把暂停、插话和最终决定权留在你手里。**
 
-[English](README.md) · [中文自部署](docs/SELF_HOSTING_zh.md) · [Self-hosting](docs/SELF_HOSTING.md)
+[English](README.md) · [自部署指南](docs/SELF_HOSTING_zh.md)
 
-FastCUA 让 AI 可以受控地操作 Windows 桌面，同时始终把最终控制权留给用户。所有客户端共享一个常驻原生 Host，因此光标、桌面上下文、授权、暂停和中断在整个任务中保持一致。
+FastCUA 是面向 Claude Code 等 AI Agent 的本地 Computer Use 控制层。它把 MCP、Windows 原生键鼠控制、权限策略和可见状态整合成一个常驻服务：AI 可以连续完成真实桌面任务，你随时可以暂停、插话或退出。
 
-## 它为什么更顺手
+## 30 秒上手
 
-| 能力 | 用户体验 |
+适用于 Windows 11。以普通用户身份打开 PowerShell：
+
+```powershell
+irm https://raw.githubusercontent.com/Guojiz/FastCUA/main/install.ps1 | iex
+```
+
+安装器会准备 Node.js、Claude Code、FastCUA 原生组件、MCP 配置和 Computer Use Skill。完成后直接对 Claude Code 说：
+
+> 打开画图，画一座带太阳和草地的房子。
+
+控制台位于 `http://127.0.0.1:8420`，所有控制接口仅监听本机回环地址。
+
+## 你始终拥有控制权
+
+| 状态 | 视觉提示 | 行为 |
+|---|---|---|
+| 正常运行 | 小型透明灵动岛 + 全屏彩边 | AI 正在使用电脑，鼠标操作仍可穿透边框 |
+| 等待确认 | 琥珀色 | 可选择“仅允许一次”“加入白名单”或“拒绝” |
+| 完全访问 | 紫粉色 | 不再逐次询问，直到你关闭该模式 |
+| 已暂停 | 红色 | 新操作立即被拦截，可一键恢复 |
+
+默认使用安全模式：白名单应用直接运行，未知应用需要确认。完全访问是独立、可见、可随时撤销的模式。
+
+## 四个快捷键
+
+| 快捷键 | 操作 |
 |---|---|
-| **小型 Dynamic Island** | 正常状态只显示一个透明小岛，不遮挡内容。仅在按下 `F9` 时展开插话输入框。 |
-| **全屏状态彩边** | 不拦截点击的彩虹边框表示正在接管；琥珀色表示等待授权；红色表示暂停或离线。 |
-| **白名单优先** | 精确匹配可执行文件名或规范路径。白名单应用无需授权，未知应用默认拒绝。 |
-| **独立询问模式** | 可切换为“未知应用询问”，岛会展示仅允许一次、信任应用、拒绝三个选择。 |
-| **人机双暂停** | 用户暂停会立即拦截新操作；等待授权也是机器暂停。一键即可恢复。 |
-| **共享热 Host** | 多个客户端共用一个常驻 Host，不必为每个动作重新建立桌面状态。 |
-| **现代双语控制台** | `127.0.0.1:8420` 可查看状态、时间线、授权、策略与自部署说明。 |
-
-## 全局快捷键
-
-| 快捷键 | 功能 |
-|---|---|
-| `F7` | 暂停控制并打开本地设置 |
-| `F8` | 暂停 / 恢复切换 |
-| `F9` | 展开小岛并插话 |
+| `F7` | 暂停并打开控制台 |
+| `F8` | 暂停 / 恢复 |
+| `F9` | 展开灵动岛并插话 |
 | `F10` | 完全退出 FastCUA |
 
-## 架构
+单击灵动岛也会进入控制台并暂停，适合鼠标接管；机器操作期间则推荐使用全局快捷键。
+
+## 为什么不是普通的鼠标脚本
+
+- **一个常驻原生 Host**：多个 Agent 共享窗口、光标、审批和暂停状态，减少重复启动和上下文漂移。
+- **窗口感知操作**：坐标绑定目标窗口并适配 Windows DPI 缩放，不依赖盲目的全屏绝对坐标。
+- **人机双向中断**：用户可以暂停，机器在等待授权时也会暂停；恢复后继续同一控制平面。
+- **精确白名单**：按规范化绝对路径或可执行文件名匹配，不使用危险的子字符串放行。
+- **可见而不打扰**：常态只显示小岛；插话、授权和异常时才展开。静态彩边保持低资源占用。
+- **本地优先**：命名管道承载 MCP 请求，控制台只绑定 `127.0.0.1`，策略和日志留在本机。
+
+## 工作方式
 
 ```mermaid
 flowchart LR
-  A["AI 客户端"] -->|"MCP stdio"| B["server.mjs"]
-  B -->|"命名管道"| C["daemon.mjs"]
-  C --> D["单一常驻原生 Host"]
-  C --> E["Dynamic Island + 全屏彩边"]
-  C --> F["本地 Web 控制台"]
-  C --> G["白名单 / 询问 / 暂停状态机"]
+  A["Claude Code / AI Agent"] -->|"MCP"| B["FastCUA 控制层"]
+  B --> C["Windows 原生 Host"]
+  B --> D["安全策略与暂停"]
+  B --> E["灵动岛与全屏彩边"]
+  B --> F["本地双语控制台"]
 ```
 
-HTTP 只监听回环地址，客户端通过 `\\.\pipe\fastcua` 连接。原生 Host 会在授权前核验窗口与进程归属，启动应用只接受真实存在的绝对 `.exe` 路径。
+## 自部署
 
-## 快速开始
-
-需要 Windows 11、Node.js 18+；编译内置原生 Host 还需要 Rust stable。
+需要自行审计、修改或构建原生组件时：
 
 ```powershell
 git clone https://github.com/Guojiz/FastCUA.git
 cd FastCUA
-./native-host/build.ps1
+.\native-host\build.ps1
 node daemon.mjs
 ```
 
-打开 `http://127.0.0.1:8420`，再把 MCP 客户端指向 `server.mjs` 的绝对路径：
+详细的 MCP 配置、构建验证、协议与故障排查见[自部署指南](docs/SELF_HOSTING_zh.md)。
 
-```json
-{
-  "mcpServers": {
-    "fastcua": {
-      "command": "node",
-      "args": ["C:\\path\\to\\FastCUA\\server.mjs"]
-    }
-  }
-}
+## 常见问题
+
+**如何立刻夺回电脑？**  按 `F7` 暂停，或按 `F10` 完全退出。
+
+**未知软件会直接启动吗？**  安全模式下不会。你可以仅允许一次、加入白名单或拒绝。
+
+**必须使用 Claude Code 吗？**  不是。任何支持 stdio MCP 的客户端都可连接 `server.mjs`。
+
+**如何卸载？**
+
+```powershell
+& "$env:LOCALAPPDATA\FastCUA\app\uninstall.ps1"
 ```
-
-daemon 会自动发现 `native-host/target/release/cua-native-host.exe`。也可以用 `CUA_BIN` 或 `cuaBinPath` 指定其他兼容 Host。
-
-## 安全模型
-
-- 默认策略为 `safe`：可信条目按可执行文件名或规范绝对路径精确匹配；未知应用可选择仅允许一次、加入可信名单或拒绝，授权请求 60 秒后自动失效。
-- `full` 是独立的免询问模式，启用期间始终以紫粉色明确提示。
-- 修改白名单或授权策略会清空内存中的历史放行缓存。
-- 暂停会重置原生 Host、拒绝待处理工作，并拦截新的桌面请求。
-- 停止与插话会拒绝进行中的操作，并为所有连接客户端写入中断标记；退出会释放 Helper、浮窗、命名管道和 HTTP 服务。
-- 控制 API 仅绑定 `127.0.0.1`，同时限制网页嵌入与跨域访问。
-- 本机 Helper、日志、构建产物和机器专属路径不会进入 Git。
-
-完整构建、验证、故障排查与协议说明见 [SELF_HOSTING_zh.md](docs/SELF_HOSTING_zh.md)。
-
-## 仓库结构
-
-| 路径 | 用途 |
-|---|---|
-| `daemon.mjs` | 常驻控制平面、策略、中断、Web API 与浮窗生命周期 |
-| `server.mjs` | MCP 到命名管道的薄桥接层 |
-| `native-host/` | 开源 Windows 原生 Computer Use Host |
-| `overlay.ps1`、`card.xaml` | Dynamic Island 与全屏穿透状态彩边 |
-| `web.html` | 双语本地控制台与自部署页面 |
-| `tests/` | 协议、授权和回归测试 |
 
 ## 许可
 
-Apache-2.0，见 [LICENSE](LICENSE)。
+Apache-2.0，详见 [LICENSE](LICENSE)。

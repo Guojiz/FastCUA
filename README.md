@@ -1,94 +1,93 @@
 # FastCUA
 
-**A local-first computer-use control plane for Windows AI agents.**
+**Let AI use your Windows PC while pause, interjection, and final control remain yours.**
 
-[中文](README_zh.md) · [Self-hosting](docs/SELF_HOSTING.md) · [中文部署指南](docs/SELF_HOSTING_zh.md)
+[中文](README_zh.md) · [Self-hosting](docs/SELF_HOSTING.md)
 
-FastCUA gives an AI agent controlled access to your Windows desktop while keeping the user visibly in charge. One resident native host is shared by connected clients, so desktop context, cursor ownership, approvals, pause state, and interrupts stay coherent across a task.
+FastCUA is a local computer-use control layer for Claude Code and other AI agents. It combines MCP, native Windows input, access policy, and visible system state in one resident service, so an agent can complete real desktop tasks while you can pause, interject, or exit at any moment.
 
-## Why it feels different
+## Start in 30 seconds
 
-| Capability | User experience |
+On Windows 11, open PowerShell as a regular user:
+
+```powershell
+irm https://raw.githubusercontent.com/Guojiz/FastCUA/main/install.ps1 | iex
+```
+
+The installer prepares Node.js, Claude Code, the FastCUA native component, MCP configuration, and the Computer Use skill. Then ask Claude Code:
+
+> Open Paint and draw a house with the sun and grass.
+
+The local control center is available at `http://127.0.0.1:8420`. Control endpoints listen on loopback only.
+
+## You stay in control
+
+| State | Visual signal | Behavior |
+|---|---|---|
+| Active | Compact translucent island + screen border | AI is using the computer; the border remains click-through |
+| Approval | Amber | Allow once, add to trusted apps, or deny |
+| Full access | Purple/pink | No per-action prompts until you disable the mode |
+| Paused | Red | New actions are blocked and can be resumed in one step |
+
+Safe mode is the default: trusted apps run directly and unknown apps require a decision. Full access is a separate, visible, reversible mode.
+
+## Four shortcuts
+
+| Key | Action |
 |---|---|
-| **Compact Dynamic Island** | A small translucent status island stays out of the way. `F9` expands the interjection field only when needed. |
-| **Full-screen state border** | A click-through rainbow edge means control is active; amber requests approval; red means paused or offline. |
-| **Safe access by default** | Trusted executables run directly. Unknown apps open the island with Allow once, Add to trusted apps, and Deny. |
-| **Explicit full access** | A separate no-prompt mode stays visibly purple/pink until disabled. |
-| **Human and machine pause** | Pause immediately blocks new desktop actions. Approval waiting also pauses the control plane. One action resumes it. |
-| **Shared warm host** | One resident helper serves all clients instead of rebuilding desktop state for every action. |
-| **Local control center** | A bilingual, responsive console at `127.0.0.1:8420` shows state, activity, approvals, policy, and deployment help. |
-
-## Keyboard controls
-
-| Shortcut | Action |
-|---|---|
-| `F7` | Pause control and open local settings |
-| `F8` | Toggle pause / resume |
+| `F7` | Pause and open the control center |
+| `F8` | Pause / resume |
 | `F9` | Expand the island and interject |
 | `F10` | Exit FastCUA completely |
 
-## Architecture
+Clicking the island also pauses and opens the control center for mouse takeover. Global keys are faster while the agent owns the pointer.
+
+## More than a mouse script
+
+- **One warm native host:** agents share window, pointer, approval, and pause state instead of rebuilding desktop context for each action.
+- **Window-aware control:** coordinates stay attached to the target window and account for Windows DPI scaling.
+- **Two-way interruption:** a person can pause; approval waiting pauses the machine; one action resumes the same control plane.
+- **Exact trust rules:** canonical paths and executable names are matched exactly, never by unsafe substring.
+- **Visible without being noisy:** the island stays compact until approval, interjection, or an exceptional state requires attention.
+- **Local first:** MCP requests use a named pipe, the console binds to `127.0.0.1`, and policy remains on the PC.
+
+## How it fits together
 
 ```mermaid
 flowchart LR
-  A["AI client"] -->|"MCP stdio"| B["server.mjs"]
-  B -->|"Named pipe"| C["daemon.mjs"]
-  C --> D["One native host"]
-  C --> E["Dynamic Island + screen border"]
-  C --> F["Local web control center"]
-  C --> G["Safe / full / pause state"]
+  A["Claude Code / AI agent"] -->|"MCP"| B["FastCUA control plane"]
+  B --> C["Windows native host"]
+  B --> D["Policy and pause state"]
+  B --> E["Dynamic Island and border"]
+  B --> F["Bilingual local console"]
 ```
 
-The daemon listens only on loopback for HTTP and uses `\\.\pipe\fastcua` for clients. The native host validates window ownership before approval, restricts application launch to existing absolute `.exe` paths, and keeps approval decisions centralized.
+## Self-host
 
-## Quick start
-
-Requirements: Windows 11, Node.js 18+, and Rust stable when building the included native host.
+To audit, modify, or build the native component yourself:
 
 ```powershell
 git clone https://github.com/Guojiz/FastCUA.git
 cd FastCUA
-./native-host/build.ps1
+.\native-host\build.ps1
 node daemon.mjs
 ```
 
-Then open `http://127.0.0.1:8420` and connect an MCP client to the absolute path of `server.mjs`:
+See the [self-hosting guide](docs/SELF_HOSTING.md) for MCP configuration, verification, protocol details, and troubleshooting.
 
-```json
-{
-  "mcpServers": {
-    "fastcua": {
-      "command": "node",
-      "args": ["C:\\path\\to\\FastCUA\\server.mjs"]
-    }
-  }
-}
+## FAQ
+
+**How do I take control immediately?** Press `F7` to pause or `F10` to exit.
+
+**Can an unknown app launch silently?** Not in safe mode. Choose allow once, trust, or deny.
+
+**Is Claude Code required?** No. Any client that supports stdio MCP can connect through `server.mjs`.
+
+**How do I uninstall it?**
+
+```powershell
+& "$env:LOCALAPPDATA\FastCUA\app\uninstall.ps1"
 ```
-
-The daemon automatically finds `native-host/target/release/cua-native-host.exe`. You can also use `CUA_BIN` or `cuaBinPath` for a different compatible host.
-
-## Safety model
-
-- `safe` is the default policy. Trusted entries are exact executable basenames or exact canonical paths—not substrings; unknown apps ask for Allow once, Add to trusted apps, or Deny. Approval expires after 60 seconds.
-- `full` is an explicit no-prompt mode and remains visibly purple/pink while enabled.
-- Changing policy or whitelist clears the in-memory approval cache.
-- Pause resets the native host, rejects pending work, and blocks new desktop requests.
-- Stop and interjection reject in-flight work and write an interrupt marker for connected clients. Exit releases the helper, overlay, pipe, and HTTP server.
-- The control API binds to `127.0.0.1`; browser framing and cross-origin access are restricted.
-- Local helper binaries, logs, build output, and machine-specific paths are excluded from Git.
-
-See [SELF_HOSTING.md](docs/SELF_HOSTING.md) for build, verification, troubleshooting, and protocol details.
-
-## Repository map
-
-| Path | Purpose |
-|---|---|
-| `daemon.mjs` | Resident control plane, policy, interrupts, web API, overlay lifecycle |
-| `server.mjs` | MCP-to-named-pipe bridge |
-| `native-host/` | Open-source Windows native computer-use host |
-| `overlay.ps1`, `card.xaml` | Dynamic Island and click-through full-screen border |
-| `web.html` | Bilingual local control center and self-host guide |
-| `tests/` | Protocol and approval regression fixtures |
 
 ## License
 
