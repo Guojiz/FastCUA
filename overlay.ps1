@@ -82,7 +82,6 @@ $script:controlState = "running"
 $script:hotkeyHwnd = [IntPtr]::Zero
 $script:edgeHwnd = [IntPtr]::Zero
 $script:rainbowBrush = $null
-$script:rainbowAngle = 0.0
 $script:registeredHotkeys = @{}
 $script:keyWasDown = @{}
 
@@ -319,15 +318,6 @@ $timer = [System.Windows.Threading.DispatcherTimer]::new()
 $timer.Interval = [TimeSpan]::FromMilliseconds(400)
 $timer.Add_Tick({ Keep-Topmost; Refresh-Island })
 $timer.Start()
-$flowTimer = [System.Windows.Threading.DispatcherTimer]::new()
-$flowTimer.Interval = [TimeSpan]::FromMilliseconds(700)
-$flowTimer.Add_Tick({
-  if ($script:rainbowBrush -and $edge.BorderBrush -eq $script:rainbowBrush) {
-    $script:rainbowAngle = ($script:rainbowAngle + 24) % 360
-    $script:rainbowBrush.RelativeTransform.Angle = $script:rainbowAngle
-  }
-})
-$flowTimer.Start()
 $keyTimer = [System.Windows.Threading.DispatcherTimer]::new()
 $keyTimer.Interval = [TimeSpan]::FromMilliseconds(55)
 $keyTimer.Add_Tick({
@@ -349,7 +339,6 @@ $keyTimer.Add_Tick({
 $keyTimer.Start()
 $win.Add_Closed({
   $timer.Stop()
-  $flowTimer.Stop()
   $keyTimer.Stop()
   if ($script:hotkeyHwnd -ne [IntPtr]::Zero) {
     1..4 | ForEach-Object { [IslandWinApi]::UnregisterHotKey($script:hotkeyHwnd, $_) | Out-Null }
