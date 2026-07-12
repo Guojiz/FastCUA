@@ -109,10 +109,32 @@ pub fn get_window(id: u64, requested_app: Option<&str>) -> Result<WindowRef, Str
     })
 }
 
-pub fn launch_app(app: &str) -> Result<(), String> {
+pub fn validate_launch_app(app: &str) -> Result<String, String> {
     let executable = app.strip_prefix("process:").unwrap_or(app);
+    let candidate = Path::new(executable);
+    if !candidate.is_absolute() {
+        return Err("launch app requires an absolute .exe path from list_apps".into());
+    }
+    let extension = candidate
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default();
+    if !extension.eq_ignore_ascii_case("exe") {
+        return Err("launch app only accepts an absolute .exe path".into());
+    }
+    if !candidate.is_file() {
+        return Err(format!("launch app target does not exist: {executable}"));
+    }
+    candidate
+        .canonicalize()
+        .map_err(|error| format!("canonicalize launch app: {error}"))
+        .map(|path| path.to_string_lossy().into_owned())
+}
+
+pub fn launch_app(app: &str) -> Result<(), String> {
+    let executable = validate_launch_app(app)?;
     let operation = wide("open");
-    let file = wide(executable);
+    let file = wide(&executable);
     let result = unsafe {
         ShellExecuteW(
             ptr::null_mut(),
@@ -165,16 +187,31 @@ unsafe extern "system" fn enum_child(hwnd: HWND, lparam: LPARAM) -> BOOL {
     TRUE
 }
 
-fn accessibility_tree(window: &WindowRef) -> (String, String, Vec<HWND>) {
-    let root = window.id as usize as HWND;
+fn child_elements(parent: HWND) -> Vec<HWND> {
     let mut children = Vec::new();
     unsafe {
         EnumChildWindows(
-            root,
+            parent,
             Some(enum_child),
             &mut children as *mut Vec<HWND> as LPARAM,
         );
     }
+    children
+}
+
+fn element_hwnd(window: &WindowRef, index: u64) -> Result<HWND, String> {
+    if index == 0 {
+        return Ok(window.id as usize as HWND);
+    }
+    child_elements(window.id as usize as HWND)
+        .get(index.saturating_sub(1) as usize)
+        .copied()
+        .ok_or_else(|| format!("element {index} no longer exists in {}", app_name(&window.app)))
+}
+
+fn accessibility_tree(window: &WindowRef) -> (String, String, Vec<HWND>) {
+    let root = window.id as usize as HWND;
+    let children = child_elements(root);
     let mut elements = Vec::with_capacity(children.len() + 1);
     elements.push(root);
     elements.extend(children.iter().copied());
@@ -352,21 +389,35 @@ fn capture_window(id: u64) -> Result<Value, String> {
 
 pub fn click(params: &Value) -> Result<(), String> {
     let window = params_window(params)?;
-    if params.get("x").is_none() || params.get("y").is_none() {
-        return Err("parse click params: missing field `x`".into());
-    }
+    let element_index = params.get("element_index").and_then(Value::as_u64);
     activate_window(window.id)?;
-    let (x, y) = screen_point(&window, number(params, "x")?, number(params, "y")?)?;
+    let (x, y, direct_target) = match (params.get("x"), params.get("y")) {
+        (Some(_), Some(_)) => {
+            let (x, y) = screen_point(&window, number(params, "x")?, number(params, "y")?)?;
+            (x, y, ptr::null_mut())
+        }
+        _ => {
+            let index = element_index.ok_or_else(|| "parse click params: missing field `x`".to_string())?;
+            let target = element_hwnd(&window, index)?;
+            let mut rect = RECT::default();
+            if unsafe { GetWindowRect(target, &mut rect) } == 0 {
+                return Err(format!("GetWindowRect failed for element {index}"));
+            }
+            ((rect.left + rect.right) / 2, (rect.top + rect.bottom) / 2, target)
+        }
+    };
     let parent = window.id as usize as HWND;
     let mut client_point = POINT { x, y };
     unsafe { ScreenToClient(parent, &mut client_point) };
-    let child = unsafe {
+    let child = if !direct_target.is_null() {
+        direct_target
+    } else { unsafe {
         ChildWindowFromPointEx(
             parent,
             client_point,
             CWP_SKIPINVISIBLE | CWP_SKIPDISABLED | CWP_SKIPTRANSPARENT,
         )
-    };
+    }};
     LAST_INPUT_HWND.store(
         if child.is_null() { parent } else { child } as usize,
         Ordering::SeqCst,
@@ -496,190 +547,47 @@ pub fn set_value(params: &Value) -> Result<(), String> {
     let index = params
         .get("element_index")
         .and_then(Value::as_u64)
-        .unwrap_or(0);
-    Err(format!(
-        "element {index} no longer exists in {}",
-        app_name(&window.app)
-    ))
-}
-
-pub fn perform_secondary_action(params: &Value) -> Result<(), String> {
-    let window = params_window(params)?;
-    let index = params
-        .get("element_index")
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
-    let action = params
-        .get("action")
+        .ok_or_else(|| "missing field `element_index`".to_string())?;
+    let value = params
+        .get("value")
         .and_then(Value::as_str)
-        .unwrap_or("");
-    if index == 0 && action.eq_ignore_ascii_case("raise") {
-        activate_window(window.id)
-    } else {
-        Err(format!("unsupported secondary action: {action}"))
+        .ok_or_else(|| "missing field `value`".to_string())?;
+    let target = element_hwnd(&window, index)?;
+    if !class_name(target).eq_ignore_ascii_case("edit") {
+        return Err(format!("element {index} does not support setting a value"));
     }
+    let value = wide(value);
+    let result = unsafe { SendMessageW(target, WM_SETTEXT, 0, value.as_ptr() as LPARAM) };
+    if result == 0 {
+        return Err(format!("set value failed for element {index}"));
+    }…8669 tokens truncated…(index: i32) -> HGDIOBJ;
+    pub fn Ellipse(hdc: HDC, left: i32, top: i32, right: i32, bottom: i32) -> BOOL;
 }
 
-pub fn params_window(params: &Value) -> Result<WindowRef, String> {
-    let object = params
-        .get("window")
-        .ok_or_else(|| "missing field `window`".to_string())?;
-    let id = object
-        .get("id")
-        .and_then(Value::as_u64)
-        .ok_or_else(|| "window missing field `id`".to_string())?;
-    let app = object.get("app").and_then(Value::as_str);
-    get_window(id, app)
+#[link(name = "shell32")]
+unsafe extern "system" {
+    pub fn ShellExecuteW(
+        hwnd: HWND,
+        operation: *const u16,
+        file: *const u16,
+        parameters: *const u16,
+        directory: *const u16,
+        show_command: i32,
+    ) -> HINSTANCE;
 }
 
-fn screen_point(window: &WindowRef, x: i32, y: i32) -> Result<(i32, i32), String> {
-    let mut rect = RECT::default();
-    if unsafe { GetWindowRect(window.id as usize as HWND, &mut rect) } == 0 {
-        return Err("GetWindowRect failed".into());
-    }
-    Ok((rect.left + x, rect.top + y))
+pub fn wide(value: &str) -> Vec<u16> {
+    value.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
-fn send_mouse(flags: DWORD, data: DWORD) -> Result<(), String> {
-    unsafe { mouse_event(flags, 0, 0, data, 0) };
-    Ok(())
+pub fn rgb(red: u8, green: u8, blue: u8) -> DWORD {
+    red as DWORD | ((green as DWORD) << 8) | ((blue as DWORD) << 16)
 }
 
-fn send_vk(key: WORD, up: bool) -> Result<(), String> {
-    let scan = unsafe { MapVirtualKeyW(key as UINT, MAPVK_VK_TO_VSC) } as u8;
-    unsafe { keybd_event(key as u8, scan, if up { KEYEVENTF_KEYUP } else { 0 }, 0) };
-    Ok(())
+pub fn null_handle() -> HANDLE {
+    std::ptr::null_mut()
 }
 
-fn send_unicode(unit: WORD) -> Result<(), String> {
-    let last = LAST_INPUT_HWND.load(Ordering::SeqCst) as HWND;
-    let target = if !last.is_null() {
-        last
-    } else {
-        let mut info: GUITHREADINFO = unsafe { mem::zeroed() };
-        info.cbSize = mem::size_of::<GUITHREADINFO>() as DWORD;
-        if unsafe { GetGUIThreadInfo(0, &mut info) } == 0 || info.hwndFocus.is_null() {
-            return Err("resolve focused window for text input".into());
-        }
-        info.hwndFocus
-    };
-    unsafe { SendMessageW(target, WM_CHAR, unit as WPARAM, 1) };
-    Ok(())
-}
-
-fn key_to_vk(token: &str) -> Option<WORD> {
-    let normalized = token.trim().to_ascii_uppercase().replace('-', "_");
-    let key = match normalized.as_str() {
-        "CTRL" | "CONTROL" | "CONTROL_L" | "CONTROL_R" => VK_CONTROL,
-        "SHIFT" | "SHIFT_L" | "SHIFT_R" => VK_SHIFT,
-        "ALT" | "ALT_L" | "ALT_R" | "MENU" => VK_MENU,
-        "RETURN" | "ENTER" | "KP_ENTER" | "NUMPAD_ENTER" => VK_RETURN,
-        "ESC" | "ESCAPE" => VK_ESCAPE,
-        "TAB" => VK_TAB,
-        "BACKSPACE" => VK_BACK,
-        "DELETE" | "DEL" => VK_DELETE,
-        "INSERT" | "INS" => VK_INSERT,
-        "HOME" | "BEGIN" => VK_HOME,
-        "END" => VK_END,
-        "PAGEUP" | "PAGE_UP" | "PRIOR" => VK_PRIOR,
-        "PAGEDOWN" | "PAGE_DOWN" | "NEXT" => VK_NEXT,
-        "UP" => VK_UP,
-        "DOWN" => VK_DOWN,
-        "LEFT" => VK_LEFT,
-        "RIGHT" => VK_RIGHT,
-        "SPACE" => VK_SPACE,
-        _ if normalized.starts_with('F') => {
-            let number = normalized[1..].parse::<u16>().ok()?;
-            if (1..=20).contains(&number) {
-                VK_F1 + number - 1
-            } else {
-                return None;
-            }
-        }
-        _ if normalized.len() == 1 => {
-            let character = normalized.encode_utf16().next()?;
-            let scanned = unsafe { VkKeyScanW(character) };
-            if scanned == -1 {
-                return None;
-            }
-            scanned as WORD & 0xff
-        }
-        _ if normalized.starts_with("KP_") || normalized.starts_with("NUMPAD_") => {
-            let suffix = normalized.rsplit('_').next()?;
-            match suffix {
-                value if value.len() == 1 && value.as_bytes()[0].is_ascii_digit() => {
-                    0x60 + value.parse::<u16>().ok()?
-                }
-                "MULTIPLY" => 0x6a,
-                "ADD" | "PLUS" => 0x6b,
-                "SUBTRACT" | "MINUS" => 0x6d,
-                "DECIMAL" | "PERIOD" | "DOT" => 0x6e,
-                "DIVIDE" | "SLASH" => 0x6f,
-                _ => return None,
-            }
-        }
-        _ => return None,
-    };
-    Some(key)
-}
-
-fn number(params: &Value, key: &str) -> Result<i32, String> {
-    params
-        .get(key)
-        .and_then(Value::as_i64)
-        .map(|value| value as i32)
-        .ok_or_else(|| format!("missing field `{key}`"))
-}
-
-fn window_text(hwnd: HWND) -> String {
-    let length = unsafe { GetWindowTextLengthW(hwnd) };
-    let mut buffer = vec![0u16; length.max(0) as usize + 1];
-    let copied = unsafe { GetWindowTextW(hwnd, buffer.as_mut_ptr(), buffer.len() as i32) };
-    String::from_utf16_lossy(&buffer[..copied.max(0) as usize])
-}
-
-fn class_name(hwnd: HWND) -> String {
-    let mut buffer = vec![0u16; 256];
-    let copied = unsafe { GetClassNameW(hwnd, buffer.as_mut_ptr(), buffer.len() as i32) };
-    String::from_utf16_lossy(&buffer[..copied.max(0) as usize])
-}
-
-fn role_for_class(class: &str) -> &'static str {
-    match class.to_ascii_lowercase().as_str() {
-        "static" => "Text",
-        "edit" => "Edit",
-        "button" => "Button",
-        "listbox" => "List",
-        "combobox" => "ComboBox",
-        "scrollbar" => "ScrollBar",
-        "msctls_trackbar32" => "Slider",
-        "systreeview32" => "Tree",
-        "syslistview32" => "List",
-        _ => "Pane",
-    }
-}
-
-fn process_path(pid: DWORD) -> Option<String> {
-    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid) };
-    if process.is_null() {
-        return None;
-    }
-    let mut buffer = vec![0u16; 32_768];
-    let mut size = buffer.len() as DWORD;
-    let success = unsafe { QueryFullProcessImageNameW(process, 0, buffer.as_mut_ptr(), &mut size) };
-    unsafe { CloseHandle(process) };
-    if success == 0 {
-        None
-    } else {
-        Some(String::from_utf16_lossy(&buffer[..size as usize]))
-    }
-}
-
-fn app_name(app: &str) -> String {
-    let raw = app.strip_prefix("process:").unwrap_or(app);
-    Path::new(raw)
-        .file_name()
-        .and_then(|value| value.to_str())
-        .unwrap_or(raw)
-        .to_string()
+pub fn hwnd_topmost() -> HWND {
+    (-1isize) as HWND
 }
