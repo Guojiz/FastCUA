@@ -4,8 +4,6 @@ on:
   push:
     tags:
       - 'v*'
-    branches:
-      - main
 
 permissions:
   contents: write
@@ -27,8 +25,8 @@ jobs:
       - name: Publish release assets
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v0.1.0
-          name: FastCUA v0.1.0
+          tag_name: ${{ github.ref_name }}
+          name: FastCUA ${{ github.ref_name }}
           files: |
             cua-native-host.exe
             SHA256SUMS.txt
