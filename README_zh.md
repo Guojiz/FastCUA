@@ -2,7 +2,9 @@
 
 **把 Windows 图形界面变成 AI 可快速执行的操作接口。**
 
-[English](README.md) · [自部署指南](docs/SELF_HOSTING_zh.md)
+[官网](https://guojiz.github.io/FastCUA/) · [English](README.md) · [自部署指南](docs/SELF_HOSTING_zh.md)
+
+> **使用你自己的 Agent。** FastCUA 支持任意兼容 stdio MCP 的 Agent。安装器只准备 Node.js 和经过校验的 FastCUA 运行时，不会安装、选择或修改任何 AI 客户端。
 
 FastCUA 是面向 Windows 的开源、本地优先 Computer Use 运行时。它把无障碍元素优先导航、按需截图、原生键鼠输入、多步执行、权限策略和可见的人类控制整合进一个常驻服务。
 
