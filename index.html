@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="FastCUA 是开源、本地优先的 Windows Computer Use 运行时：无障碍树优先、截图按需、常驻原生控制与 MCP 接入。">
+  <title>FastCUA — Windows AI Computer Use 运行时</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main>
+  <div class="ambient ambient-one"></div><div class="ambient ambient-two"></div>
+  <header class="nav-wrap"><nav class="nav shell" aria-label="主导航">
+    <a class="brand" href="#top"><span class="logo-mark"><span></span><span></span><span></span></span><span>FastCUA</span></a>
+    <button class="menu-button" aria-label="切换导航"><span></span><span></span></button>
+    <div class="nav-links"><a href="#why">为什么更快</a><a href="#workflow">安全控制</a><a href="#scenarios">适用范围</a><a class="nav-cta" href="https://github.com/Guojiz/FastCUA/releases/tag/v0.1.1">下载 v0.1.1 →</a></div>
+  </nav></header>
+
+  <section class="hero shell" id="top">
+    <div class="eyebrow"><span class="pulse"></span> OPEN-SOURCE · LOCAL-FIRST · WINDOWS</div>
+    <h1>让 AI 更快地<br><em>操作 Windows。</em></h1>
+    <p class="hero-copy">FastCUA 是独立开源的 Windows Computer Use 运行时。它优先把界面作为文本读取、按需使用截图，并通过常驻原生控制平面一次执行多步操作。</p>
+    <div class="hero-actions"><a class="button primary" href="https://github.com/Guojiz/FastCUA/releases/tag/v0.1.1">下载 v0.1.1 →</a><a class="button ghost" href="https://github.com/Guojiz/FastCUA">查看 GitHub</a></div>
+    <div class="agent-window" aria-label="FastCUA 执行任务演示">
+      <div class="window-bar"><div class="window-dots"><i></i><i></i><i></i></div><div class="window-title">FASTCUA / LIVE SESSION</div><div class="window-status"><span></span> 本地运行</div></div>
+      <div class="window-body"><aside class="session-panel"><p>当前任务</p><div class="task-card"><span>目标</span><strong id="demo-task">打开画图，画一座房子、太阳和草地</strong></div><div class="mini-metrics"><div><span>模式</span><b>Safe mode</b></div><div><span>接口</span><b>stdio MCP</b></div></div></aside>
+      <div class="screen-panel"><div class="browser-frame"><div class="browser-top"><span></span><span></span><span></span><div></div></div><div class="fake-app"><div class="fake-sidebar"><i></i><i></i><i></i><i></i></div><div class="fake-content"><div class="fake-heading"></div><div class="fake-table"><div><span></span><span></span><span></span><b></b></div><div class="active-row"><span></span><span></span><span></span><b></b></div><div><span></span><span></span><span></span><b></b></div><div><span></span><span></span><span></span><b></b></div></div><div class="cursor"><span>FastCUA</span></div></div></div></div>
+      <div class="action-feed"><div class="feed-item done"><span>✓</span><p><b>已读取 UI Automation</b><small>无需重复传输相似截图</small></p><time>TEXT</time></div><div class="feed-item running"><span>→</span><p><b>正在批量执行原生动作</b><small>点击 · 输入 · 拖拽 · 滚动</small></p><time>LIVE</time></div></div></div></div>
+    </div>
+  </section>
+
+  <section class="trust-strip"><div class="shell trust-inner"><span>FastCUA v0.1.1</span><p>Windows 11 x64</p><i></i><p>Apache-2.0</p><i></i><p>Local-first</p><i></i><p>MCP</p></div></section>
+
+  <section class="section shell" id="why"><div class="section-heading"><div><span class="kicker">THE FAST PATH</span><h2>少看重复像素，<br>多做真实操作。</h2></div><p>FastCUA 不强迫 Agent 反复进行“截图 → 推理 → 点击 → 截图”。当界面可以用文本准确表达时，它优先使用 Windows 无障碍树；视觉理解只在真正需要时出现。</p></div>
+  <div class="feature-grid"><article class="feature feature-main"><div class="feature-icon target-icon"><span></span></div><span class="feature-no">01</span><h3>无障碍树优先，截图按需</h3><p>按下一步决策需要，独立请求界面文本、截图或两者，减少无用的图像传输与视觉推理。</p><div class="prompt-line"><span>&gt;</span> include_text: true · include_screenshot: false</div></article>
+  <article class="feature"><div class="feature-icon eye-icon"><span></span></div><span class="feature-no">02</span><h3>一个常驻原生 Host</h3><p>所有客户端共享同一个温热控制平面，窗口身份、指针状态、审批与中断不会在每个动作前重建。</p></article>
+  <article class="feature dark-feature"><div class="feature-icon shield-icon">✓</div><span class="feature-no">03</span><h3>一次回合，多步动作</h3><p>把点击、快捷键、Unicode 输入、滚动、拖拽与连续笔画合并执行，减少反复往返模型。</p></article></div></section>
+
+  <section class="workflow-section" id="workflow"><div class="shell"><div class="workflow-top"><span class="kicker light">YOU STAY IN CONTROL</span><h2>四个全局按键，随时接管。</h2></div><div class="workflow-grid">
+    <article><span class="step-no">F7</span><div class="step-visual visual-1"><i></i><i></i><i></i></div><h3>暂停并打开控制台</h3><p>立即停止新动作，打开本地控制中心接管电脑。</p></article>
+    <article><span class="step-no">F8</span><div class="step-visual visual-2"><i></i><i></i><i></i></div><h3>暂停 / 继续</h3><p>随时冻结或恢复 Agent 的执行，不打断当前上下文。</p></article>
+    <article><span class="step-no">F9</span><div class="step-visual visual-3"><i></i><i></i><i></i></div><h3>展开并插话</h3><p>展开悬浮岛，向正在执行的任务追加或修正指令。</p></article>
+    <article><span class="step-no">F10</span><div class="step-visual visual-4"><i></i><i></i><i></i></div><h3>完全退出</h3><p>随时关闭 FastCUA，结束本地控制服务。</p></article>
+  </div></div></section>
+
+  <section class="section shell scenarios" id="scenarios"><div class="section-heading compact"><div><span class="kicker">BEYOND THE BROWSER</span><h2>覆盖浏览器之外的<br>Windows 桌面。</h2></div><p>FastCUA 不替代 CDP 或浏览器自动化；它补上浏览器周围的那一层——应用窗口、系统对话框和跨应用工作流。</p></div><div class="scenario-list">
+    <article><span>01</span><div><h3>Windows 桌面应用</h3><p>操作画图、文件资源管理器、Office 风格应用与其他原生窗口。</p></div><b>→</b></article>
+    <article><span>02</span><div><h3>系统文件对话框</h3><p>处理打开、保存与文件选择流程，让网页工作流越过浏览器边界。</p></div><b>→</b></article>
+    <article><span>03</span><div><h3>浏览器外壳与网页</h3><p>控制浏览器窗口与 Chrome UI；网页内部仍可与 CDP 或浏览器桥接组合。</p></div><b>→</b></article>
+    <article><span>04</span><div><h3>画布与自绘控件</h3><p>无障碍信息不足时按需启用截图，并使用原生坐标、拖拽与连续笔画。</p></div><b>→</b></article>
+  </div></section>
+
+  <section class="cta-section"><div class="cta-grid"></div><div class="shell cta-content"><span class="logo-mark"><span></span><span></span><span></span></span><span class="kicker light">START IN 30 SECONDS</span><h2>在 Windows 11<br>开始使用 FastCUA。</h2><p>安全模式默认开启；控制端点仅监听本机回环地址。下载最新版本，或查看源码自行审计与构建。</p><a class="button white" href="https://github.com/Guojiz/FastCUA/releases/tag/v0.1.1">下载 FastCUA v0.1.1 →</a></div></section>
+  <footer><div class="shell footer-inner"><a class="brand" href="#top"><span class="logo-mark"><span></span><span></span><span></span></span><span>FastCUA</span></a><p>Fast and reliable AI computer use for Windows.</p><div><a href="https://github.com/Guojiz/FastCUA">GitHub</a><a href="https://github.com/Guojiz/FastCUA/blob/main/README_zh.md">中文文档</a><a href="https://github.com/Guojiz/FastCUA/blob/main/LICENSE">Apache-2.0</a></div><small>FastCUA · Open-source · Local-first</small></div></footer>
+</main>
+<script src="app.js"></script>
+</body>
+</html>
