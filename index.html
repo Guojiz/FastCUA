@@ -9,7 +9,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
-  <link rel="stylesheet" href="style-c86d40a.css">
+  <link rel="stylesheet" href="style-2622617.css">
+  <link rel="stylesheet" href="mindmap-2622617.css">
 </head>
 <body>
   <div class="frame" aria-hidden="true"><span class="crop tl"></span><span class="crop tr"></span><span class="crop bl"></span><span class="crop br"></span></div>
@@ -18,6 +19,7 @@
   <header class="masthead">
     <a class="brand" href="https://guojiz.github.io/" aria-label="Guojiz home"><span class="brand-mark">GZ</span><span class="brand-name">FastCUA</span></a>
     <div class="masthead-right">
+      <a class="home-button" href="https://guojiz.github.io/" data-en="← Main site" data-zh="← 返回主站">← Main site</a>
       <nav aria-label="Primary"><a href="#principles" data-en="Principles" data-zh="原则">Principles</a><a href="#architecture" data-en="Architecture" data-zh="架构">Architecture</a><a href="#release" data-en="Release" data-zh="版本">Release</a><a href="https://github.com/Guojiz/FastCUA">GitHub</a></nav>
       <button class="lang-toggle" type="button" aria-label="Switch language"><span class="lang-opt" data-lang="en">EN</span><span class="lang-sep">/</span><span class="lang-opt" data-lang="zh">中</span></button>
     </div>
@@ -25,10 +27,23 @@
 
   <main>
     <section class="hero" id="top">
-      <p class="eyebrow" data-rise data-en="Open source · Local first · Computer use runtime" data-zh="开源 · 本地优先 · Computer Use 运行时">Open source · Local first · Computer use runtime</p>
-      <h1 class="display" data-rise data-en="Less waiting.&lt;br&gt;&lt;em&gt;More doing.&lt;/em&gt;" data-zh="少一点等待，&lt;br&gt;&lt;em&gt;多一点执行。&lt;/em&gt;">Less waiting.<br><em>More doing.</em></h1>
-      <p class="lede" data-rise data-en="FastCUA is a fast, reliable, and controllable local execution layer for computer-use agents. It brings interface state, native input, access policy, and human takeover into one resident control plane." data-zh="FastCUA 为 Computer Use Agent 提供快速、可靠、可控的本地执行层，把界面状态、原生输入、访问策略与人工接管组织在同一个常驻控制平面中。">FastCUA is a fast, reliable, and controllable local execution layer for computer-use agents. It brings interface state, native input, access policy, and human takeover into one resident control plane.</p>
-      <div class="hero-actions" data-rise><a class="btn primary" href="https://github.com/Guojiz/FastCUA/releases/tag/v0.1.1" data-en="Get v0.1.1 ↗" data-zh="获取 v0.1.1 ↗">Get v0.1.1 ↗</a><a class="btn" href="https://github.com/Guojiz/FastCUA" data-en="Read source" data-zh="阅读源码">Read source</a></div>
+      <div class="hero-grid">
+        <div class="hero-main">
+          <p class="eyebrow" data-rise data-en="Open source · Local first · Computer use runtime" data-zh="开源 · 本地优先 · Computer Use 运行时">Open source · Local first · Computer use runtime</p>
+          <h1 class="display" data-rise data-en="Less waiting.&lt;br&gt;&lt;em&gt;More doing.&lt;/em&gt;" data-zh="少一点等待，&lt;br&gt;&lt;em&gt;多一点执行。&lt;/em&gt;">Less waiting.<br><em>More doing.</em></h1>
+          <p class="lede" data-rise data-en="FastCUA is a fast, reliable, and controllable local execution layer for computer-use agents. It brings interface state, native input, access policy, and human takeover into one resident control plane." data-zh="FastCUA 为 Computer Use Agent 提供快速、可靠、可控的本地执行层，把界面状态、原生输入、访问策略与人工接管组织在同一个常驻控制平面中。">FastCUA is a fast, reliable, and controllable local execution layer for computer-use agents. It brings interface state, native input, access policy, and human takeover into one resident control plane.</p>
+          <div class="hero-actions" data-rise><a class="btn primary" href="https://github.com/Guojiz/FastCUA/releases/tag/v0.1.1" data-en="Get v0.1.1 ↗" data-zh="获取 v0.1.1 ↗">Get v0.1.1 ↗</a><a class="btn" href="https://github.com/Guojiz/FastCUA" data-en="Read source" data-zh="阅读源码">Read source</a></div>
+        </div>
+        <div class="mindmap" data-rise role="img" aria-label="FastCUA runtime mind map">
+          <span class="map-caption" data-en="Runtime mind map" data-zh="运行时思维导图">Runtime mind map</span>
+          <svg class="map-lines" viewBox="0 0 520 430" aria-hidden="true"><path d="M260 215C205 215 190 112 133 112M260 215C315 215 330 112 387 112M260 215C205 215 190 318 133 318M260 215C315 215 330 318 387 318"/><circle cx="260" cy="215" r="5"/></svg>
+          <div class="map-core"><span>RUNTIME</span><strong>FastCUA</strong></div>
+          <div class="map-node node-observe"><span>M-01</span><strong data-en="Observe" data-zh="观察">Observe</strong><small data-en="structure + vision" data-zh="结构 + 视觉">structure + vision</small></div>
+          <div class="map-node node-execute"><span>M-02</span><strong data-en="Execute" data-zh="执行">Execute</strong><small data-en="native actions" data-zh="原生动作">native actions</small></div>
+          <div class="map-node node-control"><span>M-03</span><strong data-en="Control" data-zh="控制">Control</strong><small data-en="pause + takeover" data-zh="暂停 + 接管">pause + takeover</small></div>
+          <div class="map-node node-connect"><span>M-04</span><strong data-en="Connect" data-zh="连接">Connect</strong><small>MCP + host protocol</small></div>
+        </div>
+      </div>
       <dl class="hero-meta" data-rise>
         <div><dt data-en="Role" data-zh="角色">Role</dt><dd data-en="Execution runtime" data-zh="执行运行时">Execution runtime</dd></div>
         <div><dt data-en="Interface" data-zh="接口">Interface</dt><dd>MCP / host protocol</dd></div>
@@ -78,6 +93,6 @@
   </main>
 
   <footer><span>© 2026 FastCUA · Apache-2.0</span><a href="https://guojiz.github.io/" data-en="Main site ↗" data-zh="返回主站 ↗">Main site ↗</a><a href="https://github.com/Guojiz/FastCUA">GitHub ↗</a></footer>
-  <script src="app-c86d40a.js"></script>
+  <script src="app-2622617.js"></script>
 </body>
 </html>
