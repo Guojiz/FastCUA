@@ -97,29 +97,35 @@ try {
 
   $agentPromptPath = Join-Path $desktop 'FastCUA Agent Setup.txt'
   $agentPrompt = @"
-Set up FastCUA for this AI agent on Windows. Do not install or switch AI clients.
+Install FastCUA into this AI agent on Windows. By default, configure this agent's own active Skill system and MCP configuration. Do not install into or switch to another AI client unless the user explicitly names that client.
 
-1. Read the Computer Use skill at:
-   $appDir\skills\computer-use\SKILL.md
-2. Add a stdio MCP server named sky-computer-use to your own MCP configuration:
+A successful FastCUA setup requires BOTH the Skill and the MCP server. Partial installation is a failure.
+
+1. Install the complete FastCUA Skill folder into this agent's own active Skill directory or Skill registry:
+   source: $appDir\skills\computer-use
+   skill name: computer-use
+   Do not merely read SKILL.md from the source directory. Copy or register the complete folder, reload or reindex Skills, and verify that computer-use is discoverable by this agent.
+2. Add a stdio MCP server named sky-computer-use to this agent's own MCP configuration:
    command: $node
    args: ["$appDir\server.mjs"]
-3. Start or reconnect the MCP server.
-4. Verify it by calling list_windows, then report which MCP configuration file you changed.
+3. Start or reconnect the MCP server and reload the installed Skill if required by this client.
+4. Verify BOTH parts:
+   - confirm that the installed computer-use Skill is active or discoverable;
+   - call list_windows through sky-computer-use and confirm that it returns actual Windows window data.
+5. Report the exact Skill destination or registration you changed and the exact MCP configuration file you changed.
 
-Reading the Skill file alone is not a successful installation. Only report success after
-FastCUA list_windows returns actual Windows window data. If this client cannot add or connect
-a custom stdio MCP server, stop and report the incompatibility. Do not substitute PowerShell,
-SendKeys, pyautogui, shell scripts, browser automation, or another desktop-control mechanism.
+Reading the source Skill file alone is not installation. Adding only MCP is not installation. Installing only the Skill is not installation.
+
+If this AI client cannot install or register local Skills, cannot add a custom stdio MCP server, or cannot verify both parts, stop and report the incompatibility. Do not substitute PowerShell, SendKeys, pyautogui, shell scripts, browser automation, or another desktop-control mechanism.
 
 Keep FastCUA local. Do not expose its pipe or http://127.0.0.1:8420 beyond this computer.
 "@
   [System.IO.File]::WriteAllText($agentPromptPath, $agentPrompt.Trim() + "`r`n", [System.Text.UTF8Encoding]::new($false))
 
   Write-Host ''
-  Write-Host 'FastCUA is ready.' -ForegroundColor Green
+  Write-Host 'FastCUA runtime is ready.' -ForegroundColor Green
   Write-Host "Desktop shortcut created: $consoleShortcut"
-  Write-Host "Give this prompt to your MCP-compatible agent: $agentPromptPath"
+  Write-Host "Give this mandatory Skill + MCP installation prompt to the agent that will use FastCUA: $agentPromptPath"
 } finally {
   if (Test-Path $tempDir) { Remove-Item -LiteralPath $tempDir -Recurse -Force -ErrorAction SilentlyContinue }
 }
