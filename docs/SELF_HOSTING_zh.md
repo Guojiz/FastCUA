@@ -66,7 +66,7 @@ Invoke-RestMethod http://127.0.0.1:8420/api/state
 ```json
 {
   "mcpServers": {
-    "fastcua": {
+    "sky-computer-use": {
       "command": "node",
       "args": ["C:\\absolute\\path\\to\\FastCUA\\server.mjs"]
     }

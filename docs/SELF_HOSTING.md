@@ -66,7 +66,7 @@ Use an absolute path in your client's MCP configuration:
 ```json
 {
   "mcpServers": {
-    "fastcua": {
+    "sky-computer-use": {
       "command": "node",
       "args": ["C:\\absolute\\path\\to\\FastCUA\\server.mjs"]
     }

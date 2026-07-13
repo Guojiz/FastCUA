@@ -25,9 +25,10 @@
   </section>
   <section id="deploy" class="view"><div class="hero-main deploy-hero"><div class="eyebrow" data-i18n="deployEyebrow">Repeatable self-hosting</div><h2 data-i18n="deployTitle">From clone to first desktop action in four clear steps.</h2><p data-i18n="deployBody">A local daemon, a compatible native helper, and one MCP entry point. No cloud control plane required.</p></div><div class="deploy-grid"><article class="card step"><div class="step-no">01 · PREREQUISITES</div><h3 data-i18n="step1Title">Prepare Windows</h3><p data-i18n="step1Body">Install Node.js 18+ and place a compatible helper on the machine.</p></article><article class="card step"><div class="step-no">02 · INSTALL</div><h3 data-i18n="step2Title">Clone and configure</h3><p data-i18n="step2Body">Set the helper path in config.json or use CUA_BIN for a machine-local override.</p></article><article class="card step"><div class="step-no">03 · RUN</div><h3 data-i18n="step3Title">Start the control plane</h3><p data-i18n="step3Body">Run the daemon, then verify the local health endpoint before connecting a client.</p></article></div><div class="two"><section class="card"><div class="card-head"><div><h3 data-i18n="quickStartTitle">Quick start</h3><p data-i18n="quickStartBody">Designed for copy, paste, verify.</p></div></div><pre class="code"><button class="copy" data-copy="clone" data-i18n="copy">Copy</button><code id="clone">git clone https://github.com/Guojiz/FastCUA.git
 cd FastCUA
+.\native-host\build.ps1
 node daemon.mjs</code></pre><pre class="code" style="margin-top:10px"><button class="copy" data-copy="health" data-i18n="copy">Copy</button><code id="health">curl http://127.0.0.1:8420/api/state</code></pre></section><section class="card"><div class="card-head"><div><h3 data-i18n="mcpTitle">Connect an MCP client</h3><p data-i18n="mcpBody">Point your client to the thin stdio server. It reuses the shared daemon.</p></div></div><pre class="code"><button class="copy" data-copy="mcp" data-i18n="copy">Copy</button><code id="mcp">{
   "mcpServers": {
-    "fastcua": {
+    "sky-computer-use": {
       "command": "node",
       "args": ["C:\\path\\to\\FastCUA\\server.mjs"]
     }

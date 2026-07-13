@@ -144,7 +144,7 @@ try {
     include_text: true,
   });
   const tree = state.accessibility.tree;
-  const textIndex = elementIndex(tree, "Fixture Text");
+  const textIndex = elementIndex(tree, "Edit initial-value");
   const buttonIndex = elementIndex(tree, "Increment Button");
 
   let setValueWorked = true;
@@ -152,7 +152,7 @@ try {
     await request("set_value", { window, element_index: textIndex, value: "set-value-ok" });
     passed("set_value");
   } catch (error) {
-    if (!/(?:element \d+ no longer exists|missing field `x`)/i.test(error.message)) throw error;
+    if (!/(?:element \d+ no longer exists|does not support setting a value|missing field `x`)/i.test(error.message)) throw error;
     setValueWorked = false;
     passed("set_value provider parity", "same provider limitation as unmodified host");
   }
@@ -249,7 +249,26 @@ try {
   });
   assert.equal(interrupted.ok, false);
   assert.match(interrupted.error || "", /turn has ended|no longer available|physical Escape key/i);
-  passed("interrupt file", interrupted.error);
+  const stillInterrupted = await rawRequest("list_windows", {}, {
+    session_id: "protocol-regression",
+    turn_id: "1",
+    "x-oai-cua-request-budget-ms": 15_000,
+  });
+  assert.equal(stillInterrupted.ok, false);
+  assert.match(stillInterrupted.error || "", /physical Escape key/i);
+  const ended = await rawRequest("end_turn", {}, {
+    session_id: "protocol-regression",
+    turn_id: "1",
+    "x-oai-cua-request-budget-ms": 15_000,
+  });
+  assert.equal(ended.ok, true);
+  const nextTurn = await rawRequest("list_windows", {}, {
+    session_id: "protocol-regression",
+    turn_id: "2",
+    "x-oai-cua-request-budget-ms": 15_000,
+  });
+  assert.equal(nextTurn.ok, true);
+  passed("interrupt file", "persists through the turn and clears on end_turn");
 } finally {
   for (const entry of pending.values()) {
     clearTimeout(entry.timer);

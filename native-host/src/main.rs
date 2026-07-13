@@ -74,11 +74,12 @@ fn main() {
 }
 
 fn handle_request(request: &Request) -> Value {
-    if let Some(path) = interrupt_path(&request.meta)
-        && path.exists()
-    {
-        let _ = fs::remove_file(path);
-        return error_response(request, INTERRUPT_MESSAGE);
+    if let Some(path) = interrupt_path(&request.meta) {
+        if matches!(request.method.as_str(), "end_turn" | "close") {
+            let _ = fs::remove_file(path);
+        } else if path.exists() {
+            return error_response(request, INTERRUPT_MESSAGE);
+        }
     }
 
     let approval_app = match request_app(request) {

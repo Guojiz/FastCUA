@@ -35,7 +35,7 @@ class PipeClient {
     this.nextId = 1;
     this.pending = new Map();
     this.buffer = "";
-    this.socket = net.connect("\\\\.\\pipe\\fastcua");
+    this.socket = net.connect(process.env.FASTCUA_PIPE || "\\\\.\\pipe\\fastcua");
     this.socket.setEncoding("utf8");
     this.socket.on("data", chunk => this.onData(chunk));
   }
@@ -86,6 +86,15 @@ const client = new PipeClient();
 await client.ready();
 
 try {
+  const crossOrigin = await fetch(base + "/api/action", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: "https://example.com" },
+    body: JSON.stringify({ action: "pause" }),
+  });
+  assert.equal(crossOrigin.status, 403);
+  assert.equal((await api("/api/state")).controlState, "running");
+  console.log("PASS cross-origin mutations are rejected");
+
   await api("/api/action", { action: "pause" });
   assert.equal((await api("/api/state")).controlState, "paused_by_user");
   await assert.rejects(client.request("list_windows"), /paused by the user/i);
@@ -136,7 +145,10 @@ try {
   await api("/api/interject", { text: "integration redirect" });
   await api("/api/action", { action: "stopAll" });
   await assert.rejects(client.request("list_windows"), /integration redirect/i);
-  console.log("PASS interjection interrupts the connected client");
+  await assert.rejects(client.request("list_windows"), /integration redirect/i);
+  await client.request("end_turn");
+  assert.ok(Array.isArray(await client.request("list_windows")));
+  console.log("PASS interjection persists for the turn and clears on end_turn");
 } finally {
   await api("/api/action", { action: "resume" }).catch(() => {});
   await api("/api/config", originalConfig).catch(() => {});
@@ -144,4 +156,4 @@ try {
   try { execFileSync("taskkill.exe", ["/IM", "FastCuaFixture.exe", "/F"], { stdio: "ignore" }); } catch {}
 }
 
-console.log("7 control-plane integration checks passed.");
+console.log("8 control-plane integration checks passed.");

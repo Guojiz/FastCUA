@@ -23,7 +23,7 @@ const log = (...a) => { const s = "[fastcua] " + a.join(" "); process.stderr.wri
 
 // Data directory for the helper subprocess (passed via env to the native binary).
 const CUA_CACHE_DIR = process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
-const PIPE = "\\\\.\\pipe\\fastcua";
+const PIPE = process.env.FASTCUA_PIPE || "\\\\.\\pipe\\fastcua";
 // Meta keys spoken to the helper over its own stdio protocol.
 const APPROVED_KEY = "x-oai-cua-approved-app";
 const BUDGET_KEY = "x-oai-cua-request-budget-ms";
@@ -86,7 +86,7 @@ function actionSummary(method, params) {
 }
 
 // ---- config (web UI editable) ----
-const CONFIG_PATH = path.join(HERE, "config.json");
+const CONFIG_PATH = process.env.FASTCUA_CONFIG_PATH || path.join(HERE, "config.json");
 const DEFAULT_CONFIG = { costartMode: "claude", idleTimeoutMin: 5, approvalPolicy: "safe", whitelist: ["mspaint.exe", "notepad.exe", "explorer.exe"], port: 8420, bannerEnabled: false, overlayEnabled: true, overlayTitle: "FastCUA is using your computer", overlayLanguage: "auto", cuaBinPath: "" };
 const APPROVAL_WAIT_MS = 60_000;
 const pendingApprovals = new Map();
@@ -147,6 +147,9 @@ function normalizeConfig(value = {}) {
 function loadConfig() { try { return normalizeConfig({ ...DEFAULT_CONFIG, ...JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8")) }); } catch { return { ...DEFAULT_CONFIG }; } }
 function saveConfig(c) { fs.writeFileSync(CONFIG_PATH, JSON.stringify(normalizeConfig(c), null, 2) + "\n"); }
 let config = loadConfig();
+if (process.env.FASTCUA_HTTP_PORT) {
+  config = normalizeConfig({ ...config, port: Number(process.env.FASTCUA_HTTP_PORT) });
+}
 function idleMs() { const m = config.idleTimeoutMin; return m > 0 ? m * 60 * 1000 : 0; }
 
 // ---- binary ownership ----
@@ -241,11 +244,11 @@ async function handleBinaryMessage(msg) {
 function killProcessTree(pid) {
   try { execFileSync("taskkill", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore", timeout: 5000 }); } catch {}
 }
-function resetBinary() {
+function resetBinary(reason = "helper reset") {
   const p = proc; proc = null;
-  for (const e of pendingBin.values()) { clearTimeout(e.timer); e.reject(new Error("helper reset")); }
+  for (const e of pendingBin.values()) { clearTimeout(e.timer); e.reject(new Error(reason)); }
   pendingBin.clear();
-  for (const token of pendingApprovals.keys()) rejectPendingApproval(token, "helper reset");
+  for (const token of [...pendingApprovals.keys()]) rejectPendingApproval(token, reason);
   try { if (p) killProcessTree(p.pid); } catch {}
 }
 
@@ -256,17 +259,28 @@ let idleTimer = null;
 function interruptFilePath(sessionId, turnId) {
   return path.join(CUA_CACHE_DIR, "cache", "computer-use", "interrupts", B(sessionId), B(String(turnId)));
 }
-function checkInterrupt(c) {
+function latchInterrupt(c) {
+  if (c.interrupted) return true;
   const f = interruptFilePath(c.sessionId, c.turnId);
   if (fs.existsSync(f)) {
-    try { fs.unlinkSync(f); } catch {}
+    c.interrupted = true;
+    c.interruptMessage = c.interjection
+      ? `User interjected: "${c.interjection}". Stop current work and respond to this instruction.`
+      : ESC_MSG;
     return true;
   }
   return false;
 }
+function clearClientInterrupt(c) {
+  const f = interruptFilePath(c.sessionId, c.turnId);
+  try { if (fs.existsSync(f)) fs.unlinkSync(f); } catch {}
+  c.interrupted = false;
+  c.interruptMessage = null;
+  c.interjection = null;
+}
 
 function makeClient(socket) {
-  const c = { sessionId: crypto.randomUUID(), turnId: 1, buf: "", socket, interjection: null };
+  const c = { sessionId: crypto.randomUUID(), turnId: 1, buf: "", socket, interjection: null, interrupted: false, interruptMessage: null };
   clients.set(socket, c);
   if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
   socket.setEncoding("utf8");
@@ -277,6 +291,7 @@ function makeClient(socket) {
 }
 function onClientGone(socket) {
   const c = clients.get(socket);
+  if (c) clearClientInterrupt(c);
   clients.delete(socket);
   log("client gone (", clients.size, "left)");
   if (clients.size === 0) {
@@ -304,15 +319,12 @@ function onClientData(c, chunk) {
 
 async function handleClientReq(c, req) {
   const { id, method, params } = req;
-  if (method === "end_turn") { c.turnId++; reply(c, id, { result: { ok: true } }); return; }
+  if (method === "end_turn") { clearClientInterrupt(c); c.turnId++; reply(c, id, { result: { ok: true } }); return; }
+  if (method === "close") { clearClientInterrupt(c); reply(c, id, { result: { ok: true } }); return; }
   if (isUserPaused) { reply(c, id, { error: "Computer use is paused by the user. Resume it before making another desktop request." }); return; }
   if (pendingApprovals.size) { reply(c, id, { error: "Computer use is paused while a desktop approval is awaiting a user decision." }); return; }
-  if (method === "close") { reply(c, id, { result: { ok: true } }); return; }
-  if (checkInterrupt(c)) {
-    const msg = c.interjection
-      ? `User interjected: "${c.interjection}". Stop current work and respond to this instruction.`
-      : ESC_MSG;
-    c.interjection = null;
+  if (latchInterrupt(c)) {
+    const msg = c.interruptMessage || ESC_MSG;
     emitEvent("interrupt", { client: c.sessionId.slice(0,8) });
     reply(c, id, { error: msg });
     return;
@@ -366,6 +378,18 @@ function fmtUptime() {
   return Math.floor(s / 3600) + "h" + Math.floor((s % 3600) / 60) + "m";
 }
 const WEB = fs.readFileSync(path.join(HERE, "web.html"), "utf8");
+function trustedMutationOrigin(req) {
+  const origin = req.headers.origin;
+  if (!origin) return true;
+  try {
+    const parsed = new URL(origin);
+    return parsed.protocol === "http:"
+      && (parsed.hostname === "127.0.0.1" || parsed.hostname === "localhost")
+      && parsed.port === String(config.port);
+  } catch {
+    return false;
+  }
+}
 const httpServer = http.createServer((req, res) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "DENY");
@@ -373,6 +397,11 @@ const httpServer = http.createServer((req, res) => {
   res.setHeader("Content-Security-Policy", "default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:");
   const u = new URL(req.url, "http://x");
   try {
+    if (req.method === "POST" && !trustedMutationOrigin(req)) {
+      res.writeHead(403, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "untrusted request origin" }));
+      return;
+    }
     if (u.pathname === "/" || u.pathname === "/index.html") {
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" }); res.end(WEB); return;
     }
@@ -427,12 +456,12 @@ const httpServer = http.createServer((req, res) => {
             const message = "FastCUA was shut down by the user.";
             isUserPaused = true;
             for (const [, client] of clients) {
+              client.interrupted = true;
+              client.interruptMessage = message;
               const marker = interruptFilePath(client.sessionId, client.turnId);
               try { fs.mkdirSync(path.dirname(marker), { recursive: true }); fs.writeFileSync(marker, ""); } catch {}
             }
-            for (const entry of pendingBin.values()) { clearTimeout(entry.timer); entry.reject(new Error(message)); }
-            pendingBin.clear();
-            for (const approvalToken of [...pendingApprovals.keys()]) rejectPendingApproval(approvalToken, message);
+            resetBinary(message);
             currentAction = null;
             emitEvent("shutdown", { client: "user" });
             log("action: shutdown — releasing helper, overlay, pipe, and HTTP server");
@@ -451,16 +480,13 @@ const httpServer = http.createServer((req, res) => {
               : ESC_MSG;
             pendingInterjection = null;
             for (const [, c] of clients) {
-              if (interjection) c.interjection = interjection;
+              c.interjection = interjection;
+              c.interrupted = true;
+              c.interruptMessage = msg;
               const f = interruptFilePath(c.sessionId, c.turnId);
               try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, ""); } catch {}
             }
-            for (const e of pendingBin.values()) {
-              clearTimeout(e.timer);
-              e.reject(new Error(msg));
-            }
-            pendingBin.clear();
-            for (const approvalToken of [...pendingApprovals.keys()]) rejectPendingApproval(approvalToken, msg);
+            resetBinary(msg);
             currentAction = null;
             emitEvent("interrupt", { client: "stop" });
             log("action: stopAll — interrupted", clients.size, "clients and rejected in-flight actions");
@@ -499,7 +525,7 @@ httpServer.listen(config.port, "127.0.0.1", () => log("config UI: http://127.0.0
 // ---- overlay (PowerShell WPF floating banner) ----
 let overlayProc = null;
 function launchOverlay() {
-  if (!config.overlayEnabled) return;
+  if (!config.overlayEnabled || process.env.FASTCUA_DISABLE_OVERLAY === "1") return;
   const overlayPath = path.join(HERE, "overlay.ps1");
   if (!fs.existsSync(overlayPath)) { log("overlay.ps1 not found, skipping launch"); return; }
   const logPath = path.join(HERE, "overlay.log");

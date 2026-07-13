@@ -7,7 +7,7 @@ use serde::Serialize;
 use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
-    mem,
+    env, mem,
     path::Path,
     ptr,
     sync::{
@@ -280,8 +280,8 @@ pub fn get_window_state(
                 )
             }
             Err(_) => {
-                clear_uia_elements(window.id)?;
-                let (tree, document_text, _) = accessibility_tree(&window);
+                let (tree, document_text, elements) = accessibility_tree(&window);
+                cache_hwnd_elements(&window, &elements)?;
                 (tree, String::new(), document_text)
             }
         };
@@ -336,12 +336,43 @@ fn cache_uia_elements(window: &WindowRef, snapshot: &uia::Snapshot) -> Result<()
     Ok(())
 }
 
-fn clear_uia_elements(window_id: u64) -> Result<(), String> {
+fn cache_hwnd_elements(window: &WindowRef, elements: &[HWND]) -> Result<(), String> {
+    let elements = elements
+        .iter()
+        .enumerate()
+        .filter_map(|(index, hwnd)| {
+            let mut bounds = RECT::default();
+            if unsafe { IsWindow(*hwnd) } == 0
+                || unsafe { GetWindowRect(*hwnd, &mut bounds) } == 0
+                || bounds.right <= bounds.left
+                || bounds.bottom <= bounds.top
+            {
+                return None;
+            }
+            let class = class_name(*hwnd);
+            Some((
+                index as u64,
+                UiaElementTarget {
+                    name: if index == 0 {
+                        window.title.clone()
+                    } else {
+                        window_text(*hwnd)
+                    },
+                    role: if index == 0 {
+                        "Window".to_string()
+                    } else {
+                        role_for_class(&class).to_string()
+                    },
+                    bounds,
+                },
+            ))
+        })
+        .collect();
     UIA_ELEMENT_MAPS
         .get_or_init(|| Mutex::new(HashMap::new()))
         .lock()
         .map_err(|_| "UIA element map cache poisoned".to_string())?
-        .remove(&window_id);
+        .insert(window.id, elements);
     Ok(())
 }
 
@@ -357,6 +388,9 @@ fn uia_element_target(window: &WindowRef, index: u64) -> Result<UiaElementTarget
 }
 
 fn uia_snapshot(window: &WindowRef) -> Result<uia::Snapshot, String> {
+    if env::var_os("FASTCUA_TEST_FORCE_UIA_FALLBACK").is_some() {
+        return Err("UI Automation fallback forced for regression testing".into());
+    }
     let timed_out = UIA_TIMEOUT_APPS.get_or_init(|| Mutex::new(HashSet::new()));
     if timed_out
         .lock()
@@ -524,37 +558,50 @@ pub fn click(params: &Value) -> Result<(), String> {
         .unwrap_or(1)
         .clamp(1, 3);
     for _ in 0..count {
-        dispatch_window_click(if child.is_null() { parent } else { child }, x, y, &button)?;
+        dispatch_click(if child.is_null() { parent } else { child }, x, y, &button)?;
         unsafe { Sleep(35) };
     }
     Ok(())
 }
 
-fn dispatch_window_click(
-    target: HWND,
-    screen_x: i32,
-    screen_y: i32,
-    button: &str,
-) -> Result<(), String> {
-    if class_name(target).eq_ignore_ascii_case("button") && matches!(button, "left" | "l") {
+fn dispatch_click(target: HWND, screen_x: i32, screen_y: i32, button: &str) -> Result<(), String> {
+    let class = class_name(target);
+    if class.eq_ignore_ascii_case("button") && matches!(button, "left" | "l") {
         unsafe { SendMessageW(target, BM_CLICK, 0, 0) };
         return Ok(());
     }
-    let mut point = POINT {
-        x: screen_x,
-        y: screen_y,
-    };
-    unsafe { ScreenToClient(target, &mut point) };
-    let coordinates = ((point.y as u32 & 0xffff) << 16) | (point.x as u32 & 0xffff);
-    let (down_message, up_message, mask) = match button {
-        "right" | "r" => (WM_RBUTTONDOWN, WM_RBUTTONUP, MK_RBUTTON),
-        "middle" | "m" => (WM_MBUTTONDOWN, WM_MBUTTONUP, MK_MBUTTON),
-        _ => (WM_LBUTTONDOWN, WM_LBUTTONUP, MK_LBUTTON),
-    };
-    unsafe {
-        SendMessageW(target, down_message, mask, coordinates as LPARAM);
-        SendMessageW(target, up_message, 0, coordinates as LPARAM);
+    if class.eq_ignore_ascii_case("edit") {
+        let mut point = POINT {
+            x: screen_x,
+            y: screen_y,
+        };
+        unsafe { ScreenToClient(target, &mut point) };
+        let coordinates = ((point.y as u32 & 0xffff) << 16) | (point.x as u32 & 0xffff);
+        let (down_message, up_message, mask) = match button {
+            "right" | "r" => (WM_RBUTTONDOWN, WM_RBUTTONUP, MK_RBUTTON),
+            "middle" | "m" => (WM_MBUTTONDOWN, WM_MBUTTONUP, MK_MBUTTON),
+            "left" | "l" => (WM_LBUTTONDOWN, WM_LBUTTONUP, MK_LBUTTON),
+            _ => return Err(format!("unsupported mouse button: {button}")),
+        };
+        unsafe {
+            SendMessageW(target, down_message, mask, coordinates as LPARAM);
+            SendMessageW(target, up_message, 0, coordinates as LPARAM);
+        }
+        return Ok(());
     }
+    dispatch_input_click(button)
+}
+
+fn dispatch_input_click(button: &str) -> Result<(), String> {
+    let (down, up) = match button {
+        "right" | "r" => (MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP),
+        "middle" | "m" => (MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP),
+        "left" | "l" => (MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP),
+        _ => return Err(format!("unsupported mouse button: {button}")),
+    };
+    send_mouse(down, 0)?;
+    unsafe { Sleep(20) };
+    send_mouse(up, 0)?;
     Ok(())
 }
 

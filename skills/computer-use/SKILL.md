@@ -31,7 +31,7 @@ A task completed through another automation mechanism is not a successful FastCU
 
 ## Tools
 
-- Window tools: `list_apps`, `list_windows`, `get_window`, `launch_app`, `get_window_state`, `click`, `press_key`, `type_text`, `scroll`, `set_value`, `drag`, `perform_secondary_action`, and `activate_window`.
+- Window tools: `list_apps`, `list_windows`, `get_window`, `launch_app`, `get_window_state`, `click`, `press_key`, `type_text`, `scroll`, `drag`, `perform_secondary_action`, and `activate_window`.
 - `js`: persistent JavaScript execution with `sky`, `nodeRepl`, `sleep`, and standard JavaScript globals available. Prefer it for multi-step work, polling, filtering accessibility trees, and batching related actions.
 - `end_turn`: clear the current turn's interrupt scope when more computer-use work will continue in the same session.
 - `close`: disconnect this session from the resident daemon when computer-use work is finished.
@@ -90,7 +90,7 @@ When computer-use work is done for the session, call `close`. The shared helper 
 - Every screenshot requested through `get_window_state` is displayed automatically. Do not decode `state.screenshots[*].url`, do not write it to disk, do not print a local file path just to inspect it. Do not call `await nodeRepl.emitImage(...)` after `get_window_state`; that duplicates large image payloads and slows the session. Only emit a screenshot manually if you are redisplaying a prior state without calling `get_window_state` again. Do not install or probe image libraries just to find screenshot dimensions; use the screenshots returned by `get_window_state` directly.
 - Element indexes come from the latest `get_window_state({ include_text: true })` accessibility tree. After an action that may change layout, focus, modality, or the element list, take another accessibility snapshot before using more element indexes. Keyboard, text, and stable coordinate actions can be batched against the captured window when the target window geometry is stable.
 - If `get_window_state` fails, stop app input and report the exact error. Do not continue with stale coordinates or attempt to bypass.
-- The computer-use tool activates the target window before `click`, `drag`, `scroll`, `type_text`, `press_key`, `set_value`, or `perform_secondary_action`. If activation or focus fails, refresh with `list_apps`/`get_window_state` and reselect the target instead of acting on a stale window.
+- The computer-use tool activates the target window before `click`, `drag`, `scroll`, `type_text`, `press_key`, or `perform_secondary_action`. If activation or focus fails, refresh with `list_apps`/`get_window_state` and reselect the target instead of acting on a stale window.
 - If computer use reports that the Windows desktop is locked, stop immediately and ask the user to unlock the desktop. Do not try to interact through `LockApp.exe`.
 - When opening or launching a Windows app by name, call `list_apps` before launching anything.
 - Call `get_window_state` again only when you need to verify progress, focus may have changed, a modal or launcher may have appeared, the user interrupted, or the prior state is otherwise stale. Choose screenshot, accessibility text, or both based on the next decision; avoid requesting both by default.
@@ -224,7 +224,7 @@ If explicitly permitted in the **initial prompt**, proceed without re-confirming
 
 ## API Reference
 
-The `sky` object in the `js` tool (and the individual MCP tools) expose the window2 API. `set_value` remains in the protocol for compatibility, but do not use it for normal text editing in this release.
+The `sky` object in the `js` tool and the individual MCP tools expose the window2 API. `set_value` remains available only through the compatibility protocol and `sky` object; it is not advertised as an individual MCP tool in this release. `perform_secondary_action` supports only `Raise` on root element `0`.
 
 ```ts
 interface Window2ComputerUseClient {

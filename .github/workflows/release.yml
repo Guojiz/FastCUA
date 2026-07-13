@@ -14,8 +14,46 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: Build native host
-        run: cargo build --release --manifest-path native-host/Cargo.toml --locked
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Static checks and unit tests
+        shell: pwsh
+        run: |
+          cargo fmt --manifest-path native-host/Cargo.toml -- --check
+          cargo test --manifest-path native-host/Cargo.toml --locked
+          node --check daemon.mjs
+          node --check server.mjs
+          node --check tests/protocol-regression.mjs
+          node --check tests/fallback-regression.mjs
+          node --check tests/control-plane-integration.mjs
+          node --check tests/approval-lifecycle.mjs
+          node --check tests/installer-contract.mjs
+          node --check tests/server-lifecycle.mjs
+          node tests/installer-contract.mjs
+          node tests/server-lifecycle.mjs
+          [scriptblock]::Create((Get-Content install.ps1 -Raw)) | Out-Null
+          [scriptblock]::Create((Get-Content uninstall.ps1 -Raw)) | Out-Null
+          [scriptblock]::Create((Get-Content overlay.ps1 -Raw)) | Out-Null
+          [scriptblock]::Create((Get-Content tests/run-control-plane.ps1 -Raw)) | Out-Null
+          [xml](Get-Content card.xaml -Raw) | Out-Null
+      - name: Build fixture and native host
+        shell: pwsh
+        run: |
+          ./tests/build-fixture.ps1
+          cargo build --release --manifest-path native-host/Cargo.toml --locked
+      - name: Native and control-plane regressions
+        shell: pwsh
+        run: |
+          node tests/protocol-regression.mjs
+          node tests/fallback-regression.mjs
+          node tests/approval-lifecycle.mjs
+          ./tests/run-control-plane.ps1
+      - name: Confirm release version matches tag
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path native-host/Cargo.toml -Pattern '^version = "([^"]+)"$').Matches[0].Groups[1].Value
+          if ("v$version" -ne '${{ github.ref_name }}') { throw "Cargo version v$version does not match tag ${{ github.ref_name }}" }
       - name: Generate checksum
         shell: pwsh
         run: |

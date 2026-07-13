@@ -100,7 +100,7 @@ Clicking the island also pauses and opens the control center for mouse takeover.
 
 - **Window-aware coordinates:** actions remain attached to the target window and account for Windows DPI scaling.
 - **Accessibility and pixels are independent:** request text, screenshot, or both according to the next decision.
-- **Native input:** click, keyboard chords, Unicode text, scrolling, drag, value replacement, and supported accessibility actions.
+- **Native input:** click, keyboard chords, Unicode text, scrolling, drag, and supported accessibility actions.
 - **Two-way interruption:** a person can pause or redirect the task; approval waiting also pauses the machine.
 - **Exact trust rules:** canonical paths and executable names are matched exactly, never by unsafe substring.
 - **Visible without being noisy:** the island stays compact until approval, interjection, or an exceptional state requires attention.
@@ -110,7 +110,7 @@ Clicking the island also pauses and opens the control center for mouse takeover.
 
 ```mermaid
 flowchart LR
-  A["Claude Code / MCP-compatible AI agent"] -->|"MCP"| B["FastCUA control plane"]
+  A["MCP-compatible AI agent"] -->|"MCP"| B["FastCUA control plane"]
   B --> C["Resident Windows native host"]
   C --> D["UI Automation tree"]
   C --> E["Optional window screenshot"]

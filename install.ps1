@@ -11,7 +11,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $repo = 'https://github.com/Guojiz/FastCUA'
-$Version = 'v0.1.2'
+$Version = 'v0.1.3'
 $appDir = Join-Path $InstallRoot 'app'
 $tempDir = Join-Path ([System.IO.Path]::GetTempPath()) ('fastcua-install-' + [guid]::NewGuid().ToString('N'))
 
@@ -106,6 +106,11 @@ Set up FastCUA for this AI agent on Windows. Do not install or switch AI clients
    args: ["$appDir\server.mjs"]
 3. Start or reconnect the MCP server.
 4. Verify it by calling list_windows, then report which MCP configuration file you changed.
+
+Reading the Skill file alone is not a successful installation. Only report success after
+FastCUA list_windows returns actual Windows window data. If this client cannot add or connect
+a custom stdio MCP server, stop and report the incompatibility. Do not substitute PowerShell,
+SendKeys, pyautogui, shell scripts, browser automation, or another desktop-control mechanism.
 
 Keep FastCUA local. Do not expose its pipe or http://127.0.0.1:8420 beyond this computer.
 "@
