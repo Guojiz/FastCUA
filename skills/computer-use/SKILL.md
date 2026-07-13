@@ -6,11 +6,69 @@ allowed-tools: mcp__sky-computer-use
 
 # Computer Use
 
-Automate Microsoft Windows apps through the `sky-computer-use` MCP tools. **FastCUA** combines a reusable Skill (this operating playbook) with a local MCP server and an independent Apache-2.0 Rust host. It uses SendInput, UI Automation, and PrintWindow with a BitBlt fallback, then exposes a window2-compatible API over newline-delimited JSON.
+Automate Microsoft Windows apps through the `sky-computer-use` MCP tools. **FastCUA** combines a reusable Skill with a local MCP server and an independent Apache-2.0 Rust host. It uses SendInput, UI Automation, and PrintWindow with a BitBlt fallback, then exposes a window2-compatible API over newline-delimited JSON.
 
-Safety is enforced by the FastCUA control plane, not delegated to model prompts. The default `safe` mode runs trusted apps directly and pauses on unknown apps to ask the user to allow once, trust the app, or deny. Explicit `full` mode allows every app without prompts and is visually marked in purple/pink for as long as it remains active.
+Safety is enforced by the FastCUA control plane. The default `safe` mode runs trusted apps directly and pauses on unknown apps to ask the user to allow once, trust the app, or deny. Explicit `full` mode allows every app without prompts and remains visibly marked while active.
 
-While control is available, a compact translucent island and click-through rainbow …3612 tokens truncated…uter-use work is **done for this session**, call `close` — this disconnects your session from the daemon. The shared helper itself stays resident (other windows may use it) and **auto-exits after 5 min idle** so no process lingers long-term. Call `end_turn` only to clear the current turn's interrupt scope when you'll keep doing more computer use this session. If a `js` cell hangs, it auto-errors after 120s; the daemon resets a wedged helper after 30s so all clients recover.
+## Required MCP connection check
+
+Reading this Skill does not mean that FastCUA is connected.
+
+Before performing any Windows desktop action:
+
+1. Confirm that the `sky-computer-use` MCP tools are present.
+2. Call `list_apps` or `list_windows`.
+3. Continue only after that call returns valid FastCUA data.
+
+If the MCP tools are missing, unavailable, disconnected, or the verification call cannot succeed:
+
+- Stop the desktop task immediately.
+- Report that the FastCUA MCP connection is unavailable.
+- Do not use PowerShell UI Automation, SendKeys, pyautogui, shell scripts, browser automation, or another desktop-control mechanism as a fallback.
+- Do not claim that FastCUA completed the task.
+
+A task completed through another automation mechanism is not a successful FastCUA task.
+
+## Tools
+
+- Window tools: `list_apps`, `list_windows`, `get_window`, `launch_app`, `get_window_state`, `click`, `press_key`, `type_text`, `scroll`, `set_value`, `drag`, `perform_secondary_action`, and `activate_window`.
+- `js`: persistent JavaScript execution with `sky`, `nodeRepl`, `sleep`, and standard JavaScript globals available. Prefer it for multi-step work, polling, filtering accessibility trees, and batching related actions.
+- `end_turn`: clear the current turn's interrupt scope when more computer-use work will continue in the same session.
+- `close`: disconnect this session from the resident daemon when computer-use work is finished.
+
+Do not spawn the native host directly, search for its executable, or build a separate protocol client. Use only the FastCUA MCP tools.
+
+## Operating workflow
+
+1. Verify the MCP connection with `list_apps` or `list_windows`.
+2. Discover the target with `list_apps`, then select one of the returned windows.
+3. Resolve or refresh the selected window with `get_window` when necessary.
+4. Request only the state needed for the next decision:
+   - Accessibility only: `include_screenshot: false, include_text: true`
+   - Screenshot only: `include_screenshot: true, include_text: false`
+   - Both only when both are required
+5. Batch related actions against the same canonical `state.window`.
+6. Verify once after a meaningful group of actions, or sooner when focus, layout, modality, or the target window may have changed.
+
+### Action selection priority
+
+1. For a stable labeled control returned by the latest accessibility snapshot, prefer `element_index`.
+2. For application commands and navigation, use keyboard shortcuts when they are faster or more reliable.
+3. For canvases, images, custom-rendered controls, drawing surfaces, and elements not exposed through accessibility, use screenshot coordinates.
+4. After an action that changes layout, focus, modality, or the element list, request a fresh accessibility snapshot before reusing element indexes.
+
+For normal text editing in this release, do not use `set_value`. Click the editable control or work surface, press `Control_L+a` when replacing existing text, then call `type_text`.
+
+## Troubleshooting
+
+- If a lightweight FastCUA call times out, wait two seconds and retry it once.
+- If the retry also fails, stop the task and report the exact FastCUA connection or helper error.
+- If the user stops computer use, the desktop is locked, or the turn is no longer available, stop immediately.
+- Never bypass a FastCUA failure by switching to PowerShell, SendKeys, pyautogui, shell scripts, browser automation, or another desktop-control stack.
+
+## Ending
+
+When computer-use work is done for the session, call `close`. The shared helper remains resident for other clients and exits after its configured idle period. Call `end_turn` only when computer-use work will continue in the same session.
 
 ## Guidelines
 
@@ -38,7 +96,8 @@ While control is available, a compact translucent island and click-through rainb
 - Call `get_window_state` again only when you need to verify progress, focus may have changed, a modal or launcher may have appeared, the user interrupted, or the prior state is otherwise stale. Choose screenshot, accessibility text, or both based on the next decision; avoid requesting both by default.
 - `type_text` sends literal text. Use `press_key` for controls such as `Enter`, `Tab`, arrows, Escape, and keyboard chords instead of embedding control characters in a typed string.
 - Prefer X Window System keysym-style names for key input, especially `KP_0` through `KP_9` for apps that distinguish numpad keys from the number row. Common aliases such as `period`, `greater`, `less`, `comma`, `slash`, `question`, `Numpad_0`, `Numpad_Add`, `Numpad_Subtract`, `Numpad_Multiply`, `Numpad_Divide`, `Numpad_Decimal`, and `Numpad_Enter` are also supported. For shifted punctuation shortcuts, include `Shift`, for example `Control_L+Shift_L+period` for Ctrl+Shift+`.` / `>`.
-- Prefer input injection over element index targeting. Coordinate `click` and `drag` use window-relative pixels for the window captured by `get_window_state`. `(0, 0)` is the top-left of the window. If you do use an accessibility index, the property is `element_index`, not `element`.
+- For stable labeled controls from the latest accessibility snapshot, prefer `element_index`. Coordinate `click` and `drag` use window-relative pixels for the window captured by `get_window_state`; `(0, 0)` is the top-left of the window. Use coordinates for canvases, images, custom-rendered surfaces, and targets not exposed through accessibility. The property is `element_index`, not `element`.
+- Do not use `set_value` for normal text editing in this release. Click the editable control or work surface, press `Control_L+a` when replacing text, then use `type_text`.
 - `scroll` scrolls with input injection from a specific screenshot coordinate, matching Browser Use's coordinate scroll shape. Use `sky.scroll({ window, x, y, scrollX: 0, scrollY: 600 })` to scroll down from `(x, y)`. Negative `scrollY` scrolls up; negative `scrollX` scrolls left. Do not pass `element_index` to `scroll`; if a specific pane needs focus, click it first with coordinates, then scroll from inside that pane.
 - Use keyboard navigation when it is faster than hunting UI pixels.
 - In Microsoft Office apps, especially Word, Excel, and PowerPoint, prefer keyboard shortcuts and Alt ribbon key sequences over direct ribbon element indexes. Office ribbon UI Automation can time out or fail while the ribbon refreshes after selection changes. For ribbon fields, rehydrate `targetWindow` if needed, then use the visible Alt path and text entry, such as `Alt`, `h`, `f`, `s`, type the font size, and `Return`.
@@ -55,7 +114,8 @@ While control is available, a compact translucent island and click-through rainb
 - Do not automate user authentication dialogs.
 - Do not change Windows security settings, Windows privacy settings, or any in-app security or privacy settings. Do not act on security or privacy permissions requests.
 - Do not embed PowerShell or .bat scripts within your `js` cells.
-- Do not mix direct PowerShell UI Automation code in the same turn as computer use. Use only the computer-use JS API for automation.
+- Do not mix direct PowerShell UI Automation code in the same turn as computer use. Use only the FastCUA computer-use API for automation.
+- If FastCUA is unavailable, stop. Do not substitute PowerShell UI Automation, SendKeys, pyautogui, shell scripts, browser automation, or another desktop-control mechanism.
 - Do not use the Windows key or shortcuts involving the Windows key. Never call `press_key` with `Meta`, `Windows`, `Win`, `WIN+...`, `Windows+...`, `WINDOWS+...`, `Meta+...`, `Cmd`, `Command`, `Super`, or `OS` key names.
 - Do not automate terminal applications such as, but not limited to, Windows Terminal or Command Prompt or Windows PowerShell.
 - Do not automate password manager apps or password manager websites.
@@ -164,7 +224,7 @@ If explicitly permitted in the **initial prompt**, proceed without re-confirming
 
 ## API Reference
 
-The `sky` object in the `js` tool (and the individual MCP tools) expose the window2 API:
+The `sky` object in the `js` tool (and the individual MCP tools) expose the window2 API. `set_value` remains in the protocol for compatibility, but do not use it for normal text editing in this release.
 
 ```ts
 interface Window2ComputerUseClient {
