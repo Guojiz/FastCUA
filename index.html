@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
   <link rel="stylesheet" href="style-2622617.css">
-  <link rel="stylesheet" href="mindmap-2622617.css">
+  <link rel="stylesheet" href="mindmap-fb857bd.css">
 </head>
 <body>
   <div class="frame" aria-hidden="true"><span class="crop tl"></span><span class="crop tr"></span><span class="crop bl"></span><span class="crop br"></span></div>
@@ -67,7 +67,7 @@
     <section id="architecture">
       <header class="section-head"><span class="code" data-en="§ Architecture" data-zh="§ 架构">§ Architecture</span><h2 data-en="Platform capability stays in adapters.&lt;br&gt;Control semantics stay in the runtime." data-zh="平台能力留在适配层，&lt;br&gt;控制语义留在运行时。">Platform capability stays in adapters.<br>Control semantics stay in the runtime.</h2></header>
       <div class="architecture">
-        <div class="arch-row"><span class="coord">A-01</span><strong data-en="Clients" data-zh="客户端">Clients</strong><p>Claude Code · MCP Clients · Custom Agents</p><small>stdio MCP</small></div>
+        <div class="arch-row"><span class="coord">A-01</span><strong data-en="Clients" data-zh="客户端">Clients</strong><p data-en="MCP-compatible Agents · Custom Clients" data-zh="支持 MCP 的 Agent · 自定义客户端">MCP-compatible Agents · Custom Clients</p><small>stdio MCP</small></div>
         <div class="arch-link"><i></i><span data-en="persistent connection" data-zh="持久连接">persistent connection</span><i></i></div>
         <div class="arch-row accent"><span class="coord">A-02</span><strong>FastCUA Runtime</strong><p data-en="state · policy · approvals · interruption" data-zh="状态 · 策略 · 审批 · 中断">state · policy · approvals · interruption</p><small data-en="control semantics" data-zh="控制语义">control semantics</small></div>
         <div class="arch-link"><i></i><span>host protocol</span><i></i></div>
@@ -87,8 +87,13 @@
     </section>
 
     <section id="release">
-      <header class="section-head"><span class="code" data-en="§ Release · v0.1.1" data-zh="§ 当前版本 · v0.1.1">§ Release · v0.1.1</span><h2 data-en="Start with the current release." data-zh="从当前版本开始。">Start with the current release.</h2><p class="section-note" data-en="The current installer targets Windows 11 x64 and provides the shortest ready-to-use path with Claude Code." data-zh="当前安装器面向 Windows 11 x64，并提供最快的 Claude Code 接入路径。">The current installer targets Windows 11 x64 and provides the shortest ready-to-use path with Claude Code.</p></header>
-      <div class="install"><div class="install-code"><code>irm https://raw.githubusercontent.com/Guojiz/FastCUA/main/install.ps1 | iex</code><button class="copy" type="button" data-en="Copy" data-zh="复制">Copy</button></div><div class="actions"><a class="btn primary" href="https://github.com/Guojiz/FastCUA/releases/tag/v0.1.1" data-en="Release page ↗" data-zh="发布页面 ↗">Release page ↗</a><a class="btn" href="https://github.com/Guojiz/FastCUA/blob/main/docs/SELF_HOSTING.md" data-en="Self-hosting ↗" data-zh="自托管文档 ↗">Self-hosting ↗</a></div></div>
+      <header class="section-head"><span class="code" data-en="§ Release · v0.1.1" data-zh="§ 当前版本 · v0.1.1">§ Release · v0.1.1</span><h2 data-en="Bring your own agent." data-zh="使用你自己的 Agent。">Bring your own agent.</h2><p class="section-note" data-en="The installer prepares Node.js and the verified FastCUA runtime. It does not install, select, or modify an AI client." data-zh="安装器只准备 Node.js 和经过校验的 FastCUA Runtime，不会安装、选择或修改任何 AI 客户端。">The installer prepares Node.js and the verified FastCUA runtime. It does not install, select, or modify an AI client.</p></header>
+      <div class="install">
+        <div class="install-code"><code>irm https://raw.githubusercontent.com/Guojiz/FastCUA/main/install.ps1 | iex</code><button class="copy" type="button" data-en="Copy" data-zh="复制">Copy</button></div>
+        <div class="setup-flow" aria-label="Installation flow"><span data-en="01 · Install runtime" data-zh="01 · 安装运行时">01 · Install runtime</span><i>→</i><span data-en="02 · Open FastCUA Agent Setup.txt" data-zh="02 · 打开 FastCUA Agent Setup.txt">02 · Open FastCUA Agent Setup.txt</span><i>→</i><span data-en="03 · Give it to any MCP-compatible agent" data-zh="03 · 交给任意支持 MCP 的 Agent">03 · Give it to any MCP-compatible agent</span></div>
+        <p class="install-note" data-en="The agent reads the bundled skill, configures its own stdio MCP connection, and verifies FastCUA. No specific agent is required." data-zh="Agent 会读取项目内 Skill、写入自己的 stdio MCP 配置并验证 FastCUA。不限定任何特定 Agent。">The agent reads the bundled skill, configures its own stdio MCP connection, and verifies FastCUA. No specific agent is required.</p>
+        <div class="actions"><a class="btn primary" href="https://github.com/Guojiz/FastCUA/releases/tag/v0.1.1" data-en="Release page ↗" data-zh="发布页面 ↗">Release page ↗</a><a class="btn" href="https://github.com/Guojiz/FastCUA/blob/main/docs/SELF_HOSTING.md" data-en="Self-hosting ↗" data-zh="自托管文档 ↗">Self-hosting ↗</a></div>
+      </div>
     </section>
   </main>
 
