@@ -1,21 +1,15 @@
-const menuButton = document.querySelector('.menu-button');
-const navLinks = document.querySelector('.nav-links');
-menuButton?.addEventListener('click', () => {
-  navLinks.classList.toggle('open');
-  menuButton.setAttribute('aria-expanded', String(navLinks.classList.contains('open')));
+const menu = document.querySelector('.menu');
+const nav = document.querySelector('.site-header nav');
+menu?.addEventListener('click', () => {
+  const open = nav.classList.toggle('open');
+  menu.setAttribute('aria-expanded', String(open));
 });
-navLinks?.querySelectorAll('a').forEach((link) => link.addEventListener('click', () => navLinks.classList.remove('open')));
+nav?.querySelectorAll('a').forEach((link) => link.addEventListener('click', () => nav.classList.remove('open')));
 
-const demos = [
-  '打开画图，画一座房子、太阳和草地',
-  '在文件资源管理器中整理下载目录',
-  '跨浏览器与桌面应用完成一段工作流',
-];
-let demoIndex = 0;
-const demoTask = document.querySelector('#demo-task');
-if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-  setInterval(() => {
-    demoIndex = (demoIndex + 1) % demos.length;
-    demoTask.textContent = demos[demoIndex];
-  }, 3200);
-}
+const copyButton = document.querySelector('.copy');
+const command = document.querySelector('.code-block code')?.textContent;
+copyButton?.addEventListener('click', async () => {
+  await navigator.clipboard.writeText(command);
+  copyButton.textContent = '已复制';
+  setTimeout(() => copyButton.textContent = '复制', 1400);
+});
