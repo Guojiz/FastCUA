@@ -71,6 +71,13 @@ function rpc(method, params = {}) {
   return promise;
 }
 
+function waitForChildExit() {
+  return new Promise((resolve, reject) => {
+    child.once("exit", (code, signal) => resolve({ code, signal }));
+    child.once("error", reject);
+  });
+}
+
 try {
   const initialized = await rpc("initialize");
   assert.equal(initialized.serverInfo.name, "sky-computer-use");
@@ -79,6 +86,8 @@ try {
   const listed = await rpc("tools/list");
   const names = listed.tools.map(tool => tool.name);
   assert.ok(!names.includes("set_value"));
+  assert.ok(!names.includes("end_turn"));
+  assert.ok(names.includes("close"));
   const secondary = listed.tools.find(tool => tool.name === "perform_secondary_action");
   assert.deepEqual(secondary.inputSchema.properties.action.enum, ["Raise"]);
   assert.match(listed.tools.find(tool => tool.name === "list_apps").description, /running apps/i);
@@ -98,13 +107,21 @@ try {
   assert.equal(windows.isError, false);
   assert.equal(calls.filter(method => method === "list_windows").length, 1);
 
+  const legacyEndTurn = await rpc("tools/call", {
+    name: "js",
+    arguments: { code: "await sky.end_turn();" },
+  });
+  assert.equal(legacyEndTurn.isError, true);
+  assert.match(legacyEndTurn.content[0].text, /end_turn is not a function/i);
+  console.log("PASS end_turn is unavailable through both MCP and sky");
+
+  const exited = waitForChildExit();
   const closed = await rpc("tools/call", { name: "close", arguments: {} });
   assert.equal(closed.isError, false);
-  const afterClose = await rpc("tools/call", { name: "list_windows", arguments: {} });
-  assert.equal(afterClose.isError, true);
-  assert.match(afterClose.content[0].text, /session is closed/i);
+  assert.deepEqual(await exited, { code: 0, signal: null });
+  assert.equal(calls.filter(method => method === "close").length, 1);
   assert.equal(calls.filter(method => method === "list_windows").length, 1);
-  console.log("PASS close prevents old work from reconnecting");
+  console.log("PASS close ends the turn and exits the MCP client");
 } finally {
   for (const entry of pending.values()) {
     clearTimeout(entry.timer);

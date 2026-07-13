@@ -33,8 +33,7 @@ A task completed through another automation mechanism is not a successful FastCU
 
 - Window tools: `list_apps`, `list_windows`, `get_window`, `launch_app`, `get_window_state`, `click`, `press_key`, `type_text`, `scroll`, `drag`, `perform_secondary_action`, and `activate_window`.
 - `js`: persistent JavaScript execution with `sky`, `nodeRepl`, `sleep`, and standard JavaScript globals available. Prefer it for multi-step work, polling, filtering accessibility trees, and batching related actions.
-- `end_turn`: clear the current turn's interrupt scope when more computer-use work will continue in the same session.
-- `close`: disconnect this session from the resident daemon when computer-use work is finished.
+- `close`: finish the current computer-use turn and close this MCP client's connection after the task is verified.
 
 Do not spawn the native host directly, search for its executable, or build a separate protocol client. Use only the FastCUA MCP tools.
 
@@ -68,7 +67,7 @@ For normal text editing in this release, do not use `set_value`. Click the edita
 
 ## Ending
 
-When computer-use work is done for the session, call `close`. The shared helper remains resident for other clients and exits after its configured idle period. Call `end_turn` only when computer-use work will continue in the same session.
+When computer-use work is done, call `close` once. It ends the current turn and closes this MCP client; a later task needs a fresh MCP client connection. The shared daemon and helper remain resident for other clients and exit after their configured idle period. Pause only blocks new desktop actions; it does not end the daemon, native host, or MCP client.
 
 ## Guidelines
 
