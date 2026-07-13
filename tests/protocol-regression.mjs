@@ -256,19 +256,19 @@ try {
   });
   assert.equal(stillInterrupted.ok, false);
   assert.match(stillInterrupted.error || "", /physical Escape key/i);
-  const ended = await rawRequest("end_turn", {}, {
+  const exited = new Promise((resolve, reject) => {
+    child.once("exit", (code, signal) => resolve({ code, signal }));
+    child.once("error", reject);
+  });
+  const closed = await rawRequest("close", {}, {
     session_id: "protocol-regression",
     turn_id: "1",
     "x-oai-cua-request-budget-ms": 15_000,
   });
-  assert.equal(ended.ok, true);
-  const nextTurn = await rawRequest("list_windows", {}, {
-    session_id: "protocol-regression",
-    turn_id: "2",
-    "x-oai-cua-request-budget-ms": 15_000,
-  });
-  assert.equal(nextTurn.ok, true);
-  passed("interrupt file", "persists through the turn and clears on end_turn");
+  assert.equal(closed.ok, true);
+  assert.equal(fs.existsSync(interruptPath), false);
+  assert.deepEqual(await exited, { code: 0, signal: null });
+  passed("close", "clears the interrupted turn and exits the native host");
 } finally {
   for (const entry of pending.values()) {
     clearTimeout(entry.timer);

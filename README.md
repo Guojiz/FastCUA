@@ -152,6 +152,8 @@ During normal use, the MCP server starts the daemon automatically. You do not ne
 
 **How do I take control immediately?** Press `F7` to pause or `F10` to exit.
 
+**How does an agent finish a FastCUA task?** It calls `close` once after verification. `close` ends the current turn and closes that MCP client connection; it does not stop the shared daemon or other clients. Pause only blocks new actions and does not end any process.
+
 **Can an unknown application launch silently?** Not in safe mode. Choose allow once, trust, or deny.
 
 **Is Claude Code required?** No. Any agent that supports both local Skills and stdio MCP can install the complete FastCUA stack.

@@ -33,8 +33,7 @@ A task completed through another automation mechanism is not a successful FastCU
 
 - Window tools: `list_apps`, `list_windows`, `get_window`, `launch_app`, `get_window_state`, `click`, `press_key`, `type_text`, `scroll`, `drag`, `perform_secondary_action`, and `activate_window`.
 - `js`: persistent JavaScript execution with `sky`, `nodeRepl`, `sleep`, and standard JavaScript globals available. Prefer it for multi-step work, polling, filtering accessibility trees, and batching related actions.
-- `end_turn`: clear the current turn's interrupt scope when more computer-use work will continue in the same session.
-- `close`: disconnect this session from the resident daemon when computer-use work is finished.
+- `close`: finish the current computer-use turn and close this MCP client's connection after the task is verified.
 
 Do not spawn the native host directly, search for its executable, or build a separate protocol client. Use only the FastCUA MCP tools.
 
@@ -68,17 +67,17 @@ For normal text editing in this release, do not use `set_value`. Click the edita
 
 ## Ending
 
-When computer-use work is done for the session, call `close`. The shared helper remains resident for other clients and exits after its configured idle period. Call `end_turn` only when computer-use work will continue in the same session.
+When computer-use work is done, call `close` once. It ends the current turn and closes this MCP client; a later task needs a fresh MCP client connection. The shared daemon and helper remain resident for other clients and exit after their configured idle period. Pause only blocks new desktop actions; it does not end the daemon, native host, or MCP client.
 
 ## Guidelines
 
-- Launch apps with `await sky.launch_app({ app: targetApp.id })` when `list_apps` returns the intended app. If the app is not yet discoverable in `list_apps` use an explicit `.exe` path or `.exe` process identifier instead.
+- Launch apps with `await sky.launch_app({ app: targetApp.id })` when `list_apps` returns the intended app. If it is not yet discoverable, use an explicit `.exe` path. For Windows packaged apps, use `shell:AppsFolder\\<AUMID>`; Paint also accepts the stable alias `paint`.
 - Start automating Windows apps by finding the app with `list_apps`, then selecting one of its open windows.
 - `get_window_state` and input methods activate their target window before capture or input. Use `activate_window` only when you explicitly need to bring a window forward without taking another action.
-- Use `list_apps` for running-app discovery, canonical app identity, and each app's open windows. Prefer the returned `list_apps` id whenever a suitable candidate is available. To launch an app not currently returned, use an existing absolute `.exe` path.
+- Use `list_apps` for running-app discovery, canonical app identity, and each app's open windows. Prefer the returned `list_apps` id whenever a suitable candidate is available. To launch an app not currently returned, use an existing absolute `.exe` path, a validated `shell:AppsFolder\\<AUMID>` packaged-app target, or `paint` for Microsoft Paint.
 - Use `list_windows` only when the task is explicitly about currently open windows or when you already know the target app is running and need a fresh flat window list.
 - Minimized windows may be listed, but capture is not reliable until the window is restored. FastCUA activates and restores the target before capture and input. If a snapshot fails, refresh the object with `get_window({ id, app })` and retry once.
-- If the intended app is present but has no suitable open window, call `launch_app({ app: targetApp.id })`, then poll `list_apps()` until the app exposes a targetable window. If the app is not yet in `list_apps`, launch it with an explicit `.exe` path or `.exe` process identifier, then poll `list_apps()` or `list_windows()` for the resulting targetable window. If the window never appears, report the exact launch or polling failure. Do not open or navigate the Windows Start menu/Search UI to launch apps, and do not use PowerShell or `Start-Process` as the normal app launch path.
+- If the intended app is present but has no suitable open window, call `launch_app({ app: targetApp.id })`, then poll `list_apps()` until the app exposes a targetable window. If it is not yet in `list_apps`, launch it with an explicit `.exe` path, `shell:AppsFolder\\<AUMID>`, or `paint`, then poll `list_apps()` or `list_windows()` for the resulting targetable window. If the window never appears, report the exact launch or polling failure. Do not open or navigate the Windows Start menu/Search UI to launch apps, and do not use PowerShell or `Start-Process` as the normal app launch path.
 - `get_window_state` is an expensive point-in-time snapshot, not a live view. Use it to reason over, then batch related actions without re-snapshotting between every input.
 - After `get_window_state`, use the returned `state.window` for later actions; it is the canonical window object that was actually captured.
 - After a kernel reset, stale handle, or lost window binding, recover a current window object with `sky.get_window({ id, app })` using an id and app from an earlier returned `Window`.

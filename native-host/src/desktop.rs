@@ -29,6 +29,8 @@ struct UiaElementTarget {
 }
 
 const STALE_UIA_ELEMENT: &str = "UIA element index is unavailable or stale. Call get_window_state with include_text: true again.";
+const APPS_FOLDER_PREFIX: &str = "shell:AppsFolder\\";
+const PAINT_AUMID: &str = "Microsoft.Paint_8wekyb3d8bbwe!App";
 
 #[derive(Clone, Debug, Serialize)]
 pub struct WindowRef {
@@ -124,19 +126,62 @@ pub fn get_window(id: u64, requested_app: Option<&str>) -> Result<WindowRef, Str
 }
 
 pub fn validate_launch_app(app: &str) -> Result<String, String> {
-    let executable = app.strip_prefix("process:").unwrap_or(app);
+    let requested = app.trim();
+    if matches!(
+        requested.to_ascii_lowercase().as_str(),
+        "paint" | "mspaint" | "mspaint.exe"
+    ) {
+        return Ok(format!("{APPS_FOLDER_PREFIX}{PAINT_AUMID}"));
+    }
+
+    if requested
+        .get(..APPS_FOLDER_PREFIX.len())
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(APPS_FOLDER_PREFIX))
+    {
+        let aumid = &requested[APPS_FOLDER_PREFIX.len()..];
+        let Some((package_family, app_id)) = aumid.split_once('!') else {
+            return Err(
+                "packaged app target must contain a Package Family Name and App ID separated by `!`"
+                    .into(),
+            );
+        };
+        let valid_part = |part: &str| {
+            !part.is_empty()
+                && part.chars().all(|character| {
+                    character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-')
+                })
+        };
+        if !valid_part(package_family) || !valid_part(app_id) || app_id.contains('!') {
+            return Err("packaged app target contains invalid AUMID characters".into());
+        }
+        return Ok(format!("{APPS_FOLDER_PREFIX}{aumid}"));
+    }
+
+    let executable = requested.strip_prefix("process:").unwrap_or(requested);
     let candidate = Path::new(executable);
     if !candidate.is_absolute() {
-        return Err("launch app requires an absolute .exe path from list_apps".into());
+        return Err(
+            "launch app requires an absolute .exe path, `paint`, or shell:AppsFolder\\<AUMID>"
+                .into(),
+        );
     }
     let extension = candidate
         .extension()
         .and_then(|value| value.to_str())
         .unwrap_or_default();
     if !extension.eq_ignore_ascii_case("exe") {
-        return Err("launch app only accepts an absolute .exe path".into());
+        return Err(
+            "launch app only accepts an absolute .exe path or a packaged-app target".into(),
+        );
     }
     if !candidate.is_file() {
+        if candidate
+            .file_name()
+            .and_then(|value| value.to_str())
+            .is_some_and(|name| name.eq_ignore_ascii_case("mspaint.exe"))
+        {
+            return Ok(format!("{APPS_FOLDER_PREFIX}{PAINT_AUMID}"));
+        }
         return Err(format!("launch app target does not exist: {executable}"));
     }
     candidate
@@ -146,9 +191,9 @@ pub fn validate_launch_app(app: &str) -> Result<String, String> {
 }
 
 pub fn launch_app(app: &str) -> Result<(), String> {
-    let executable = validate_launch_app(app)?;
+    let target = validate_launch_app(app)?;
     let operation = wide("open");
-    let file = wide(&executable);
+    let file = wide(&target);
     let result = unsafe {
         ShellExecuteW(
             ptr::null_mut(),
@@ -160,7 +205,7 @@ pub fn launch_app(app: &str) -> Result<(), String> {
         )
     } as usize;
     if result <= 32 {
-        Err(format!("launch app failed ({result}): {executable}"))
+        Err(format!("launch app failed ({result}): {target}"))
     } else {
         Ok(())
     }
@@ -727,6 +772,30 @@ pub fn params_window(params: &Value) -> Result<WindowRef, String> {
         .ok_or_else(|| "window missing field `id`".to_string())?;
     let app = object.get("app").and_then(Value::as_str);
     get_window(id, app)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{APPS_FOLDER_PREFIX, PAINT_AUMID, validate_launch_app};
+
+    #[test]
+    fn paint_alias_resolves_to_packaged_app() {
+        let expected = format!("{APPS_FOLDER_PREFIX}{PAINT_AUMID}");
+        assert_eq!(validate_launch_app("paint").unwrap(), expected);
+        assert_eq!(validate_launch_app("MSPAINT").unwrap(), expected);
+        assert_eq!(
+            validate_launch_app(r"C:\definitely-missing\mspaint.exe").unwrap(),
+            expected
+        );
+    }
+
+    #[test]
+    fn apps_folder_aumid_is_validated() {
+        let target = r"shell:AppsFolder\Microsoft.WindowsCalculator_8wekyb3d8bbwe!App";
+        assert_eq!(validate_launch_app(target).unwrap(), target);
+        assert!(validate_launch_app(r"shell:AppsFolder\missing-app-id").is_err());
+        assert!(validate_launch_app(r"shell:AppsFolder\Family!App&command").is_err());
+    }
 }
 
 fn screen_point(window: &WindowRef, x: i32, y: i32) -> Result<(i32, i32), String> {

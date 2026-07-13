@@ -28,7 +28,7 @@ function request(method, params = {}) {
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 await new Promise((resolve, reject) => { socket.once("connect", resolve); socket.once("error", reject); });
-const paintExe = process.argv[3] || process.env.PAINT_EXE || process.env.LOCALAPPDATA + "\\Microsoft\\WindowsApps\\mspaint.exe";
+const paintExe = process.argv[3] || process.env.PAINT_EXE || "paint";
 await request("launch_app", { app: paintExe });
 let window;
 for (let i = 0; i < 40 && !window; i++) {

@@ -75,7 +75,7 @@ fn main() {
 
 fn handle_request(request: &Request) -> Value {
     if let Some(path) = interrupt_path(&request.meta) {
-        if matches!(request.method.as_str(), "end_turn" | "close") {
+        if request.method == "close" {
             let _ = fs::remove_file(path);
         } else if path.exists() {
             return error_response(request, INTERRUPT_MESSAGE);
@@ -180,7 +180,7 @@ fn dispatch(method: &str, params: &Value) -> Result<Value, String> {
             desktop::perform_secondary_action(params)?;
             Ok(json!({}))
         }
-        "end_turn" | "close" => Ok(json!({"ok": true})),
+        "close" => Ok(json!({"ok": true})),
         _ => Err(format!("unsupported method: {method}")),
     }
 }
@@ -192,7 +192,7 @@ fn error_response(request: &Request, message: &str) -> Value {
 fn request_app(request: &Request) -> Result<Option<String>, String> {
     if matches!(
         request.method.as_str(),
-        "list_apps" | "list_windows" | "end_turn" | "close"
+        "list_apps" | "list_windows" | "close"
     ) {
         return Ok(None);
     }

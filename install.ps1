@@ -11,7 +11,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $repo = 'https://github.com/Guojiz/FastCUA'
-$Version = 'v0.1.3'
+$Version = 'v0.1.4'
 $appDir = Join-Path $InstallRoot 'app'
 $tempDir = Join-Path ([System.IO.Path]::GetTempPath()) ('fastcua-install-' + [guid]::NewGuid().ToString('N'))
 
@@ -104,17 +104,18 @@ A successful FastCUA setup requires BOTH the Skill and the MCP server. Partial i
 1. Install the complete FastCUA Skill folder into this agent's own active Skill directory or Skill registry:
    source: $appDir\skills\computer-use
    skill name: computer-use
-   Do not merely read SKILL.md from the source directory. Copy or register the complete folder, reload or reindex Skills, and verify that computer-use is discoverable by this agent.
+   Do not merely read SKILL.md from the source directory. Do not create a forwarding, wrapper, summary, or shortened SKILL.md that points back to the source. Copy or register the complete folder without rewriting its contents, then reload or reindex Skills.
+   If this client uses a filesystem Skill directory, recursively compare the installed relative file list and SHA-256 hashes with the source folder. If it uses a native Skill registry, verify that the active registration resolves to the complete source folder and includes all neighboring resources.
 2. Add a stdio MCP server named sky-computer-use to this agent's own MCP configuration:
    command: $node
    args: ["$appDir\server.mjs"]
 3. Start or reconnect the MCP server and reload the installed Skill if required by this client.
 4. Verify BOTH parts:
-   - confirm that the installed computer-use Skill is active or discoverable;
+   - confirm that the active computer-use Skill resolves to the complete installed folder, not a forwarding stub, and is discoverable by this agent;
    - call list_windows through sky-computer-use and confirm that it returns actual Windows window data.
 5. Report the exact Skill destination or registration you changed and the exact MCP configuration file you changed.
 
-Reading the source Skill file alone is not installation. Adding only MCP is not installation. Installing only the Skill is not installation.
+Reading the source Skill file alone is not installation. A forwarding or shortened SKILL.md is not installation. Adding only MCP is not installation. Installing only the Skill is not installation. Do not report success until the full Skill and MCP checks both pass.
 
 If this AI client cannot install or register local Skills, cannot add a custom stdio MCP server, or cannot verify both parts, stop and report the incompatibility. Do not substitute PowerShell, SendKeys, pyautogui, shell scripts, browser automation, or another desktop-control mechanism.
 

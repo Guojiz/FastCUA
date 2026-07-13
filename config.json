@@ -4,6 +4,7 @@
   "approvalPolicy": "safe",
   "whitelist": [
     "mspaint.exe",
+    "shell:AppsFolder\\Microsoft.Paint_8wekyb3d8bbwe!App",
     "notepad.exe",
     "explorer.exe"
   ],

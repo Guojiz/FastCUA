@@ -38,6 +38,7 @@ class PipeClient {
     this.socket = net.connect(process.env.FASTCUA_PIPE || "\\\\.\\pipe\\fastcua");
     this.socket.setEncoding("utf8");
     this.socket.on("data", chunk => this.onData(chunk));
+    this.closed = new Promise(resolve => this.socket.once("close", resolve));
   }
 
   async ready() {
@@ -95,10 +96,14 @@ try {
   assert.equal((await api("/api/state")).controlState, "running");
   console.log("PASS cross-origin mutations are rejected");
 
+  assert.ok(Array.isArray(await client.request("list_windows")));
+  const beforePause = await api("/api/state");
+  assert.ok(beforePause.binaryPid, "native host should be resident before pause");
   await api("/api/action", { action: "pause" });
   assert.equal((await api("/api/state")).controlState, "paused_by_user");
+  assert.equal((await api("/api/state")).binaryPid, beforePause.binaryPid);
   await assert.rejects(client.request("list_windows"), /paused by the user/i);
-  console.log("PASS manual pause blocks pipe requests");
+  console.log("PASS manual pause preserves the native host and blocks pipe requests");
 
   await api("/api/action", { action: "resume" });
   assert.equal((await api("/api/state")).controlState, "running");
@@ -146,9 +151,13 @@ try {
   await api("/api/action", { action: "stopAll" });
   await assert.rejects(client.request("list_windows"), /integration redirect/i);
   await assert.rejects(client.request("list_windows"), /integration redirect/i);
-  await client.request("end_turn");
-  assert.ok(Array.isArray(await client.request("list_windows")));
-  console.log("PASS interjection persists for the turn and clears on end_turn");
+  await client.request("close");
+  await client.closed;
+  const nextClient = new PipeClient();
+  await nextClient.ready();
+  assert.ok(Array.isArray(await nextClient.request("list_windows")));
+  nextClient.close();
+  console.log("PASS close ends the interrupted turn and the next client reconnects cleanly");
 } finally {
   await api("/api/action", { action: "resume" }).catch(() => {});
   await api("/api/config", originalConfig).catch(() => {});

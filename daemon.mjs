@@ -87,7 +87,7 @@ function actionSummary(method, params) {
 
 // ---- config (web UI editable) ----
 const CONFIG_PATH = process.env.FASTCUA_CONFIG_PATH || path.join(HERE, "config.json");
-const DEFAULT_CONFIG = { costartMode: "claude", idleTimeoutMin: 5, approvalPolicy: "safe", whitelist: ["mspaint.exe", "notepad.exe", "explorer.exe"], port: 8420, bannerEnabled: false, overlayEnabled: true, overlayTitle: "FastCUA is using your computer", overlayLanguage: "auto", cuaBinPath: "" };
+const DEFAULT_CONFIG = { costartMode: "claude", idleTimeoutMin: 5, approvalPolicy: "safe", whitelist: ["mspaint.exe", "shell:AppsFolder\\Microsoft.Paint_8wekyb3d8bbwe!App", "notepad.exe", "explorer.exe"], port: 8420, bannerEnabled: false, overlayEnabled: true, overlayTitle: "FastCUA is using your computer", overlayLanguage: "auto", cuaBinPath: "" };
 const APPROVAL_WAIT_MS = 60_000;
 const pendingApprovals = new Map();
 let isUserPaused = false;
@@ -319,8 +319,12 @@ function onClientData(c, chunk) {
 
 async function handleClientReq(c, req) {
   const { id, method, params } = req;
-  if (method === "end_turn") { clearClientInterrupt(c); c.turnId++; reply(c, id, { result: { ok: true } }); return; }
-  if (method === "close") { clearClientInterrupt(c); reply(c, id, { result: { ok: true } }); return; }
+  if (method === "close") {
+    clearClientInterrupt(c);
+    c.turnId++;
+    closeClientAfterReply(c, id, { result: { ok: true } });
+    return;
+  }
   if (isUserPaused) { reply(c, id, { error: "Computer use is paused by the user. Resume it before making another desktop request." }); return; }
   if (pendingApprovals.size) { reply(c, id, { error: "Computer use is paused while a desktop approval is awaiting a user decision." }); return; }
   if (latchInterrupt(c)) {
@@ -352,6 +356,13 @@ async function handleClientReq(c, req) {
 function reply(c, id, obj) {
   const payload = JSON.stringify({ id, ...obj }) + "\n";
   c.socket.write(payload, (e) => { if (e) log("reply write ERROR id=", id, ":", e.message); });
+}
+function closeClientAfterReply(c, id, obj) {
+  const payload = JSON.stringify({ id, ...obj }) + "\n";
+  c.socket.end(payload, (e) => {
+    if (e) log("close reply write ERROR id=", id, ":", e.message);
+    else log("client closed its computer-use turn");
+  });
 }
 
 // ---- co-start (Windows login auto-start via HKCU Run key) ----
@@ -445,7 +456,7 @@ const httpServer = http.createServer((req, res) => {
           const { action, token } = JSON.parse(body);
           if (action === "killBinary") { resetBinary(); log("action: binary killed"); }
           else if (action === "clearApprovals") { approvedApps.clear(); log("action: approvals cleared"); }
-          else if (action === "pause") { isUserPaused = true; resetBinary(); currentAction = null; emitEvent("paused", { client: "user" }); log("action: user paused desktop control"); }
+          else if (action === "pause") { isUserPaused = true; emitEvent("paused", { client: "user" }); log("action: user paused desktop control"); }
           else if (action === "resume") { isUserPaused = false; emitEvent("resumed", { client: "user" }); log("action: user resumed desktop control"); }
           else if (action === "allowOnce" || action === "allowAndWhitelist" || action === "denyApproval") {
             const decision = action === "allowOnce" ? "allow_once" : action === "allowAndWhitelist" ? "allow_and_whitelist" : "deny";

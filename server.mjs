@@ -23,9 +23,8 @@ function readCostart() { if (process.env.FASTCUA_COSTART_MODE) return process.en
 
 // ---- daemon client (named pipe, newline JSON) ----
 class DaemonClient {
-  constructor() { this.sock = null; this.buf = ""; this.pending = new Map(); this.nextId = 1; this.connectPromise = null; this.closed = false; }
+  constructor() { this.sock = null; this.buf = ""; this.pending = new Map(); this.nextId = 1; this.connectPromise = null; }
   async ensure() {
-    if (this.closed) throw new Error("computer-use session is closed");
     if (this.sock && this.sock.writable && !this.sock.destroyed) return;
     if (this.connectPromise) return this.connectPromise;
     this.connectPromise = this.connect();
@@ -81,7 +80,6 @@ class DaemonClient {
   }
   failAll(msg) { for (const p of this.pending.values()) { clearTimeout(p.timer); p.reject(new Error(msg)); } this.pending.clear(); this.sock = null; }
   async request(method, params) {
-    if (this.closed) throw new Error("computer-use session is closed");
     await this.ensure();
     return new Promise((resolve, reject) => {
       if (!this.sock || !this.sock.writable || this.sock.destroyed) { reject(new Error("daemon unavailable")); return; }
@@ -92,10 +90,12 @@ class DaemonClient {
     });
   }
   async close() {
-    if (this.closed) return;
-    try { await this.request("close", {}); } catch {}
-    this.closed = true;
-    try { this.sock && this.sock.end(); } catch {}
+    const socket = this.sock;
+    if (socket && socket.writable && !socket.destroyed) {
+      try { await this.request("close", {}); } catch {}
+    }
+    this.failAll("computer-use client closed");
+    try { socket && socket.end(); } catch {}
   }
 }
 const daemon = new DaemonClient();
@@ -115,7 +115,6 @@ const sky = {
   drag: (i) => daemon.request("drag", i),
   perform_secondary_action: (i) => daemon.request("perform_secondary_action", i),
   activate_window: (i) => daemon.request("activate_window", i),
-  end_turn: () => daemon.request("end_turn", {}),
   close: async () => { await daemon.close(); return { ok: true }; },
 };
 
@@ -170,6 +169,11 @@ const skyProxy = new Proxy(sky, {
     return async (input) => {
       const cell = assertActiveCell();
       const r = await Reflect.apply(v, target, [input]);
+      if (prop === "close" && cell) {
+        cell.closeRequested = true;
+        deactivateCell(cell);
+        return r;
+      }
       if (cell && !cell.active) throw new Error("js cell is no longer active");
       if (prop === "get_window_state" && r && Array.isArray(r.screenshots)) {
         for (const s of r.screenshots) {
@@ -204,11 +208,11 @@ const replSandbox = {
 const replContext = vm.createContext(replSandbox);
 async function runJs(code) {
   replSession.out = []; replSession.images = [];
-  const cell = { id: nextCellId++, active: true, timeouts: new Set(), intervals: new Set() };
+  const cell = { id: nextCellId++, active: true, closeRequested: false, timeouts: new Set(), intervals: new Set() };
   const wrapped = `(async () => {\n${code}\n})()`;
   let p;
   try { p = cellStorage.run(cell, () => new vm.Script(wrapped, { filename: "repl-cell.js" }).runInContext(replContext)); }
-  catch (e) { return { content: [{ type: "text", text: "SyntaxError: " + (e.stack || e.message) }], isError: true }; }
+  catch (e) { return { content: [{ type: "text", text: "SyntaxError: " + (e.stack || e.message) }], isError: true, closeRequested: false }; }
   let timeoutHandle;
   try {
     await Promise.race([p, new Promise((_, rej) => { timeoutHandle = setTimeout(() => rej(new Error(`js cell timed out after ${JS_TIMEOUT_MS}ms`)), JS_TIMEOUT_MS); })]);
@@ -216,7 +220,7 @@ async function runJs(code) {
     deactivateCell(cell);
     Promise.resolve(p).catch(() => {});
     const text = (replSession.out.length ? replSession.out.join("\n") + "\n" : "") + (e.stack || e.message);
-    return { content: [{ type: "text", text }], isError: true };
+    return { content: [{ type: "text", text }], isError: true, closeRequested: cell.closeRequested };
   } finally {
     if (timeoutHandle) clearTimeout(timeoutHandle);
   }
@@ -225,16 +229,16 @@ async function runJs(code) {
   if (replSession.out.length) content.push({ type: "text", text: replSession.out.join("\n") });
   for (const img of replSession.images) content.push({ type: "image", data: img.data, mimeType: img.mimeType });
   if (!content.length) content.push({ type: "text", text: "(no output — use nodeRepl.write(x) or console.log(x) to print; bare expression values are not auto-printed)" });
-  return { content, isError: false };
+  return { content, isError: false, closeRequested: cell.closeRequested };
 }
 
-// ---- tool definitions (window2 + end_turn + close + js) ----
+// ---- tool definitions (window2 + close + js) ----
 const W = { type: "object", properties: { app: { type: "string" }, id: { type: "number" } }, required: ["app", "id"] };
 const TOOLS = [
   { name: "list_apps", desc: "List running apps that currently have visible targetable windows. Each app has windows[]. Choose the task-specific app+window before acting.", inputSchema: { type: "object", properties: {} } },
   { name: "list_windows", desc: "List open windows that can be targeted by the window2 API.", inputSchema: { type: "object", properties: {} } },
   { name: "get_window", desc: "Rehydrate a currently open window by id (after losing a window binding).", inputSchema: { type: "object", properties: { app: { type: "string" }, id: { type: "number" } }, required: ["id"] } },
-  { name: "launch_app", desc: "Launch an app by id (from list_apps) or explicit .exe path. Its window appears in list_apps() afterwards.", inputSchema: { type: "object", properties: { app: { type: "string", description: "app id from list_apps() or a .exe process path" } }, required: ["app"] } },
+  { name: "launch_app", desc: "Launch an app by id from list_apps, an explicit .exe path, the `paint` alias, or a shell:AppsFolder\\<AUMID> packaged-app target. Its window appears in list_apps() afterwards.", inputSchema: { type: "object", properties: { app: { type: "string", description: "app id, .exe process path, `paint`, or shell:AppsFolder\\<AUMID>" } }, required: ["app"] } },
   { name: "get_window_state", desc: "Capture accessibility tree (with element indexes) and/or screenshot for an open window. Stable labeled controls can be clicked with their latest [N] element_index.", inputSchema: { type: "object", properties: { window: W, include_screenshot: { type: "boolean", default: true }, include_text: { type: "boolean", default: true } }, required: ["window"] } },
   { name: "click", desc: "Click an indexed element (element_index from latest get_window_state) OR a coordinate (x,y) in the window screenshot.", inputSchema: { type: "object", properties: { window: W, element_index: { type: "number" }, x: { type: "number" }, y: { type: "number" }, mouse_button: { type: "string", enum: ["left", "right", "middle", "l", "r", "m"] }, click_count: { type: "number" }, screenshotId: { type: "string" } }, required: ["window"] } },
   { name: "press_key", desc: "Press a key or +-separated chord (e.g. 'Return', 'Control_L+a', 'Ctrl+s', 'space').", inputSchema: { type: "object", properties: { window: W, key: { type: "string" } }, required: ["window", "key"] } },
@@ -243,8 +247,7 @@ const TOOLS = [
   { name: "drag", desc: "Drag from one window coordinate to another.", inputSchema: { type: "object", properties: { window: W, from_x: { type: "number" }, from_y: { type: "number" }, to_x: { type: "number" }, to_y: { type: "number" }, screenshotId: { type: "string" } }, required: ["window", "from_x", "from_y", "to_x", "to_y"] } },
   { name: "perform_secondary_action", desc: "Raise the target window. This release supports only action='Raise' on the root element_index 0.", inputSchema: { type: "object", properties: { window: W, element_index: { type: "number", enum: [0] }, action: { type: "string", enum: ["Raise"] } }, required: ["window", "element_index", "action"] } },
   { name: "activate_window", desc: "Bring an open window to the foreground. Input methods activate their target window automatically; use this only as an escape hatch.", inputSchema: { type: "object", properties: { window: W }, required: ["window"] } },
-  { name: "end_turn", desc: "Signal end of the current computer-use turn (clears interrupt/turn scope). Call after a task's actions are verified, if you will keep doing more computer use this session.", inputSchema: { type: "object", properties: {} } },
-  { name: "close", desc: "Disconnect this session from the shared computer-use daemon. Call when computer-use work is DONE for this session. The shared helper itself stays resident (other windows may use it) and auto-exits after 5 min idle.", inputSchema: { type: "object", properties: {} } },
+  { name: "close", desc: "Finish the current computer-use turn and close this MCP client connection. Call once after the task is verified. The shared FastCUA daemon and helper remain available to other clients.", inputSchema: { type: "object", properties: {} } },
   { name: "js", desc: "Run JavaScript in a persistent REPL with `sky` (the window2 API) and `nodeRepl` in scope. Top-level await supported. globalThis state persists across calls. Print with nodeRepl.write(x) / console.log(x); get_window_state screenshots auto-display as images. Use for multi-step/dependent logic, polling loops, tree filtering, batched actions. Example: globalThis.apps = await sky.list_apps(); nodeRepl.write(apps.length);", inputSchema: { type: "object", properties: { code: { type: "string", description: "JavaScript to execute. Use await for sky calls. Assign cross-cell state to globalThis." } }, required: ["code"] } },
 ];
 
@@ -265,7 +268,6 @@ async function callTool(name, args) {
     case "drag": return await sky.drag({ window: w, from_x: args.from_x, from_y: args.from_y, to_x: args.to_x, to_y: args.to_y, screenshotId: args.screenshotId });
     case "perform_secondary_action": return await sky.perform_secondary_action({ window: w, element_index: args.element_index, action: args.action });
     case "activate_window": return await sky.activate_window({ window: w });
-    case "end_turn": return await sky.end_turn();
     case "close": return await sky.close();
     default: throw new Error("unknown tool: " + name);
   }
@@ -307,7 +309,7 @@ process.stdin.on("data", (chunk) => {
     if (line) handle(line);
   }
 });
-process.stdin.on("end", () => { try { daemon.close(); } catch {} process.exit(0); });
+process.stdin.on("end", () => { daemon.failAll("MCP stdin closed"); try { daemon.sock && daemon.sock.end(); } catch {} process.exit(0); });
 
 async function handle(line) {
   let req;
@@ -315,8 +317,9 @@ async function handle(line) {
   const { id, method, params } = req;
   try {
     let result;
+    let closeAfterResponse = false;
     if (method === "initialize") {
-      result = { protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "sky-computer-use", version: "0.1.3" } };
+      result = { protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "sky-computer-use", version: "0.1.4" } };
     } else if (method === "initialized" || method === "notifications/initialized") {
       return;
     } else if (method === "tools/list") {
@@ -327,23 +330,30 @@ async function handle(line) {
       log("call", name, JSON.stringify(args).slice(0, 200));
       if (name === "js") {
         result = await runJs(args.code || "");
+        closeAfterResponse = result.closeRequested;
+        delete result.closeRequested;
       } else {
         const out = await callTool(name, args);
         const content = (name === "get_window_state" && out) ? stateToContent(out) : [{ type: "text", text: JSON.stringify(out, null, 2) }];
         result = { content, isError: false };
+        closeAfterResponse = name === "close";
       }
     } else {
       sendError(id, -32601, "method not found: " + method);
       return;
     }
-    send(id, { result });
+    send(id, { result }, closeAfterResponse ? closeMcpClient : undefined);
   } catch (e) {
     log("error", method, e.message);
     if (method === "tools/call") send(id, { result: { content: [{ type: "text", text: "Error: " + e.message }], isError: true } });
     else sendError(id, -32603, e.message);
   }
 }
-function send(id, obj) { process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id, ...obj }) + "\n"); }
+function closeMcpClient() {
+  process.stdin.pause();
+  setImmediate(() => process.exit(0));
+}
+function send(id, obj, onFlushed) { process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id, ...obj }) + "\n", onFlushed); }
 function sendError(id, code, message) { process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id, error: { code, message } }) + "\n"); }
 
 log("fastcua MCP server ready (thin client -> daemon at", PIPE + ")");
