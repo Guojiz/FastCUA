@@ -1,117 +1,83 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="description" content="FastCUA 是面向 Computer Use Agent 的开源、本地优先执行运行时：无障碍信息优先、视觉按需、常驻控制平面与多动作执行。">
-  <meta name="theme-color" content="#f4f1ea">
-  <title>FastCUA — Computer Use Runtime</title>
+  <meta name="description" data-en="FastCUA is an open-source, local-first execution runtime for computer-use agents." data-zh="FastCUA 是面向 Computer Use Agent 的开源、本地优先执行运行时。" content="FastCUA is an open-source, local-first execution runtime for computer-use agents.">
+  <meta name="theme-color" content="#e9e7de">
+  <title data-en="FastCUA — Computer Use Runtime" data-zh="FastCUA — 计算机操作运行时">FastCUA — Computer Use Runtime</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <header class="site-header">
-    <a class="wordmark" href="#top" aria-label="FastCUA 首页"><span>F</span>FastCUA</a>
-    <button class="menu" type="button" aria-label="切换导航" aria-expanded="false"><i></i><i></i></button>
-    <nav>
-      <a href="#principles">设计原则</a>
-      <a href="#architecture">架构</a>
-      <a href="#release">当前版本</a>
-      <a href="https://github.com/Guojiz/FastCUA">GitHub ↗</a>
-    </nav>
+  <div class="frame" aria-hidden="true"><span class="crop tl"></span><span class="crop tr"></span><span class="crop bl"></span><span class="crop br"></span></div>
+  <div class="ruler" aria-hidden="true"><span class="ruler-mark">◆</span><span class="ruler-label" data-en="FastCUA — Runtime Register" data-zh="FastCUA — 运行时登记册">FastCUA — Runtime Register</span><span class="ruler-coord">R 0.1.1 · 2026</span><span class="ruler-mark">◆</span></div>
+
+  <header class="masthead">
+    <a class="brand" href="https://guojiz.github.io/" aria-label="Guojiz home"><span class="brand-mark">GZ</span><span class="brand-name">FastCUA</span></a>
+    <div class="masthead-right">
+      <nav aria-label="Primary"><a href="#principles" data-en="Principles" data-zh="原则">Principles</a><a href="#architecture" data-en="Architecture" data-zh="架构">Architecture</a><a href="#release" data-en="Release" data-zh="版本">Release</a><a href="https://github.com/Guojiz/FastCUA">GitHub</a></nav>
+      <button class="lang-toggle" type="button" aria-label="Switch language"><span class="lang-opt" data-lang="en">EN</span><span class="lang-sep">/</span><span class="lang-opt" data-lang="zh">中</span></button>
+    </div>
   </header>
 
-  <main id="top">
-    <section class="hero wrap">
-      <p class="overline"><span></span> OPEN SOURCE · LOCAL FIRST · COMPUTER USE RUNTIME</p>
-      <h1>让 Agent 少一点等待，<br><em>多一点执行。</em></h1>
-      <p class="hero-copy">FastCUA 为 Computer Use Agent 提供快速、可靠、可控的本地执行层。它把界面信息、原生输入、访问策略与人工接管组织在同一个常驻控制平面中。</p>
-      <div class="hero-actions">
-        <a class="button solid" href="https://github.com/Guojiz/FastCUA/releases/tag/v0.1.1">获取 v0.1.1 <span>↗</span></a>
-        <a class="button" href="https://github.com/Guojiz/FastCUA">阅读源码</a>
-      </div>
-      <div class="release-note">
-        <span class="label">当前实现</span>
-        <p>v0.1.1 提供 Windows 11 x64 原生 Host。平台接入被隔离为 Host 层，不定义 FastCUA 的长期边界。</p>
-      </div>
+  <main>
+    <section class="hero" id="top">
+      <p class="eyebrow" data-rise data-en="Open source · Local first · Computer use runtime" data-zh="开源 · 本地优先 · Computer Use 运行时">Open source · Local first · Computer use runtime</p>
+      <h1 class="display" data-rise data-en="Less waiting.&lt;br&gt;&lt;em&gt;More doing.&lt;/em&gt;" data-zh="少一点等待，&lt;br&gt;&lt;em&gt;多一点执行。&lt;/em&gt;">Less waiting.<br><em>More doing.</em></h1>
+      <p class="lede" data-rise data-en="FastCUA is a fast, reliable, and controllable local execution layer for computer-use agents. It brings interface state, native input, access policy, and human takeover into one resident control plane." data-zh="FastCUA 为 Computer Use Agent 提供快速、可靠、可控的本地执行层，把界面状态、原生输入、访问策略与人工接管组织在同一个常驻控制平面中。">FastCUA is a fast, reliable, and controllable local execution layer for computer-use agents. It brings interface state, native input, access policy, and human takeover into one resident control plane.</p>
+      <div class="hero-actions" data-rise><a class="btn primary" href="https://github.com/Guojiz/FastCUA/releases/tag/v0.1.1" data-en="Get v0.1.1 ↗" data-zh="获取 v0.1.1 ↗">Get v0.1.1 ↗</a><a class="btn" href="https://github.com/Guojiz/FastCUA" data-en="Read source" data-zh="阅读源码">Read source</a></div>
+      <dl class="hero-meta" data-rise>
+        <div><dt data-en="Role" data-zh="角色">Role</dt><dd data-en="Execution runtime" data-zh="执行运行时">Execution runtime</dd></div>
+        <div><dt data-en="Interface" data-zh="接口">Interface</dt><dd>MCP / host protocol</dd></div>
+        <div><dt data-en="Current host" data-zh="当前 Host">Current host</dt><dd>Windows 11 x64</dd></div>
+        <div><dt data-en="License" data-zh="许可证">License</dt><dd>Apache-2.0</dd></div>
+      </dl>
+      <aside class="release-note"><span class="coord">NOTE-01</span><p data-en="v0.1.1 ships a Windows 11 x64 native host. Platform integration is isolated behind the host layer; it does not define FastCUA’s long-term boundary." data-zh="v0.1.1 提供 Windows 11 x64 原生 Host。平台接入被隔离在 Host 层之后，不定义 FastCUA 的长期边界。">v0.1.1 ships a Windows 11 x64 native host. Platform integration is isolated behind the host layer; it does not define FastCUA’s long-term boundary.</p></aside>
     </section>
 
-    <section class="signal" aria-label="FastCUA 执行链路">
-      <div class="signal-track">
-        <span>Agent / MCP Client</span><i>→</i><span>FastCUA Runtime</span><i>→</i><span>Native Host Adapter</span><i>→</i><span>Computer</span>
-      </div>
+    <section class="runtime-line" aria-label="Runtime path"><span>Agent / MCP Client</span><i>→</i><span>FastCUA Runtime</span><i>→</i><span>Native Host Adapter</span><i>→</i><span>Computer</span></section>
+
+    <section id="principles">
+      <header class="section-head"><span class="code" data-en="§ Principles · 03" data-zh="§ 设计原则 · 03">§ Principles · 03</span><h2 data-en="Speed comes from execution,&lt;br&gt;not marketing numbers." data-zh="速度来自执行方式，&lt;br&gt;不是宣传数字。">Speed comes from execution,<br>not marketing numbers.</h2><p class="section-note" data-en="FastCUA shortens the round-trip between an agent and a computer. This page describes mechanisms already present in the code—no invented product interface." data-zh="FastCUA 缩短 Agent 与计算机之间的往返路径。页面只描述代码已经实现的机制，不展示虚构产品界面。">FastCUA shortens the round-trip between an agent and a computer. This page describes mechanisms already present in the code—no invented product interface.</p></header>
+      <ol class="register principle-register">
+        <li class="entry"><span class="coord">P-01</span><div class="entry-body"><span class="tag" data-en="Observe" data-zh="观察">Observe</span><h3 data-en="Structured first, vision when needed" data-zh="结构化信息优先，视觉按需">Structured first, vision when needed</h3><p data-en="When accessibility information can express an interface accurately, read text and control structure directly. Request screenshots for canvases, custom controls, or visual verification." data-zh="界面能够通过可访问性信息准确表达时，直接读取文本与控件结构；画布、自绘控件或视觉验证再请求截图。">When accessibility information can express an interface accurately, read text and control structure directly. Request screenshots for canvases, custom controls, or visual verification.</p></div><span class="status">01</span></li>
+        <li class="entry"><span class="coord">P-02</span><div class="entry-body"><span class="tag" data-en="Persist" data-zh="常驻">Persist</span><h3 data-en="One warm control plane" data-zh="一个温热的常驻控制平面">One warm control plane</h3><p data-en="Clients share a resident native host. Window identity, pointer state, approvals, pauses, and interruptions are not rebuilt for every individual action." data-zh="客户端共享常驻原生 Host。窗口身份、指针状态、审批、暂停与中断不会为每个动作重复初始化。">Clients share a resident native host. Window identity, pointer state, approvals, pauses, and interruptions are not rebuilt for every individual action.</p></div><span class="status">02</span></li>
+        <li class="entry"><span class="coord">P-03</span><div class="entry-body"><span class="tag" data-en="Execute" data-zh="执行">Execute</span><h3 data-en="Many actions per model turn" data-zh="一次模型回合，多步执行">Many actions per model turn</h3><p data-en="Stable clicks, keys, text input, scrolling, and drags can run in sequence. Observe again when layout, focus, or modal state changes." data-zh="稳定的点击、按键、文本输入、滚动与拖拽可以顺序执行；布局、焦点或模态状态变化时，再回到观察。">Stable clicks, keys, text input, scrolling, and drags can run in sequence. Observe again when layout, focus, or modal state changes.</p></div><span class="status">03</span></li>
+      </ol>
     </section>
 
-    <section class="section wrap" id="principles">
-      <header class="section-head">
-        <p class="index">01 / PRINCIPLES</p>
-        <h2>速度来自执行方式，<br>不是宣传数字。</h2>
-        <p>FastCUA 优化 Agent 与计算机之间的往返路径。页面只描述代码已经实现的机制，不展示虚构产品界面。</p>
-      </header>
-      <div class="principle-grid">
-        <article>
-          <b>01</b><span class="glyph text-glyph">Aa</span>
-          <h3>信息优先，视觉按需</h3>
-          <p>界面能够通过可访问性信息准确表达时，直接读取文本与控件结构；画布、自绘控件或视觉验证再请求截图。</p>
-        </article>
-        <article>
-          <b>02</b><span class="glyph pulse-glyph"><i></i></span>
-          <h3>一个常驻控制平面</h3>
-          <p>客户端共享温热的原生 Host。窗口身份、指针状态、审批、暂停与中断不会为每个动作重复初始化。</p>
-        </article>
-        <article>
-          <b>03</b><span class="glyph batch-glyph"><i></i><i></i><i></i></span>
-          <h3>一次回合，多步执行</h3>
-          <p>稳定的点击、按键、文本输入、滚动与拖拽可以顺序执行；布局或焦点发生变化时，再回到观察与推理。</p>
-        </article>
+    <section id="architecture">
+      <header class="section-head"><span class="code" data-en="§ Architecture" data-zh="§ 架构">§ Architecture</span><h2 data-en="Platform capability stays in adapters.&lt;br&gt;Control semantics stay in the runtime." data-zh="平台能力留在适配层，&lt;br&gt;控制语义留在运行时。">Platform capability stays in adapters.<br>Control semantics stay in the runtime.</h2></header>
+      <div class="architecture">
+        <div class="arch-row"><span class="coord">A-01</span><strong data-en="Clients" data-zh="客户端">Clients</strong><p>Claude Code · MCP Clients · Custom Agents</p><small>stdio MCP</small></div>
+        <div class="arch-link"><i></i><span data-en="persistent connection" data-zh="持久连接">persistent connection</span><i></i></div>
+        <div class="arch-row accent"><span class="coord">A-02</span><strong>FastCUA Runtime</strong><p data-en="state · policy · approvals · interruption" data-zh="状态 · 策略 · 审批 · 中断">state · policy · approvals · interruption</p><small data-en="control semantics" data-zh="控制语义">control semantics</small></div>
+        <div class="arch-link"><i></i><span>host protocol</span><i></i></div>
+        <div class="arch-row"><span class="coord">A-03</span><strong data-en="Host adapters" data-zh="Host 适配层">Host adapters</strong><p data-en="Native platform integration" data-zh="平台原生集成">Native platform integration</p><small data-en="current: Windows 11 x64" data-zh="当前：Windows 11 x64">current: Windows 11 x64</small></div>
       </div>
+      <p class="architecture-note" data-en="The runtime defines consistent control semantics; host adapters provide windows, input, and platform APIs. Current release scope and future architecture boundaries remain separate." data-zh="运行时负责一致的控制语义；Host adapter 负责窗口、输入与平台 API。当前发布范围与未来架构边界保持分离。">The runtime defines consistent control semantics; host adapters provide windows, input, and platform APIs. Current release scope and future architecture boundaries remain separate.</p>
     </section>
 
-    <section class="section dark" id="architecture">
-      <div class="wrap architecture">
-        <header class="section-head inverse">
-          <p class="index">02 / ARCHITECTURE</p>
-          <h2>平台能力留在适配层，<br>控制语义留在运行时。</h2>
-        </header>
-        <div class="arch-stack">
-          <div class="arch-row client"><span>Clients</span><strong>Claude Code · MCP Clients · Custom Agents</strong><small>stdio MCP</small></div>
-          <div class="connector"><i></i><span>persistent connection</span><i></i></div>
-          <div class="arch-row runtime"><span>Runtime</span><strong>FastCUA</strong><small>state · policy · approvals · interruption</small></div>
-          <div class="connector"><i></i><span>host protocol</span><i></i></div>
-          <div class="arch-row hosts"><span>Host adapters</span><strong>Native platform integration</strong><small>current release: Windows 11 x64</small></div>
-        </div>
-        <p class="arch-caption">运行时负责一致的控制语义；Host adapter 负责窗口、输入与平台 API。当前发布范围和未来架构边界被明确分开。</p>
-      </div>
-    </section>
-
-    <section class="section wrap boundaries">
-      <header class="section-head">
-        <p class="index">03 / BOUNDARIES</p>
-        <h2>它是什么，也诚实说明<br>它暂时不是什么。</h2>
-      </header>
-      <div class="boundary-grid">
-        <div><h3>FastCUA 是</h3><ul><li>开源、本地优先的 Computer Use 执行运行时</li><li>文本模型与视觉模型都可调用的 MCP 工具层</li><li>可暂停、可审批、可人工接管的控制平面</li><li>浏览器自动化之外的互补层</li></ul></div>
-        <div><h3>当前版本不是</h3><ul><li>完整的跨平台发布包</li><li>替代 DOM、CDP 或所有专用自动化工具</li><li>绕过 UAC、安全桌面或认证界面的方案</li><li>无需观察变化便能无限批处理的鼠标脚本</li></ul></div>
-      </div>
+    <section class="boundaries">
+      <header class="section-head"><span class="code" data-en="§ Boundaries" data-zh="§ 能力边界">§ Boundaries</span><h2 data-en="What it is—and what&lt;br&gt;the current release is not." data-zh="它是什么，也诚实说明&lt;br&gt;当前版本不是什么。">What it is—and what<br>the current release is not.</h2></header>
+      <div class="two-col"><article><span class="tag" data-en="FastCUA is" data-zh="FastCUA 是">FastCUA is</span><ul><li data-en="An open-source, local-first computer-use execution runtime" data-zh="开源、本地优先的 Computer Use 执行运行时">An open-source, local-first computer-use execution runtime</li><li data-en="An MCP tool layer for text-only and vision-capable models" data-zh="文本模型与视觉模型都可调用的 MCP 工具层">An MCP tool layer for text-only and vision-capable models</li><li data-en="A control plane with pause, approval, and human takeover" data-zh="可暂停、可审批、可人工接管的控制平面">A control plane with pause, approval, and human takeover</li></ul></article><article><span class="tag" data-en="The current release is not" data-zh="当前版本不是">The current release is not</span><ul><li data-en="A complete cross-platform release package" data-zh="完整的跨平台发布包">A complete cross-platform release package</li><li data-en="A replacement for DOM, CDP, or every specialized automation tool" data-zh="DOM、CDP 或所有专用自动化工具的替代品">A replacement for DOM, CDP, or every specialized automation tool</li><li data-en="A way around UAC, secure desktops, or authentication surfaces" data-zh="绕过 UAC、安全桌面或认证界面的方案">A way around UAC, secure desktops, or authentication surfaces</li></ul></article></div>
     </section>
 
     <section class="video-section">
-      <div class="wrap video-card">
-        <div class="video-copy"><p class="index">04 / REAL-WORLD DEMO</p><h2>真实画面，<br>等实测视频说话。</h2><p>这里不会用概念动画代替真实产品。B 站实测视频上线后，将展示从任务指令、界面观察到执行与人工接管的完整过程。</p><span class="coming"><i></i> 视频准备中</span></div>
-        <div class="video-placeholder" aria-label="实测视频即将上线"><span class="play">▶</span><p>BILIBILI TEST VIDEO</p><small>COMING SOON</small></div>
-      </div>
+      <div class="video-copy"><span class="code" data-en="§ Real-world demo" data-zh="§ 真实实测">§ Real-world demo</span><h2 data-en="Real footage.&lt;br&gt;No concept mockups." data-zh="真实画面，&lt;br&gt;不拿概念图代替。">Real footage.<br>No concept mockups.</h2><p data-en="The Bilibili field-test video will show the complete path from task instruction and interface observation to execution and human takeover." data-zh="B 站实测视频将展示从任务指令、界面观察到执行与人工接管的完整过程。">The Bilibili field-test video will show the complete path from task instruction and interface observation to execution and human takeover.</p><span class="pending"><i></i><span data-en="Video in preparation" data-zh="视频准备中">Video in preparation</span></span></div>
+      <div class="video-placeholder"><span>▶</span><p>BILIBILI TEST VIDEO</p><small>COMING SOON</small></div>
     </section>
 
-    <section class="section wrap" id="release">
-      <header class="section-head release-head"><div><p class="index">05 / RELEASE</p><h2>从当前版本开始。</h2></div><span class="version">v0.1.1</span></header>
-      <div class="install-grid">
-        <div><h3>安装</h3><p>当前安装器面向 Windows 11 x64，并提供最快的 Claude Code 接入路径。</p></div>
-        <div class="code-block"><code>irm https://raw.githubusercontent.com/Guojiz/FastCUA/main/install.ps1 | iex</code><button class="copy" type="button">复制</button></div>
-      </div>
-      <div class="release-actions"><a class="button solid" href="https://github.com/Guojiz/FastCUA/releases/tag/v0.1.1">查看发布页 ↗</a><a class="button" href="https://github.com/Guojiz/FastCUA/blob/main/docs/SELF_HOSTING.md">自托管文档 ↗</a></div>
+    <section id="release">
+      <header class="section-head"><span class="code" data-en="§ Release · v0.1.1" data-zh="§ 当前版本 · v0.1.1">§ Release · v0.1.1</span><h2 data-en="Start with the current release." data-zh="从当前版本开始。">Start with the current release.</h2><p class="section-note" data-en="The current installer targets Windows 11 x64 and provides the shortest ready-to-use path with Claude Code." data-zh="当前安装器面向 Windows 11 x64，并提供最快的 Claude Code 接入路径。">The current installer targets Windows 11 x64 and provides the shortest ready-to-use path with Claude Code.</p></header>
+      <div class="install"><div class="install-code"><code>irm https://raw.githubusercontent.com/Guojiz/FastCUA/main/install.ps1 | iex</code><button class="copy" type="button" data-en="Copy" data-zh="复制">Copy</button></div><div class="actions"><a class="btn primary" href="https://github.com/Guojiz/FastCUA/releases/tag/v0.1.1" data-en="Release page ↗" data-zh="发布页面 ↗">Release page ↗</a><a class="btn" href="https://github.com/Guojiz/FastCUA/blob/main/docs/SELF_HOSTING.md" data-en="Self-hosting ↗" data-zh="自托管文档 ↗">Self-hosting ↗</a></div></div>
     </section>
   </main>
 
-  <footer><a class="wordmark" href="#top"><span>F</span>FastCUA</a><p>Fast and reliable computer use for AI agents.</p><div><a href="https://github.com/Guojiz/FastCUA">GitHub</a><a href="https://github.com/Guojiz/FastCUA/blob/main/README_zh.md">中文文档</a><a href="https://github.com/Guojiz/FastCUA/blob/main/LICENSE">Apache-2.0</a></div></footer>
+  <footer><span>© 2026 FastCUA · Apache-2.0</span><a href="https://guojiz.github.io/" data-en="Main site ↗" data-zh="返回主站 ↗">Main site ↗</a><a href="https://github.com/Guojiz/FastCUA">GitHub ↗</a></footer>
   <script src="app.js"></script>
 </body>
 </html>
