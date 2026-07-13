@@ -2,7 +2,9 @@
 
 **Turn Windows GUIs into a fast, executable interface for AI agents.**
 
-[中文](README_zh.md) · [Self-hosting](docs/SELF_HOSTING.md)
+[Website](https://guojiz.github.io/FastCUA/) · [中文](README_zh.md) · [Self-hosting](docs/SELF_HOSTING.md)
+
+> **Bring your own agent.** FastCUA works with any stdio MCP-compatible agent. The installer only prepares Node.js and the verified FastCUA runtime—it does not install, select, or modify an AI client.
 
 FastCUA is an open-source, local-first Computer Use runtime for Windows. It combines accessibility-first navigation, optional screenshots, native keyboard and mouse input, multi-action execution, access policy, and visible human control in one resident service.
 
