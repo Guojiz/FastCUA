@@ -62,12 +62,12 @@ The Skill source directory is:
 The current agent must:
 
 1. Locate its own active Skill directory or Skill registry.
-2. Copy, link, or register the entire `computer-use` folder there.
-3. Preserve `SKILL.md` and any neighboring resources. Do not merely read the source file.
+2. Copy, link, or register the entire `computer-use` folder there without rewriting its contents.
+3. Preserve `SKILL.md` and every neighboring resource. Do not merely read the source file, and do not create a forwarding, wrapper, summary, or shortened `SKILL.md`.
 4. Reload or reindex Skills.
 5. Verify that this agent can discover and activate the `computer-use` Skill.
 
-Merely reading `SKILL.md` from the repository is not installation.
+Merely reading `SKILL.md` from the repository or creating a stub that points back to it is not installation. For filesystem-based Skill directories, compare the installed relative file list and SHA-256 hashes with the source. For a native Skill registry, verify that the active registration resolves to the complete folder.
 
 ### 3.2 Install the MCP server
 
