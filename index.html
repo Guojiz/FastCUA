@@ -11,6 +11,7 @@
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
   <link rel="stylesheet" href="style-2622617.css">
   <link rel="stylesheet" href="mindmap-fb857bd.css">
+  <link rel="stylesheet" href="clarity-8c8d1bf.css">
 </head>
 <body>
   <div class="frame" aria-hidden="true"><span class="crop tl"></span><span class="crop tr"></span><span class="crop bl"></span><span class="crop br"></span></div>
@@ -20,7 +21,7 @@
     <a class="brand" href="https://guojiz.github.io/" aria-label="Guojiz home"><span class="brand-mark">GZ</span><span class="brand-name">FastCUA</span></a>
     <div class="masthead-right">
       <a class="home-button" href="https://guojiz.github.io/" data-en="← Main site" data-zh="← 返回主站">← Main site</a>
-      <nav aria-label="Primary"><a href="#principles" data-en="Principles" data-zh="原则">Principles</a><a href="#architecture" data-en="Architecture" data-zh="架构">Architecture</a><a href="#release" data-en="Release" data-zh="版本">Release</a><a href="https://github.com/Guojiz/FastCUA">GitHub</a></nav>
+      <nav aria-label="Primary"><a href="#why" data-en="Why" data-zh="对比">Why</a><a href="#principles" data-en="Fast path" data-zh="快速路径">Fast path</a><a href="#control" data-en="Control" data-zh="接管">Control</a><a href="#release" data-en="Install" data-zh="安装">Install</a><a href="https://github.com/Guojiz/FastCUA">GitHub</a></nav>
       <button class="lang-toggle" type="button" aria-label="Switch language"><span class="lang-opt" data-lang="en">EN</span><span class="lang-sep">/</span><span class="lang-opt" data-lang="zh">中</span></button>
     </div>
   </header>
@@ -55,6 +56,20 @@
 
     <section class="runtime-line" aria-label="Runtime path"><span>Agent / MCP Client</span><i>→</i><span>FastCUA Runtime</span><i>→</i><span>Native Host Adapter</span><i>→</i><span>Computer</span></section>
 
+    <section id="why">
+      <header class="section-head"><span class="code" data-en="§ Why FastCUA" data-zh="§ 为什么是 FastCUA">§ Why FastCUA</span><h2 data-en="Use the right layer&lt;br&gt;for the right job." data-zh="在正确的场景，&lt;br&gt;使用正确的控制层。">Use the right layer<br>for the right job.</h2><p class="section-note" data-en="FastCUA does not replace browser automation. It covers the Windows layer around it: applications, system dialogs, browser chrome, and workflows that cross app boundaries." data-zh="FastCUA 不取代浏览器自动化，而是负责它周围的 Windows 层：应用窗口、系统对话框、浏览器外壳和跨应用工作流。">FastCUA does not replace browser automation. It covers the Windows layer around it: applications, system dialogs, browser chrome, and workflows that cross app boundaries.</p></header>
+      <div class="comparison-scroll"><table class="comparison">
+        <thead><tr><th></th><th data-en="Vision-first Computer Use" data-zh="视觉优先 Computer Use">Vision-first Computer Use</th><th data-en="Browser bridge / extension" data-zh="浏览器 Bridge / 扩展">Browser bridge / extension</th><th>FastCUA</th></tr></thead>
+        <tbody>
+          <tr><th data-en="Control scope" data-zh="控制范围">Control scope</th><td data-en="What appears in screenshots" data-zh="截图中可见的界面">What appears in screenshots</td><td data-en="Web pages inside the browser" data-zh="浏览器内部网页">Web pages inside the browser</td><td data-en="Desktop applications and browser windows" data-zh="桌面应用与浏览器窗口">Desktop applications and browser windows</td></tr>
+          <tr><th data-en="Primary navigation" data-zh="主要导航方式">Primary navigation</th><td data-en="Pixels and coordinates" data-zh="像素与坐标">Pixels and coordinates</td><td>DOM · CDP · Browser APIs</td><td data-en="UI Automation text; screenshots when needed" data-zh="UI Automation 文本；必要时截图">UI Automation text; screenshots when needed</td></tr>
+          <tr><th data-en="Model requirement" data-zh="模型要求">Model requirement</th><td data-en="Usually needs vision" data-zh="通常需要视觉模型">Usually needs vision</td><td data-en="Usually text is enough" data-zh="通常文本模型即可">Usually text is enough</td><td data-en="Text-only or vision-capable" data-zh="文本或视觉模型均可">Text-only or vision-capable</td></tr>
+          <tr><th data-en="Execution pattern" data-zh="执行方式">Execution pattern</th><td data-en="Often one action per loop" data-zh="常见为一轮一个动作">Often one action per loop</td><td data-en="Browser commands" data-zh="浏览器命令">Browser commands</td><td data-en="Multiple native actions per model turn" data-zh="一个模型回合执行多个原生动作">Multiple native actions per model turn</td></tr>
+          <tr><th data-en="Human takeover" data-zh="人工接管">Human takeover</th><td data-en="Varies" data-zh="取决于实现">Varies</td><td data-en="Usually limited to browser" data-zh="通常限于浏览器">Usually limited to browser</td><td data-en="Global pause, approval, interjection, and exit" data-zh="全局暂停、审批、插话与退出">Global pause, approval, interjection, and exit</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
     <section id="principles">
       <header class="section-head"><span class="code" data-en="§ Principles · 03" data-zh="§ 设计原则 · 03">§ Principles · 03</span><h2 data-en="Speed comes from execution,&lt;br&gt;not marketing numbers." data-zh="速度来自执行方式，&lt;br&gt;不是宣传数字。">Speed comes from execution,<br>not marketing numbers.</h2><p class="section-note" data-en="FastCUA shortens the round-trip between an agent and a computer. This page describes mechanisms already present in the code—no invented product interface." data-zh="FastCUA 缩短 Agent 与计算机之间的往返路径。页面只描述代码已经实现的机制，不展示虚构产品界面。">FastCUA shortens the round-trip between an agent and a computer. This page describes mechanisms already present in the code—no invented product interface.</p></header>
       <ol class="register principle-register">
@@ -62,6 +77,34 @@
         <li class="entry"><span class="coord">P-02</span><div class="entry-body"><span class="tag" data-en="Persist" data-zh="常驻">Persist</span><h3 data-en="One warm control plane" data-zh="一个温热的常驻控制平面">One warm control plane</h3><p data-en="Clients share a resident native host. Window identity, pointer state, approvals, pauses, and interruptions are not rebuilt for every individual action." data-zh="客户端共享常驻原生 Host。窗口身份、指针状态、审批、暂停与中断不会为每个动作重复初始化。">Clients share a resident native host. Window identity, pointer state, approvals, pauses, and interruptions are not rebuilt for every individual action.</p></div><span class="status">02</span></li>
         <li class="entry"><span class="coord">P-03</span><div class="entry-body"><span class="tag" data-en="Execute" data-zh="执行">Execute</span><h3 data-en="Many actions per model turn" data-zh="一次模型回合，多步执行">Many actions per model turn</h3><p data-en="Stable clicks, keys, text input, scrolling, and drags can run in sequence. Observe again when layout, focus, or modal state changes." data-zh="稳定的点击、按键、文本输入、滚动与拖拽可以顺序执行；布局、焦点或模态状态变化时，再回到观察。">Stable clicks, keys, text input, scrolling, and drags can run in sequence. Observe again when layout, focus, or modal state changes.</p></div><span class="status">03</span></li>
       </ol>
+    </section>
+
+    <section id="control" class="control-section">
+      <header class="section-head"><span class="code" data-en="§ You stay in control" data-zh="§ 你始终拥有控制权">§ You stay in control</span><h2 data-en="Visible when it matters.&lt;br&gt;Interruptible at any time." data-zh="关键时刻清晰可见，&lt;br&gt;任何时候都能接管。">Visible when it matters.<br>Interruptible at any time.</h2><p class="section-note" data-en="Safe mode is the default. Trusted applications can run directly; unknown applications require a decision. Full access is separate, visible, and reversible." data-zh="默认使用安全模式。白名单应用可以直接运行，未知应用需要用户决定；完全访问是独立、可见、可随时撤销的模式。">Safe mode is the default. Trusted applications can run directly; unknown applications require a decision. Full access is separate, visible, and reversible.</p></header>
+      <div class="control-layout">
+        <div class="state-grid">
+          <article><span class="state-dot active"></span><small data-en="Active" data-zh="正常运行">Active</small><h3 data-en="Compact island + screen border" data-zh="小型灵动岛 + 全屏彩边">Compact island + screen border</h3><p data-en="The AI is using the computer; the border remains click-through." data-zh="AI 正在使用电脑，彩边不会拦截鼠标操作。">The AI is using the computer; the border remains click-through.</p></article>
+          <article><span class="state-dot approval"></span><small data-en="Approval" data-zh="等待确认">Approval</small><h3 data-en="Allow once, trust, or deny" data-zh="仅允许一次、信任或拒绝">Allow once, trust, or deny</h3><p data-en="Unknown applications cannot launch silently in safe mode." data-zh="安全模式下，未知应用不会静默启动。">Unknown applications cannot launch silently in safe mode.</p></article>
+          <article><span class="state-dot full"></span><small data-en="Full access" data-zh="完全访问">Full access</small><h3 data-en="Visible and reversible" data-zh="可见并可随时撤销">Visible and reversible</h3><p data-en="Per-app prompts are disabled only while this mode remains on." data-zh="只有在该模式开启期间，才不会逐个应用询问。">Per-app prompts are disabled only while this mode remains on.</p></article>
+          <article><span class="state-dot paused"></span><small data-en="Paused" data-zh="已暂停">Paused</small><h3 data-en="New actions are blocked" data-zh="立即拦截新操作">New actions are blocked</h3><p data-en="Resume in one step or take over the mouse directly." data-zh="可以一键恢复，也可以直接接管鼠标。">Resume in one step or take over the mouse directly.</p></article>
+        </div>
+        <div class="key-panel"><span class="tag" data-en="Four global controls" data-zh="四个全局控制键">Four global controls</span>
+          <div class="key-list"><div><kbd>F7</kbd><span data-en="Pause + open control center" data-zh="暂停并打开控制台">Pause + open control center</span></div><div><kbd>F8</kbd><span data-en="Pause / resume" data-zh="暂停 / 恢复">Pause / resume</span></div><div><kbd>F9</kbd><span data-en="Expand island + interject" data-zh="展开灵动岛并插话">Expand island + interject</span></div><div><kbd>F10</kbd><span data-en="Exit FastCUA completely" data-zh="完全退出 FastCUA">Exit FastCUA completely</span></div></div>
+          <p data-en="Global keys remain available while the agent owns the pointer. Clicking the island also pauses and opens the control center." data-zh="Agent 正在控制光标时，全局快捷键仍然可用；单击灵动岛也会暂停并打开控制台。">Global keys remain available while the agent owns the pointer. Clicking the island also pauses and opens the control center.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="capability-section">
+      <header class="section-head"><span class="code" data-en="§ More than a mouse script" data-zh="§ 不只是鼠标脚本">§ More than a mouse script</span><h2 data-en="A coherent control plane,&lt;br&gt;not a pile of clicks." data-zh="是一套完整控制平面，&lt;br&gt;不是一堆盲目点击。">A coherent control plane,<br>not a pile of clicks.</h2></header>
+      <div class="capability-grid">
+        <article><span>01</span><h3 data-en="Window-aware coordinates" data-zh="窗口感知坐标">Window-aware coordinates</h3><p data-en="Actions stay attached to the target window and account for DPI scaling." data-zh="动作绑定目标窗口，并处理 DPI 缩放。">Actions stay attached to the target window and account for DPI scaling.</p></article>
+        <article><span>02</span><h3 data-en="Text and pixels are independent" data-zh="文本与像素相互独立">Text and pixels are independent</h3><p data-en="Request interface text, a screenshot, or both according to the next decision." data-zh="根据下一步决策，请求文本、截图，或同时请求两者。">Request interface text, a screenshot, or both according to the next decision.</p></article>
+        <article><span>03</span><h3 data-en="Native input" data-zh="原生输入">Native input</h3><p data-en="Clicks, key chords, Unicode text, scrolling, drag, and value replacement." data-zh="点击、组合键、Unicode 文本、滚动、拖拽和值替换。">Clicks, key chords, Unicode text, scrolling, drag, and value replacement.</p></article>
+        <article><span>04</span><h3 data-en="Two-way interruption" data-zh="人机双向中断">Two-way interruption</h3><p data-en="A person can pause or redirect; approval waiting also pauses the machine." data-zh="用户可以暂停或改变方向；等待审批时机器也会自动暂停。">A person can pause or redirect; approval waiting also pauses the machine.</p></article>
+        <article><span>05</span><h3 data-en="Exact trust rules" data-zh="精确白名单">Exact trust rules</h3><p data-en="Canonical paths and executable names are matched exactly—never unsafe substrings." data-zh="按规范化路径或文件名精确匹配，不使用危险的子字符串。">Canonical paths and executable names are matched exactly—never unsafe substrings.</p></article>
+        <article><span>06</span><h3 data-en="Local first" data-zh="本地优先">Local first</h3><p data-en="MCP uses a named pipe, the console binds to 127.0.0.1, and policy stays on the PC." data-zh="MCP 使用命名管道，控制台绑定 127.0.0.1，策略保留在本机。">MCP uses a named pipe, the console binds to 127.0.0.1, and policy stays on the PC.</p></article>
+      </div>
     </section>
 
     <section id="architecture">
