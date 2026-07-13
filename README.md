@@ -4,7 +4,7 @@
 
 [Website](https://guojiz.github.io/FastCUA/) · [中文](README_zh.md) · [Self-hosting](docs/SELF_HOSTING.md)
 
-> **Bring your own agent.** FastCUA works with any stdio MCP-compatible agent. The installer only prepares Node.js and the verified FastCUA runtime—it does not install, select, or modify an AI client.
+> **Bring your own agent, and install FastCUA into that agent itself by default.** The Windows installer prepares Node.js and the verified FastCUA runtime. The agent that receives the setup prompt must then install both the complete `computer-use` Skill and the `sky-computer-use` MCP server into its own active configuration. Missing either part means installation failed.
 
 FastCUA is an open-source, local-first Computer Use runtime for Windows. It combines accessibility-first navigation, optional screenshots, native keyboard and mouse input, multi-action execution, access policy, and visible human control in one resident service.
 
@@ -64,15 +64,23 @@ On Windows 11, open PowerShell as a regular user:
 irm https://raw.githubusercontent.com/Guojiz/FastCUA/main/install.ps1 | iex
 ```
 
-The installer prepares Node.js and the verified FastCUA runtime. It does **not** install, select, or modify an AI client. After installation, give the generated `FastCUA Agent Setup.txt` prompt on your desktop to any MCP-compatible agent. The agent will read the bundled skill, configure its own stdio MCP connection, and verify FastCUA.
+The installer prepares Node.js, the FastCUA runtime, and the SHA-256-verified native host. It also creates `FastCUA Agent Setup.txt` on the desktop.
 
-Then give your agent a real task:
+Give that prompt to **the agent that will actually use FastCUA**. By default, the target is the receiving agent itself. It must:
+
+1. Copy, link, or register the entire `skills\computer-use` folder in its own active Skill system. Merely reading `SKILL.md` is not enough.
+2. Add the `sky-computer-use` stdio MCP server to its own MCP configuration.
+3. Reload both parts, verify that `computer-use` is discoverable, and successfully call `list_windows` through MCP.
+
+If either the Skill or MCP is missing, installation must be reported as failed. The agent must also report the Skill destination and the MCP configuration file it changed.
+
+Then give the agent a real task:
 
 > Open Paint and draw a house with the sun and grass.
 
 The local control center is available at `http://127.0.0.1:8420`. Control endpoints listen on loopback only.
 
-No specific agent is required. Any client that supports stdio MCP can connect through `server.mjs`.
+FastCUA is agent-neutral, but the complete deployment flow requires a client that supports both local Skills and stdio MCP.
 
 ## You stay in control
 
@@ -110,7 +118,7 @@ Clicking the island also pauses and opens the control center for mouse takeover.
 
 ```mermaid
 flowchart LR
-  A["MCP-compatible AI agent"] -->|"MCP"| B["FastCUA control plane"]
+  A["Agent with the computer-use Skill installed"] -->|"MCP"| B["FastCUA control plane"]
   B --> C["Resident Windows native host"]
   C --> D["UI Automation tree"]
   C --> E["Optional window screenshot"]
@@ -125,16 +133,20 @@ FastCUA currently targets Windows 11 x64. Secure Desktop, UAC elevation surfaces
 
 ## Self-host
 
-To audit, modify, or build the native component yourself:
+Self-hosting is not complete after building and starting the daemon. The complete flow is:
+
+1. Clone and build the native host.
+2. Install the complete `computer-use` Skill into the current agent itself by default.
+3. Install `sky-computer-use` MCP into the same agent.
+4. Reload and verify both the Skill and `list_windows`.
 
 ```powershell
 git clone https://github.com/Guojiz/FastCUA.git
 cd FastCUA
 .\native-host\build.ps1
-node daemon.mjs
 ```
 
-See the [self-hosting guide](docs/SELF_HOSTING.md) for MCP configuration, verification, protocol details, and troubleshooting.
+During normal use, the MCP server starts the daemon automatically. You do not need to run `node daemon.mjs` manually. See the [self-hosting guide](docs/SELF_HOSTING.md) for exact paths, configuration templates, and acceptance checks.
 
 ## FAQ
 
@@ -142,7 +154,9 @@ See the [self-hosting guide](docs/SELF_HOSTING.md) for MCP configuration, verifi
 
 **Can an unknown application launch silently?** Not in safe mode. Choose allow once, trust, or deny.
 
-**Is Claude Code required?** No. Any client that supports stdio MCP can connect through `server.mjs`.
+**Is Claude Code required?** No. Any agent that supports both local Skills and stdio MCP can install the complete FastCUA stack.
+
+**Can I configure only MCP?** No. Standard FastCUA installation requires the same agent to install both the `computer-use` Skill and `sky-computer-use` MCP, then pass both verification checks.
 
 **Does FastCUA eliminate screenshots?** No. It makes them optional. Accessibility text is preferred when it can express the interface accurately; screenshots remain available where visual understanding is necessary.
 
@@ -153,6 +167,8 @@ See the [self-hosting guide](docs/SELF_HOSTING.md) for MCP configuration, verifi
 ```powershell
 & "$env:LOCALAPPDATA\FastCUA\app\uninstall.ps1"
 ```
+
+The uninstaller removes the FastCUA runtime but intentionally leaves AI client configuration unchanged. Remove the `computer-use` Skill and `sky-computer-use` MCP entry from every agent where FastCUA was installed.
 
 ## License
 
