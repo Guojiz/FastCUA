@@ -5,14 +5,13 @@
 param(
   [string]$InstallRoot = (Join-Path $env:LOCALAPPDATA 'FastCUA'),
   [string]$SourcePath = '',
-  [string]$NativeHostPath = '',
-  [switch]$SkipClaudeInstall
+  [string]$NativeHostPath = ''
 )
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $repo = 'https://github.com/Guojiz/FastCUA'
-$Version = 'v0.1.1'
+$Version = 'v0.1.2'
 $appDir = Join-Path $InstallRoot 'app'
 $tempDir = Join-Path ([System.IO.Path]::GetTempPath()) ('fastcua-install-' + [guid]::NewGuid().ToString('N'))
 
@@ -41,7 +40,6 @@ try {
   if ($env:OS -ne 'Windows_NT') { throw 'FastCUA currently supports Windows only.' }
   Refresh-ProcessPath
   $node = Require-Command 'node.exe' 'OpenJS.NodeJS.LTS'
-  $claude = if ($SkipClaudeInstall) { (Get-Command claude.exe -ErrorAction SilentlyContinue).Source } else { Require-Command 'claude.exe' 'Anthropic.ClaudeCode' }
 
   New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
   if ($SourcePath) {
@@ -97,24 +95,26 @@ try {
   $shortcutContents = "[InternetShortcut]`r`nURL=http://127.0.0.1:8420`r`nIconFile=$env:SystemRoot\System32\shell32.dll`r`nIconIndex=14`r`n"
   [System.IO.File]::WriteAllText($consoleShortcut, $shortcutContents, [System.Text.UTF8Encoding]::new($false))
 
-  $skillTarget = Join-Path $HOME '.claude\skills\computer-use'
-  New-Item -ItemType Directory -Path $skillTarget -Force | Out-Null
-  Copy-Item -LiteralPath (Join-Path $appDir 'skills\computer-use\SKILL.md') -Destination (Join-Path $skillTarget 'SKILL.md') -Force
+  $agentPromptPath = Join-Path $desktop 'FastCUA Agent Setup.txt'
+  $agentPrompt = @"
+Set up FastCUA for this AI agent on Windows. Do not install or switch AI clients.
 
-  if ($claude) {
-    $savedErrorPreference = $ErrorActionPreference
-    $ErrorActionPreference = 'SilentlyContinue'
-    & $claude mcp remove 'sky-computer-use' --scope user *> $null
-    $ErrorActionPreference = $savedErrorPreference
-    & $claude mcp add --scope user --transport stdio 'sky-computer-use' -- $node (Join-Path $appDir 'server.mjs')
-    if ($LASTEXITCODE -ne 0) { throw 'Claude Code MCP registration failed.' }
-  }
+1. Read the Computer Use skill at:
+   $appDir\skills\computer-use\SKILL.md
+2. Add a stdio MCP server named sky-computer-use to your own MCP configuration:
+   command: $node
+   args: ["$appDir\server.mjs"]
+3. Start or reconnect the MCP server.
+4. Verify it by calling list_windows, then report which MCP configuration file you changed.
+
+Keep FastCUA local. Do not expose its pipe or http://127.0.0.1:8420 beyond this computer.
+"@
+  [System.IO.File]::WriteAllText($agentPromptPath, $agentPrompt.Trim() + "`r`n", [System.Text.UTF8Encoding]::new($false))
 
   Write-Host ''
   Write-Host 'FastCUA is ready.' -ForegroundColor Green
   Write-Host "Desktop shortcut created: $consoleShortcut"
-  Write-Host 'Open a new PowerShell window, configure your model provider, then run: claude'
-  Write-Host 'Inside Claude Code, start with: /computer-use'
+  Write-Host "Give this prompt to your MCP-compatible agent: $agentPromptPath"
 } finally {
   if (Test-Path $tempDir) { Remove-Item -LiteralPath $tempDir -Recurse -Force -ErrorAction SilentlyContinue }
 }

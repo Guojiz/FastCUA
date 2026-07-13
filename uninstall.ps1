@@ -5,18 +5,6 @@
 param([string]$InstallRoot = (Join-Path $env:LOCALAPPDATA 'FastCUA'))
 
 $ErrorActionPreference = 'Stop'
-$claude = Get-Command claude.exe -ErrorAction SilentlyContinue
-if ($claude) {
-  $savedErrorPreference = $ErrorActionPreference
-  $ErrorActionPreference = 'SilentlyContinue'
-  & $claude.Source mcp remove 'sky-computer-use' --scope user *> $null
-  $ErrorActionPreference = $savedErrorPreference
-}
-
-$skill = Join-Path $HOME '.claude\skills\computer-use'
-if ((Test-Path $skill) -and $PSCmdlet.ShouldProcess($skill, 'Remove FastCUA skill')) {
-  Remove-Item -LiteralPath $skill -Recurse -Force
-}
 if ((Test-Path $InstallRoot) -and $PSCmdlet.ShouldProcess($InstallRoot, 'Remove FastCUA application files')) {
   Remove-Item -LiteralPath $InstallRoot -Recurse -Force
 }
@@ -25,4 +13,8 @@ $consoleShortcut = if ($desktop) { Join-Path $desktop 'FastCUA Console.url' } el
 if ($consoleShortcut -and (Test-Path $consoleShortcut) -and $PSCmdlet.ShouldProcess($consoleShortcut, 'Remove FastCUA Console shortcut')) {
   Remove-Item -LiteralPath $consoleShortcut -Force
 }
-Write-Host 'FastCUA was removed. Claude Code itself was left installed.' -ForegroundColor Green
+$agentPrompt = if ($desktop) { Join-Path $desktop 'FastCUA Agent Setup.txt' } else { $null }
+if ($agentPrompt -and (Test-Path $agentPrompt) -and $PSCmdlet.ShouldProcess($agentPrompt, 'Remove FastCUA agent setup prompt')) {
+  Remove-Item -LiteralPath $agentPrompt -Force
+}
+Write-Host 'FastCUA was removed. AI client configuration was left unchanged.' -ForegroundColor Green

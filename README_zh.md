@@ -62,13 +62,15 @@ await sky.drag({ window, from_x: 120, from_y: 320, to_x: 420, to_y: 180 });
 irm https://raw.githubusercontent.com/Guojiz/FastCUA/main/install.ps1 | iex
 ```
 
-安装器会准备 Node.js、Claude Code、FastCUA 原生组件、MCP 配置和 Computer Use Skill。完成后直接对 Claude Code 说：
+安装器只准备 Node.js 和经过校验的 FastCUA 运行时，**不会**安装、选择或修改任何 AI 客户端。安装完成后，把桌面生成的 `FastCUA Agent Setup.txt` 提示词交给任意支持 MCP 的 Agent；Agent 会读取项目内 Skill、写入自己的 stdio MCP 配置并验证 FastCUA。
+
+然后给 Agent 一个真实任务：
 
 > 打开画图，画一座带太阳和草地的房子。
 
 控制台位于 `http://127.0.0.1:8420`，所有控制接口仅监听本机回环地址。
 
-运行时本身不强制依赖 Claude Code。任何支持 stdio MCP 的客户端都可以通过 `server.mjs` 连接；当前安装器只是优先提供与 Claude Code 配合的最短可用路径。
+FastCUA 不限定 Agent。任何支持 stdio MCP 的客户端都可以通过 `server.mjs` 连接。
 
 ## 你始终拥有控制权
 

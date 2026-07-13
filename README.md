@@ -62,13 +62,15 @@ On Windows 11, open PowerShell as a regular user:
 irm https://raw.githubusercontent.com/Guojiz/FastCUA/main/install.ps1 | iex
 ```
 
-The installer prepares Node.js, Claude Code, the FastCUA native component, MCP configuration, and the Computer Use skill. Then ask Claude Code:
+The installer prepares Node.js and the verified FastCUA runtime. It does **not** install, select, or modify an AI client. After installation, give the generated `FastCUA Agent Setup.txt` prompt on your desktop to any MCP-compatible agent. The agent will read the bundled skill, configure its own stdio MCP connection, and verify FastCUA.
+
+Then give your agent a real task:
 
 > Open Paint and draw a house with the sun and grass.
 
 The local control center is available at `http://127.0.0.1:8420`. Control endpoints listen on loopback only.
 
-Claude Code is not required by the runtime. Any client that supports stdio MCP can connect through `server.mjs`; the bundled installer currently provides the shortest ready-to-use path with Claude Code.
+No specific agent is required. Any client that supports stdio MCP can connect through `server.mjs`.
 
 ## You stay in control
 
