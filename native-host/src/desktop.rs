@@ -848,10 +848,10 @@ fn draw_square_grid_overlay(rgb: &mut [u8], w: i32, h: i32, cells: &[GridCell]) 
         draw_vline(rgb, w, h, cell.right - 1, cell.top, cell.bottom, thick, lr, lg, lb, la);
     }
     for cell in cells {
-        // Number scale: small — about 18–22% of cell, capped so it never dominates.
-        let scale = (side as f64 * 0.07).round() as i32;
-        let scale = scale.clamp(2, 6);
-        // Multi-digit: draw centered sequence.
+        // Small digits dead-center on the cell (same as click target cx,cy).
+        // Keep ~8–12% of side so the midpoint stays obvious and UI is not covered.
+        let scale = ((side as f64) * 0.045).round() as i32;
+        let scale = scale.clamp(1, 3);
         let digits: Vec<u8> = cell
             .id
             .chars()
@@ -860,9 +860,11 @@ fn draw_square_grid_overlay(rgb: &mut [u8], w: i32, h: i32, cells: &[GridCell]) 
         if digits.is_empty() {
             continue;
         }
-        let digit_w = 5 * scale + scale; // glyph + gap
-        let total_w = digits.len() as i32 * digit_w - scale;
-        let mut x = cell.cx - total_w / 2 + (5 * scale) / 2;
+        // Glyph is 5*scale wide; 1*scale gap between digits. Whole block centered on (cx,cy).
+        let glyph_w = 5 * scale;
+        let gap = scale;
+        let total_w = digits.len() as i32 * glyph_w + (digits.len() as i32 - 1).max(0) * gap;
+        let mut x = cell.cx - total_w / 2 + glyph_w / 2;
         for d in digits {
             draw_digit(
                 rgb,
@@ -870,12 +872,12 @@ fn draw_square_grid_overlay(rgb: &mut [u8], w: i32, h: i32, cells: &[GridCell]) 
                 h,
                 d,
                 x,
-                cell.cy,
+                cell.cy, // vertical center of cell = click midpoint
                 scale,
-                (255, 255, 255), // soft white fill
-                (0, 0, 0),       // dark outline
+                (255, 255, 255),
+                (0, 0, 0),
             );
-            x += digit_w;
+            x += glyph_w + gap;
         }
     }
 }
