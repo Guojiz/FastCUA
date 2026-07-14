@@ -57,22 +57,31 @@ When desktop work for this turn is done, call MCP **`close` once**. That ends th
 
 1. Always read `state.viewport` (or screenshot size) **before** coordinate clicks.
 2. Prefer `element_index` from the accessibility tree when labels exist.
-3. If the tree is empty/useless (many Electron apps): use **letter grid refine** (Apple Voice Control style):
+3. If the tree is empty/useless (many Electron apps): use **Apple Voice Control–style square number grid**:
 
 ```js
 globalThis.state = await sky.get_window_state({ window: targetWindow, include_text: false });
 globalThis.targetWindow = state.window;
 const vp = state.viewport; // { width, height, ... }
-let grid = sky.grid({ width: vp.width, height: vp.height, cols: 3, rows: 3 });
-// look at screenshot → choose cell id, e.g. "B"
-grid = sky.grid_refine(grid, "B", 3, 3); // subdivide that cell
-// repeat until the cell is small enough, then:
-await sky.click_cell({ window: targetWindow, grid, cell: "E", screenshotId: state.screenshots[0].id });
-// or: await sky.click({ window: targetWindow, x: cell.cx, y: cell.cy });
+
+// Initial: SQUARE cells, prefer 3 rows (fallback 2). Numbers 1..N. Does NOT click.
+let grid = sky.grid({ width: vp.width, height: vp.height }); // mode square by default
+// Look at screenshot → SELECT a number only (e.g. "4"). No click yet.
+
+// Refine: 3×3 SQUARES only inside that cell — not the whole window again.
+grid = sky.grid_refine(grid, "4");
+// SELECT again (new 1..9). Repeat refine until small enough.
+
+// Explicit click only when ready (like saying "click" in Voice Control):
+await sky.click_cell({ window: targetWindow, grid, cell: "5", screenshotId: state.screenshots[0].id });
 ```
 
-4. Optional: pass `x,y` both in `0..1` as fractions of the viewport.
-5. Out-of-bounds coordinates return an error that includes viewport size — fix coords, do not thrash.
+Rules:
+- Cells are **squares**, not stretched rectangles matching the window aspect ratio.
+- `grid_refine` returns **only the chosen cell’s interior** subdivided; parent viewport size stays for absolute x,y.
+- **Select ≠ click.** Never call `click_cell` until the target cell is precise enough.
+- Optional: pass `x,y` both in `0..1` as fractions of the viewport.
+- Out-of-bounds coordinates error with viewport size — recompute, do not thrash.
 
 ### Text fields (read → decide → write)
 

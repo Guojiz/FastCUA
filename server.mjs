@@ -100,56 +100,165 @@ class DaemonClient {
 }
 const daemon = new DaemonClient();
 
-// Letter grid for coordinate targeting (Apple Voice Control style refine).
-// Region is in screenshot/window pixel space (same as click x,y).
-const GRID_LABELS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-function buildGrid(input = {}) {
-  const width = Math.max(1, Math.round(Number(input.width) || 0));
-  const height = Math.max(1, Math.round(Number(input.height) || 0));
-  const cols = Math.min(10, Math.max(2, Math.round(Number(input.cols) || 3)));
-  const rows = Math.min(10, Math.max(2, Math.round(Number(input.rows) || 3)));
-  const left = Math.max(0, Math.round(Number(input.left) || 0));
-  const top = Math.max(0, Math.round(Number(input.top) || 0));
-  const right = Math.min(width, Math.round(input.right != null ? Number(input.right) : width));
-  const bottom = Math.min(height, Math.round(input.bottom != null ? Number(input.bottom) : height));
-  if (right <= left || bottom <= top) throw new Error("invalid grid region");
-  const cellW = (right - left) / cols;
-  const cellH = (bottom - top) / rows;
-  const cells = [];
-  let n = 0;
+// Apple Voice Control–style number grid (screenshot/window pixel space = click x,y).
+// - Cells are SQUARES (not viewport-aspect rectangles).
+// - First pass: pack squares in 3 rows (fallback 2 rows if width is tight).
+// - Refine: always 3×3 squares inside the chosen cell only (not the whole window).
+// - Selecting a cell does NOT click; only sky.click_cell / sky.click commits input.
+function pushCells(cells, { originLeft, originTop, cols, rows, side, startId = 1 }) {
+  let n = startId;
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
-      const L = left + c * cellW;
-      const T = top + r * cellH;
-      const R = left + (c + 1) * cellW;
-      const B = top + (r + 1) * cellH;
-      const id = n < GRID_LABELS.length ? GRID_LABELS[n] : `${r}${c}`;
-      n++;
+      const L = originLeft + c * side;
+      const T = originTop + r * side;
+      const R = L + side;
+      const B = T + side;
       cells.push({
-        id,
+        id: String(n++),
         row: r,
         col: c,
         left: Math.round(L),
         top: Math.round(T),
         right: Math.round(R),
         bottom: Math.round(B),
-        cx: Math.round((L + R) / 2),
-        cy: Math.round((T + B) / 2),
-        width: Math.round(R - L),
-        height: Math.round(B - T),
+        cx: Math.round(L + side / 2),
+        cy: Math.round(T + side / 2),
+        width: Math.round(side),
+        height: Math.round(side),
+        square: true,
       });
     }
   }
+  return n;
+}
+
+/** Fill a rectangle with an equal rows×cols of squares using side = min(rw,rh)/n for refine, or row-based packing for initial. */
+function buildGrid(input = {}) {
+  const width = Math.max(1, Math.round(Number(input.width) || 0));
+  const height = Math.max(1, Math.round(Number(input.height) || 0));
+  const left = Math.max(0, Math.round(Number(input.left) || 0));
+  const top = Math.max(0, Math.round(Number(input.top) || 0));
+  const right = Math.min(width, Math.round(input.right != null ? Number(input.right) : width));
+  const bottom = Math.min(height, Math.round(input.bottom != null ? Number(input.bottom) : height));
+  if (right <= left || bottom <= top) throw new Error("invalid grid region");
+
+  const rw = right - left;
+  const rh = bottom - top;
+  const mode = input.mode === "rect" ? "rect" : "square"; // default square (Apple-like)
+  const refine = input.refine === true || input.phase === "refine";
+  const cells = [];
+
+  if (mode === "rect") {
+    // Legacy: stretch cols×rows to fill region (non-square). Prefer square.
+    const cols = Math.min(10, Math.max(2, Math.round(Number(input.cols) || 3)));
+    const rows = Math.min(10, Math.max(2, Math.round(Number(input.rows) || 3)));
+    const cellW = rw / cols;
+    const cellH = rh / rows;
+    let n = 1;
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const L = left + c * cellW;
+        const T = top + r * cellH;
+        const R = left + (c + 1) * cellW;
+        const B = top + (r + 1) * cellH;
+        cells.push({
+          id: String(n++),
+          row: r,
+          col: c,
+          left: Math.round(L),
+          top: Math.round(T),
+          right: Math.round(R),
+          bottom: Math.round(B),
+          cx: Math.round((L + R) / 2),
+          cy: Math.round((T + B) / 2),
+          width: Math.round(R - L),
+          height: Math.round(B - T),
+          square: false,
+        });
+      }
+    }
+    return {
+      width, height, cols, rows, mode: "rect", phase: refine ? "refine" : "initial",
+      region: { left, top, right, bottom },
+      cells,
+      select_only: true,
+      howto: "SELECT a cell id (no click yet). Refine with sky.grid_refine(grid, id). Click only via sky.click_cell when precise enough.",
+    };
+  }
+
+  // --- square mode (default) ---
+  let cols;
+  let rows;
+  let side;
+  let originLeft = left;
+  let originTop = top;
+
+  if (refine) {
+    // Always 3×3 squares inside the selected cell (cell is already a square).
+    rows = 3;
+    cols = 3;
+    side = Math.min(rw, rh) / 3;
+    // Center the 3×3 block if region is slightly non-square due to rounding.
+    originLeft = left + (rw - side * 3) / 2;
+    originTop = top + (rh - side * 3) / 2;
+  } else if (input.cols != null || input.rows != null) {
+    // Explicit dims: still force square cells using the limiting side.
+    rows = Math.min(10, Math.max(1, Math.round(Number(input.rows) || 3)));
+    cols = Math.min(10, Math.max(1, Math.round(Number(input.cols) || 3)));
+    side = Math.min(rw / cols, rh / rows);
+    originLeft = left + (rw - side * cols) / 2;
+    originTop = top + (rh - side * rows) / 2;
+  } else {
+    // Initial pass (Apple-like): prefer 3 rows of squares; if width too tight, 2 rows.
+    rows = 3;
+    side = rh / 3;
+    cols = Math.floor(rw / side + 1e-6);
+    if (cols < 2) {
+      rows = 2;
+      side = rh / 2;
+      cols = Math.floor(rw / side + 1e-6);
+    }
+    if (cols < 1) {
+      rows = 1;
+      cols = 1;
+      side = Math.min(rw, rh);
+    }
+    // Center leftover horizontal/vertical margins (letterbox), do not stretch cells.
+    originLeft = left + (rw - side * cols) / 2;
+    originTop = top + (rh - side * rows) / 2;
+  }
+
+  pushCells(cells, { originLeft, originTop, cols, rows, side, startId: 1 });
+
   return {
-    width, height, cols, rows,
+    width,
+    height,
+    cols,
+    rows,
+    side: Math.round(side),
+    mode: "square",
+    phase: refine ? "refine" : "initial",
     region: { left, top, right, bottom },
+    pack: {
+      originLeft: Math.round(originLeft),
+      originTop: Math.round(originTop),
+      gridWidth: Math.round(side * cols),
+      gridHeight: Math.round(side * rows),
+    },
     cells,
-    howto: "Pick the cell id containing the target, then sky.grid({..., left, top, right, bottom, cols, rows}) to refine, or sky.click({ window, x: cell.cx, y: cell.cy }).",
+    select_only: true,
+    howto: [
+      "Cells are SQUARES numbered 1..N (Apple Voice Control style).",
+      "SELECT a number only — this does NOT click.",
+      "Refine: sky.grid_refine(grid, id) → new 3×3 squares ONLY inside that cell (not the whole window).",
+      "Repeat refine until small enough, then sky.click_cell({ window, grid, cell: id }) to click the center.",
+    ].join(" "),
   };
 }
 function cellById(grid, id) {
-  const cell = (grid?.cells || []).find((c) => String(c.id).toUpperCase() === String(id).toUpperCase());
-  if (!cell) throw new Error("unknown grid cell id: " + id);
+  const want = String(id).trim();
+  const cell = (grid?.cells || []).find((c) => String(c.id) === want || String(c.id).toUpperCase() === want.toUpperCase());
+  if (!cell) throw new Error("unknown grid cell id: " + id + " (valid: " + (grid?.cells || []).map((c) => c.id).join(",") + ")");
   return cell;
 }
 function viewportFromState(state) {
@@ -188,21 +297,25 @@ const sky = {
   viewport: viewportFromState,
   grid: buildGrid,
   grid_cell: cellById,
-  /** Refine: return a sub-grid of one cell (Apple-style drill-down). */
-  grid_refine: (grid, cellId, cols = 3, rows = 3) => {
+  /**
+   * Select a cell and return a NEW 3×3 square grid covering only that cell.
+   * Does NOT click. Parent viewport width/height stay for absolute coordinates.
+   */
+  grid_refine: (grid, cellId) => {
     const cell = cellById(grid, cellId);
+    // Always 3×3 squares inside the chosen cell (infinite drill-down).
     return buildGrid({
       width: grid.width,
       height: grid.height,
-      cols,
-      rows,
       left: cell.left,
       top: cell.top,
       right: cell.right,
       bottom: cell.bottom,
+      refine: true,
+      mode: "square",
     });
   },
-  /** Click the center of a grid cell. */
+  /** Explicit click at cell center — only call when the user/agent intends to click. */
   click_cell: async (input) => {
     const { window, grid, cell: cellId, mouse_button, click_count, screenshotId } = input || {};
     const cell = cellById(grid, cellId);
@@ -347,7 +460,7 @@ const TOOLS = [
   { name: "perform_secondary_action", desc: "Raise the target window. This release supports only action='Raise' on the root element_index 0.", inputSchema: { type: "object", properties: { window: W, element_index: { type: "number", enum: [0] }, action: { type: "string", enum: ["Raise"] } }, required: ["window", "element_index", "action"] } },
   { name: "activate_window", desc: "Bring an open window to the foreground. Input methods activate their target window automatically; use this only as an escape hatch.", inputSchema: { type: "object", properties: { window: W }, required: ["window"] } },
   { name: "close", desc: "Finish the current computer-use turn and close this MCP client connection. Call once after the task is verified. The shared FastCUA daemon and helper remain available to other clients.", inputSchema: { type: "object", properties: {} } },
-  { name: "js", desc: "Persistent JS REPL with sky + nodeRepl. Includes sky.grid / sky.grid_refine / sky.click_cell for letter-grid targeting when UIA fails. Example: const st=await sky.get_window_state({window,include_text:false}); const g=sky.grid(st.viewport); await sky.click_cell({window, grid:g, cell:'B'});", inputSchema: { type: "object", properties: { code: { type: "string", description: "JavaScript to execute. Use await for sky calls. Assign cross-cell state to globalThis." } }, required: ["code"] } },
+  { name: "js", desc: "Persistent JS REPL with sky + nodeRepl. Apple-style square number grid: sky.grid(viewport) → select id (no click) → sky.grid_refine(grid,id) 3×3 inside cell only → sky.click_cell when ready. Example: let g=sky.grid(st.viewport); g=sky.grid_refine(g,'4'); await sky.click_cell({window,grid:g,cell:'5'});", inputSchema: { type: "object", properties: { code: { type: "string", description: "JavaScript to execute. Use await for sky calls. Assign cross-cell state to globalThis." } }, required: ["code"] } },
 ];
 
 function win(a) { return a && typeof a === "object" ? { app: a.app, id: a.id } : a; }
@@ -382,7 +495,9 @@ function stateToContent(state) {
         `  viewport: ${v.width}x${v.height}  origin=top_left  space=${v.coordinate_space || "window_screenshot_pixels"}`,
         `  screen origin: (${v.screenLeft ?? v.originX},${v.screenTop ?? v.originY})`,
         "  click({x,y}) uses these pixel units (or x,y in 0..1 as fractions).",
-        "  When UIA indexes are empty/unusable: sky.grid({width,height,cols:3,rows:3}) → pick cell → sky.grid_refine / sky.click_cell.",
+        "  When UIA is unusable: sky.grid(viewport) → SQUARE number cells (3 rows, or 2 if tight).",
+        "  SELECT number only (no click). sky.grid_refine(grid, id) → 3×3 squares INSIDE that cell only.",
+        "  Repeat refine; only then sky.click_cell({window, grid, cell:id}) to click the center.",
       ].join("\n"),
     });
   }

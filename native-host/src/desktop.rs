@@ -376,7 +376,7 @@ pub fn get_window_state(
             "origin": "top_left",
             "click_xy": "x,y are relative to window top-left; same units as screenshots[0].width/height",
             "normalized": "optional: pass x,y in 0..1 to mean fractions of width/height",
-            "grid_hint": "When UIA indexes are unusable, subdivide the viewport into a letter grid (see sky.grid in js) and click cell centers"
+            "grid_hint": "When UIA is unusable: sky.grid(viewport) packs SQUARE number cells (3 rows, else 2). SELECT a number (no click). sky.grid_refine(grid,id) → 3x3 squares INSIDE that cell only. sky.click_cell only when ready."
         },
         "cacheDiagnostics": {
             "accessibilityRevision": 1,

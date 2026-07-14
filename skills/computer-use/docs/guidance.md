@@ -279,7 +279,11 @@ globalThis.targetWindow = state.window;
 - Prefer input injection / coordinates when UIA indexes are flaky; for stable labeled controls prefer `element_index` from the latest tree. Property name is `element_index`, not `element`.
 - **Coordinate space:** `click`/`drag`/`scroll` x,y are **window screenshot pixels** (origin top-left), identical to `get_window_state().viewport` / `screenshots[0].{width,height}`. Never use uncalibrated guesses.
 - **Resolution first:** after every relevant `get_window_state`, record `viewport.width/height` (or screenshot size) before any pixel click.
-- **Letter grid (when UIA fails):** `sky.grid({width,height,cols:3,rows:3})` → pick cell id from the screenshot → `sky.grid_refine(grid, id, 3, 3)` repeatedly → `sky.click_cell({window, grid, cell})` at the cell center. Same idea as Apple Voice Control grid zoom.
+- **Square number grid (when UIA fails, Apple Voice Control model):**
+  - `sky.grid(viewport)` packs **squares** (prefer 3 rows; 2 rows if width is tight). Cells numbered `1..N`.
+  - **Select a number only** — does not click.
+  - `sky.grid_refine(grid, id)` always builds a **3×3 of squares inside that cell only** (not the whole window). Repeat indefinitely for precision.
+  - `sky.click_cell` only when ready (explicit click). Select ≠ click.
 - **Normalized coords:** both `x` and `y` in `0..1` are treated as fractions of the viewport.
 - Out-of-bounds clicks error with viewport bounds; recompute instead of retrying the same bad point.
 - Do not use `set_value` for normal text editing in this release (limited to classic Win32 Edit). Prefer click → read → decide → `type_text`.
