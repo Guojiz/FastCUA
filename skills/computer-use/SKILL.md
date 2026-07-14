@@ -96,7 +96,7 @@ User-side controls return tool errors with a stable prefix. Branch on the tag fi
 | Tag | Meaning | Agent behavior |
 |-----|---------|----------------|
 | `[control_plane:paused]` | **BLOCK** only (F8 / Pause). Not a task. | Stop desktop tools. No retry, no poll, no invented recovery. Wait for resume or a new **chat** message. |
-| `[control_plane:interjection]` | **INSTRUCTION** (F9 text). Only control-plane path that is a new task. | Stop other work. Follow **only** the quoted user instruction. Stay paused until user resumes or chats again. |
+| `[control_plane:interjection]` | **INSTRUCTION** (F9 text, one-shot). Control plane auto-resumes. | Abort previous plan. Follow **only** this instruction. You **may** call Computer Use tools again immediately. |
 | `[control_plane:stopped]` | Turn stop (Stop task). Not a new task. | End Computer Use for this turn. No further tools. Brief note that the user stopped. |
 | `[control_plane:shutdown]` | FastCUA exited (F10). Final for this turn. | Stop permanently. Do **not** restart FastCUA, reconnect, reinstall, or continue desktop automation. |
 | `[control_plane:awaiting_approval]` | Human approval pending. **BLOCK**. | Do not retry in a loop. Wait. |

@@ -244,21 +244,15 @@ function Send-Interjection {
   $text = $inputBox.Text.Trim()
   if (-not $text) { return }
   try {
-    # Ensure paused, then deliver interjection text as the agent-facing instruction.
-    # /api/interject is atomic (interrupt + pause); stopAll remains a safe follow-up.
-    if ($script:controlState -ne "paused_by_user") {
-      Post-Action "pause" | Out-Null
-    }
+    # Typing phase may already be paused. On send: deliver instruction + AUTO-RESUME.
+    # Do NOT call stopAll/pause after interject — that would leave the agent blocked.
     Invoke-RestMethod -Uri "$base/api/interject" -Method Post -ContentType "application/json" -Body (@{ text = $text } | ConvertTo-Json -Compress) -TimeoutSec 3 | Out-Null
-    Post-Action "stopAll" | Out-Null
     $inputBox.Text = ""
-    $script:controlState = "paused_by_user"
-    # After send: stay compact unless pause UI needs the expanded resume controls.
-    # Refresh-Island will re-open compact-or-expanded for paused state next tick.
+    $script:controlState = "running"
     Collapse-Island
     try {
-      $status.Text = T "paused"
-      $action.Text = "Interjected and paused"
+      $status.Text = T "using"
+      $action.Text = "Interjected — control resumed"
     } catch {}
   } catch {
     try {

@@ -7,7 +7,7 @@ IMPORTANT: do NOT dig through source code or control Windows apps through unrela
 - If a tool error starts with `[control_plane:…]`, treat it as authoritative human control-plane state. **Stop desktop tools** unless the tag is `interjection` (then follow only that instruction). Never fall back to PowerShell `SendKeys` or other automation.
 - **Tag map (prompt engineering — branch on the prefix):**
   - `[control_plane:paused]` — **BLOCK**. Not a task. No retry/poll/recovery. Wait for resume or chat.
-  - `[control_plane:interjection]` — **INSTRUCTION**. Only control-plane path that is a new task. Follow the quoted text only; stay paused until resume/chat.
+  - `[control_plane:interjection]` — **INSTRUCTION** (one-shot). Follow the quoted text only; control auto-resumes — continue tools immediately. Do not wait for F8.
   - `[control_plane:stopped]` — end Computer Use this turn; report that the user stopped.
   - `[control_plane:shutdown]` — final stop. **Do not restart** FastCUA, reconnect, reinstall, or re-open Computer Use yourself.
   - `[control_plane:awaiting_approval]` — **BLOCK**. Wait; do not retry in a loop.

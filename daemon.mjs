@@ -64,7 +64,9 @@ const SHUTDOWN_MSG = "[control_plane:shutdown] FastCUA was shut down by the user
 const APPROVAL_BLOCK_MSG = "[control_plane:awaiting_approval] Computer use is waiting for a human approval decision. This is a BLOCK, not a task instruction. Do not retry the blocked call in a loop.";
 function interjectMsg(text) {
   const safe = String(text).replace(/"/g, "'").slice(0, 2000);
-  return `[control_plane:interjection] User instruction: "${safe}". Stop other desktop work and follow ONLY this instruction. Control is already paused; do not resume desktop actions until the user resumes or sends a further chat message.`;
+  // One-shot instruction: agent should continue tools after this message is delivered.
+  // Do NOT tell the agent to wait for resume — interject auto-resumes the control plane.
+  return `[control_plane:interjection] User instruction: "${safe}". Abort the previous plan and follow ONLY this instruction. You may call Computer Use tools again immediately to carry it out.`;
 }
 const B = (t) => String(t).replace(/[^A-Za-z0-9._-]/g, "_");
 const recentLogs = [];
@@ -309,13 +311,9 @@ function clearClientInterrupt(c) {
   c.interrupted = false;
   c.interruptMessage = null;
   c.interjection = null;
+  c.interruptOneShot = false;
 }
 
-/**
- * Interrupt every connected client and reject in-flight helper work.
- * When pause=true (interjection path), also enter paused_by_user so the
- * control plane blocks further desktop actions until the user resumes.
- */
 /**
  * Abort in-flight helper work without latching interrupt markers on clients.
  * Used by plain Pause: agent should not receive an "instruction" prompt—only a block
@@ -334,6 +332,14 @@ function abortInFlightWithoutAgentPrompt(reason = PAUSE_BLOCK_MSG) {
   try { if (p) killProcessTree(p.pid); } catch {}
 }
 
+/**
+ * Interrupt every connected client and reject in-flight helper work.
+ *
+ * Tool-message contract (what the agent should receive):
+ * - pause=true, no interjection: no instruction latch; only isUserPaused block
+ * - interjection set: latch ONE instruction message; do NOT stay paused (auto-resume)
+ * - stop without interjection: ESC_MSG latch and stay interrupted until next turn/close
+ */
 function applyStopAll({ pause = false } = {}) {
   const interjection = pendingInterjection;
   // Only interjection text is a real agent-facing instruction. Plain stop uses ESC_MSG.
@@ -343,27 +349,47 @@ function applyStopAll({ pause = false } = {}) {
     c.interjection = interjection;
     c.interrupted = true;
     c.interruptMessage = msg;
+    // Mark one-shot so interjection is delivered once then control continues.
+    c.interruptOneShot = Boolean(interjection);
     const f = interruptFilePath(c.sessionId, c.turnId);
     try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, ""); } catch {}
   }
   resetBinary(msg);
   currentAction = null;
-  if (pause) {
+  if (interjection) {
+    // Interject = redirect instruction. Cancel in-flight, deliver text, AUTO-RESUME.
+    isUserPaused = false;
+    emitEvent("interjection", { client: "user", text: String(interjection).slice(0, 200) });
+    emitEvent("resumed", { client: "user", reason: "interjection_auto_resume" });
+  } else if (pause) {
     isUserPaused = true;
-    emitEvent("paused", { client: "user", reason: interjection ? "interjection" : "stop" });
+    emitEvent("paused", { client: "user", reason: "stop" });
   }
-  emitEvent("interrupt", { client: "stop", paused: Boolean(pause) });
+  emitEvent("interrupt", {
+    client: "stop",
+    paused: Boolean(pause) && !interjection,
+    interjection: Boolean(interjection),
+  });
   log(
     "action: stopAll — interrupted",
     clients.size,
     "clients",
-    pause ? "(paused_by_user)" : "(running latch only)",
+    interjection ? "(interject + auto-resume)" : pause ? "(paused_by_user)" : "(running latch only)",
     interjection ? `interjection="${String(interjection).slice(0, 60)}"` : ""
   );
 }
 
 function makeClient(socket) {
-  const c = { sessionId: crypto.randomUUID(), turnId: 1, buf: "", socket, interjection: null, interrupted: false, interruptMessage: null };
+  const c = {
+    sessionId: crypto.randomUUID(),
+    turnId: 1,
+    buf: "",
+    socket,
+    interjection: null,
+    interrupted: false,
+    interruptMessage: null,
+    interruptOneShot: false,
+  };
   clients.set(socket, c);
   if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
   socket.setEncoding("utf8");
@@ -408,14 +434,22 @@ async function handleClientReq(c, req) {
     closeClientAfterReply(c, id, { result: { ok: true } });
     return;
   }
-  if (isUserPaused) { reply(c, id, { error: PAUSE_BLOCK_MSG }); return; }
-  if (pendingApprovals.size) { reply(c, id, { error: APPROVAL_BLOCK_MSG }); return; }
+  // Order matters for agent messaging:
+  // 1) Deliver latched interrupt FIRST (interjection one-shot or stop).
+  //    Interjection must not be masked by isUserPaused (user was paused while typing).
+  // 2) Then plain pause / approval blocks (no instruction payload).
   if (latchInterrupt(c)) {
     const msg = c.interruptMessage || ESC_MSG;
-    emitEvent("interrupt", { client: c.sessionId.slice(0,8) });
+    const oneShot = Boolean(c.interruptOneShot);
+    emitEvent("interrupt", { client: c.sessionId.slice(0, 8), oneShot });
     reply(c, id, { error: msg });
+    // Interjection is one-shot: clear latch so subsequent tools can run under auto-resume.
+    // Stop/ESC stays latched so further Computer Use tools keep failing this turn.
+    if (oneShot) clearClientInterrupt(c);
     return;
   }
+  if (isUserPaused) { reply(c, id, { error: PAUSE_BLOCK_MSG }); return; }
+  if (pendingApprovals.size) { reply(c, id, { error: APPROVAL_BLOCK_MSG }); return; }
   const meta = { session_id: c.sessionId, turn_id: String(c.turnId) };
   const app = params?.window?.app || params?.app;
   if (app && isApproved(app)) meta[APPROVED_KEY] = app;
@@ -596,13 +630,15 @@ const httpServer = http.createServer((req, res) => {
           const parsed = JSON.parse(body);
           const text = typeof parsed.text === "string" ? parsed.text.trim().slice(0, 2000) : "";
           if (!text) throw new Error("interjection text is required");
-          // Atomic: queue text, interrupt in-flight work, AND enter paused_by_user so
-          // the island/console show Pause state and further desktop actions require Resume.
-          // Overlay still may call stopAll afterward; applyStopAll is idempotent.
+          // Atomic: cancel in-flight work, latch ONE interjection instruction for the agent,
+          // and AUTO-RESUME (isUserPaused=false). Do not leave control paused after send —
+          // pause is only for the typing phase before Enter.
           pendingInterjection = text;
-          applyStopAll({ pause: true });
-          log("interjection applied + paused:", text.slice(0, 80));
-          res.writeHead(200, { "Content-Type": "application/json" }); res.end(JSON.stringify({ ok: true, paused: true }));
+          applyStopAll({ pause: false });
+          isUserPaused = false;
+          log("interjection applied + auto-resumed:", text.slice(0, 80));
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: true, paused: false, resumed: true, interjection: true }));
         } catch (error) {
           res.writeHead(400, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error: error.message }));
         }
