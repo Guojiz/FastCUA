@@ -20,7 +20,7 @@
     <div class="hero"><div class="hero-main"><div class="eyebrow" data-i18n="eyebrow">A persistent desktop control plane</div><h2 data-i18n="heroTitle">One warm helper. Every action stays in rhythm.</h2><p data-i18n="heroBody">FastCUA keeps a single native host alive for faster, safer desktop automation across every connected client.</p><div class="hero-kpis"><div><b>1×</b><span data-i18n="kpiWarm">shared warm helper</span></div><div><b>NDJSON</b><span data-i18n="kpiProtocol">transparent local protocol</span></div><div><b>Stop</b><span data-i18n="kpiStop">instant turn recovery</span></div></div></div><aside class="hero-main status-card"><div><h3 data-i18n="statusTitle">System pulse</h3><div id="big-status" class="big-status">—</div><div id="status-copy" class="muted" data-i18n="statusWaiting">Waiting for daemon</div><div id="approval-callout" class="approval-callout" role="alert" hidden><strong id="pending-app">—</strong><div class="actions"><button id="approve-once" class="button primary" data-i18n="allowOnce">Allow once</button><button id="approve-trust" class="button" data-i18n="trustApp">Trust app</button><button id="approve-deny" class="button danger" data-i18n="deny">Deny</button></div></div></div><div class="status-row"><span data-i18n="portLabel">Local endpoint</span><strong id="endpoint">127.0.0.1:8420</strong></div></aside></div>
     <div class="grid"><article class="card metric"><div class="label" data-i18n="metricClients">Connected clients</div><div id="s-clients" class="value">—</div><div class="hint" data-i18n="metricClientsHint">shared session count</div></article><article class="card metric"><div class="label" data-i18n="metricHelper">Native helper</div><div id="s-binary" class="value">—</div><div class="hint" data-i18n="metricHelperHint">one cursor, one state</div></article><article class="card metric"><div class="label" data-i18n="metricApproved">Approved apps</div><div id="s-approved" class="value">—</div><div class="hint" data-i18n="metricApprovedHint">cached across clients</div></article><article class="card metric"><div class="label" data-i18n="metricUptime">Uptime</div><div id="s-uptime" class="value">—</div><div class="hint" data-i18n="metricUptimeHint">daemon lifetime</div></article></div>
     <div class="two"><section class="card"><div class="card-head"><div><h3 data-i18n="activityTitle">Action timeline</h3><p data-i18n="activityBody">Recent requests across connected clients.</p></div><button id="clear-events" class="icon-btn" data-i18n="refresh">Refresh</button></div><div id="activity" class="activity"></div></section><section class="card"><div class="card-head"><div><h3 data-i18n="approvedTitle">Approval memory</h3><p data-i18n="approvedBody">Apps approved for the shared helper.</p></div><button id="act-clear" class="icon-btn" data-i18n="clear">Clear</button></div><div id="approved" class="chips"></div></section></div>
-    <section class="card" style="margin-top:16px"><div class="card-head"><div><h3 data-i18n="runtimeTitle">Runtime & safety</h3><p data-i18n="runtimeBody">Local-first settings. Changes are saved immediately; port and helper changes need a daemon restart.</p></div><div class="actions"><button id="act-pause" class="button danger" data-i18n="pause">Pause control</button><button id="act-resume" class="button primary" data-i18n="resume" hidden>Resume control</button><button id="act-killbin" class="button danger" data-i18n="killHelper">Stop helper</button><button id="act-shutdown" class="button danger" data-i18n="shutdown">Exit FastCUA</button><button id="act-restart" class="button" data-i18n="restart">Restart daemon</button></div></div><div class="form-grid"><div class="field"><label data-i18n="costartLabel">Start policy</label><div id="costart" class="segment"><button data-v="claude" data-i18n="costartClaude">On demand</button><button data-v="login" data-i18n="costartLogin">At sign-in</button><button data-v="manual" data-i18n="costartManual">Manual</button></div><div id="costart-desc" class="help"></div></div><div class="field"><label data-i18n="approvalLabel">Approval policy</label><div id="approval" class="segment"><button data-v="whitelist" data-i18n="approvalWhitelist">Whitelist only</button><button data-v="prompt" data-i18n="approvalPrompt">Ask for unknown apps</button><button data-v="full" data-i18n="approvalFull">Full access</button></div><div class="help" data-i18n="approvalHelp">Whitelist mode is the safest default. Prompt mode expands the island only for unknown apps.</div></div><div class="field"><label for="idle" data-i18n="idleLabel">Idle shutdown (minutes)</label><input id="idle" type="number" min="0" max="120"><div class="help" data-i18n="idleHelp">Use 0 to keep the daemon alive.</div></div><div class="field"><label for="port" data-i18n="portLabel">HTTP port</label><input id="port" type="number" min="1024" max="65535"><div class="help" data-i18n="portHelp">Restart daemon after changing this value.</div></div><div class="field full"><label for="cuabin" data-i18n="helperLabel">Native helper path</label><input id="cuabin" type="text" spellcheck="false"><div class="help" data-i18n="helperHelp">Leave empty to auto-discover. CUA_BIN overrides this field.</div></div><div class="field"><label class="toggle"><input id="overlay-en" type="checkbox"><span data-i18n="overlayLabel">Enable FastCUA status overlay</span></label><div class="help" data-i18n="overlayHelp">Shows a compact status island and a click-through screen-edge border.</div></div><div class="field"><label for="overlay-title" data-i18n="overlayTitleLabel">Overlay title</label><input id="overlay-title" type="text"></div><div class="field full"><label for="whitelist" data-i18n="whitelistLabel">Whitelist</label><textarea id="whitelist" spellcheck="false"></textarea><div class="help" data-i18n="whitelistHelp">One exact executable name or absolute path per line.</div></div></div></section>
+    <section class="card" style="margin-top:16px"><div class="card-head"><div><h3 data-i18n="runtimeTitle">Runtime & safety</h3><p data-i18n="runtimeBody">Local-first settings. Changes are saved immediately; port and helper changes need a daemon restart.</p></div><div class="actions"><button id="act-pause" class="button danger" data-i18n="pause">Pause control</button><button id="act-resume" class="button primary" data-i18n="resume" hidden>Resume control</button><button id="act-killbin" class="button danger" data-i18n="killHelper">Stop helper</button><button id="act-shutdown" class="button danger" data-i18n="shutdown">Exit FastCUA</button><button id="act-restart" class="button" data-i18n="restart">Restart daemon</button></div></div><div class="form-grid"><div class="field"><label data-i18n="costartLabel">Start policy</label><div id="costart" class="segment"><button data-v="claude" data-i18n="costartClaude">On demand</button><button data-v="login" data-i18n="costartLogin">At sign-in</button><button data-v="manual" data-i18n="costartManual">Manual</button></div><div id="costart-desc" class="help"></div></div><div class="field"><label data-i18n="approvalLabel">Approval policy</label><div id="approval" class="segment"><button data-v="safe" data-i18n="approvalSafe">Safe access</button><button data-v="full" data-i18n="approvalFull">Full access</button></div><div class="help" data-i18n="approvalHelp">Whitelist mode is the safest default. Prompt mode expands the island only for unknown apps.</div></div><div class="field"><label for="idle" data-i18n="idleLabel">Idle shutdown (minutes)</label><input id="idle" type="number" min="0" max="120"><div class="help" data-i18n="idleHelp">Use 0 to keep the daemon alive.</div></div><div class="field"><label for="port" data-i18n="portLabel">HTTP port</label><input id="port" type="number" min="1024" max="65535"><div class="help" data-i18n="portHelp">Restart daemon after changing this value.</div></div><div class="field full"><label for="cuabin" data-i18n="helperLabel">Native helper path</label><input id="cuabin" type="text" spellcheck="false"><div class="help" data-i18n="helperHelp">Leave empty to auto-discover. CUA_BIN overrides this field.</div></div><div class="field"><label class="toggle"><input id="overlay-en" type="checkbox"><span data-i18n="overlayLabel">Enable FastCUA status overlay</span></label><div class="help" data-i18n="overlayHelp">Shows a compact status island and a click-through screen-edge border.</div></div><div class="field"><label for="overlay-title" data-i18n="overlayTitleLabel">Overlay title</label><input id="overlay-title" type="text"></div><div class="field full"><label for="whitelist" data-i18n="whitelistLabel">Whitelist</label><textarea id="whitelist" spellcheck="false"></textarea><div class="help" data-i18n="whitelistHelp">One exact executable name or absolute path per line.</div></div></div></section>
     <div class="savebar"><button id="save" class="button primary" data-i18n="save">Save settings</button><span id="saved" class="saved" data-i18n="saved">Saved</span><span class="spacer"></span><span class="muted" data-i18n="localOnly">Runs locally on your Windows desktop</span></div>
   </section>
   <section id="deploy" class="view"><div class="hero-main deploy-hero"><div class="eyebrow" data-i18n="deployEyebrow">Repeatable self-hosting</div><h2 data-i18n="deployTitle">From clone to first desktop action in four clear steps.</h2><p data-i18n="deployBody">A local daemon, a compatible native helper, and one MCP entry point. No cloud control plane required.</p></div><div class="deploy-grid"><article class="card step"><div class="step-no">01 · PREREQUISITES</div><h3 data-i18n="step1Title">Prepare Windows</h3><p data-i18n="step1Body">Install Node.js 18+ and place a compatible helper on the machine.</p></article><article class="card step"><div class="step-no">02 · INSTALL</div><h3 data-i18n="step2Title">Clone and configure</h3><p data-i18n="step2Body">Set the helper path in config.json or use CUA_BIN for a machine-local override.</p></article><article class="card step"><div class="step-no">03 · RUN</div><h3 data-i18n="step3Title">Start the control plane</h3><p data-i18n="step3Body">Run the daemon, then verify the local health endpoint before connecting a client.</p></article></div><div class="two"><section class="card"><div class="card-head"><div><h3 data-i18n="quickStartTitle">Quick start</h3><p data-i18n="quickStartBody">Designed for copy, paste, verify.</p></div></div><pre class="code"><button class="copy" data-copy="clone" data-i18n="copy">Copy</button><code id="clone">git clone https://github.com/Guojiz/FastCUA.git
@@ -35,13 +35,336 @@ node daemon.mjs</code></pre><pre class="code" style="margin-top:10px"><button cl
   }
 }</code></pre><p class="deploy-note" data-i18n="deployNote">For the no-display native host, keep the host binary local and set overlayEnabled to false. See the self-hosting guide for verification and safety notes.</p></section></div></section>
 </main>
+
 <script>
-const accessButtons=document.querySelectorAll('#approval button');
-accessButtons[0].dataset.v='safe'; accessButtons[0].dataset.i18n='approvalSafe'; accessButtons[0].textContent='Safe access';
-accessButtons[1].remove();
-const I18N={zh:{brandSub:'桌面自动化控制平面',connecting:'连接中',online:'本地 daemon 已连接',offline:'daemon 未运行',navConsole:'控制中心',navDeploy:'自部署',eyebrow:'常驻桌面控制平面',heroTitle:'一个热启动 helper，让每一步桌面操作保持节奏。',heroBody:'FastCUA 让同一个原生 host 持续服务全部客户端，更快、更稳地完成桌面自动化。',kpiWarm:'共享热启动 helper',kpiProtocol:'透明本地协议',kpiStop:'即时交还回合',statusTitle:'系统脉搏',statusWaiting:'正在等待 daemon',statusLive:'准备接受桌面操作',portLabel:'本地端点',metricClients:'连接客户端',metricClientsHint:'共享会话数量',metricHelper:'原生 Helper',metricHelperHint:'一个光标，一份状态',metricApproved:'已审批应用',metricApprovedHint:'跨客户端复用',metricUptime:'运行时长',metricUptimeHint:'daemon 生命周期',activityTitle:'动作时间线',activityBody:'所有已连接客户端的最近请求。',app…3134 tokens truncated…erlay-lang').value,cuaBinPath:$('cuabin').value.trim()});$('saved').classList.add('show');setTimeout(()=>$('saved').classList.remove('show'),1500);applyLanguage();refresh()}
-async function control(action,token){await api('/api/action',{action,token});await refresh()}
-document.querySelectorAll('.nav button').forEach(button=>button.onclick=()=>{document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('active',b===button));document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active',v.id===button.dataset.view))});$('locale').onclick=()=>{lang=lang==='zh'?'en':'zh';localStorage.setItem('fastcua-lang',lang);applyLanguage();refresh()};$('save').onclick=()=>save().catch(error=>alert(error.message));$('act-pause').onclick=()=>control('pause').catch(error=>alert(error.message));$('act-resume').onclick=()=>control('resume').catch(error=>alert(error.message));$('approve-once').onclick=()=>pendingApproval&&control('allowOnce',pendingApproval.token).catch(error=>alert(error.message));$('approve-trust').onclick=()=>pendingApproval&&control('allowAndWhitelist',pendingApproval.token).catch(error=>alert(error.message));$('approve-deny').onclick=()=>pendingApproval&&control('denyApproval',pendingApproval.token).catch(error=>alert(error.message));$('act-shutdown').onclick=()=>api('/api/action',{action:'shutdown'}).catch(()=>{});$('act-restart').onclick=()=>api('/api/action',{action:'restart'}).catch(()=>{});$('act-killbin').onclick=()=>control('killBinary').catch(error=>alert(error.message));$('act-clear').onclick=()=>control('clearApprovals').catch(error=>alert(error.message));$('clear-events').onclick=refresh;document.querySelectorAll('.copy').forEach(button=>button.onclick=async()=>{try{await navigator.clipboard.writeText($(button.dataset.copy).textContent);const before=button.textContent;button.textContent=t('copied');setTimeout(()=>button.textContent=before,1200)}catch{}});load().then(refresh).catch(refresh);setInterval(refresh,1500);
+const I18N = {
+  zh: {
+    brandSub: '桌面自动化控制平面', connecting: '连接中', online: '本地 daemon 已连接', offline: 'daemon 未运行',
+    navConsole: '控制中心', navDeploy: '自部署',
+    eyebrow: '常驻桌面控制平面',
+    heroTitle: '一个热启动 helper，让每一步桌面操作保持节奏。',
+    heroBody: 'FastCUA 让同一个原生 host 持续服务全部客户端，更快、更稳地完成桌面自动化。',
+    kpiWarm: '共享热启动 helper', kpiProtocol: '透明本地协议', kpiStop: '即时交还回合',
+    statusTitle: '系统脉搏', statusWaiting: '正在等待 daemon', statusLive: '准备接受桌面操作',
+    statusPaused: '已由用户暂停', statusApproval: '等待审批',
+    portLabel: '本地端点',
+    metricClients: '连接客户端', metricClientsHint: '共享会话数量',
+    metricHelper: '原生 Helper', metricHelperHint: '一个光标，一份状态',
+    metricApproved: '已审批应用', metricApprovedHint: '跨客户端复用',
+    metricUptime: '运行时长', metricUptimeHint: 'daemon 生命周期',
+    activityTitle: '动作时间线', activityBody: '所有已连接客户端的最近请求。',
+    approvedTitle: '审批记忆', approvedBody: '共享 helper 已放行的应用。',
+    refresh: '刷新', clear: '清空',
+    runtimeTitle: '运行参数与安全边界',
+    runtimeBody: '设置仅存于本机。端口与 helper 路径修改后需重启 daemon。',
+    pause: '暂停控制', resume: '恢复控制', killHelper: '停止 helper', shutdown: '退出 FastCUA', restart: '重启 daemon',
+    allowOnce: '允许一次', trustApp: '信任应用', deny: '拒绝',
+    costartLabel: '启动策略', costartClaude: '按需启动', costartLogin: '登录时启动', costartManual: '手动启动',
+    costartDesc: { claude: '由 MCP 客户端首次请求时拉起。', login: 'Windows 登录后常驻运行。', manual: '仅在你主动启动 daemon 时运行。' },
+    approvalLabel: '审批策略', approvalSafe: '安全模式', approvalFull: '完全访问',
+    approvalHelp: '安全模式：未知应用需审批。完全访问：不弹审批（高风险）。',
+    idleLabel: '空闲退出（分钟）', idleHelp: '设为 0 可保持 daemon 常驻。',
+    portHelp: '修改后重启 daemon 生效。',
+    helperLabel: '原生 helper 路径', helperHelp: '留空将自动发现；CUA_BIN 环境变量优先。',
+    overlayLabel: '启用 FastCUA 状态浮窗', overlayHelp: '使用无 Display Overlay 的 native host 时建议关闭。',
+    overlayTitleLabel: '浮窗标题',
+    whitelistLabel: '白名单', whitelistHelp: '每行一个可执行文件名或绝对路径。',
+    save: '保存设置', saved: '已保存', localOnly: '仅在你的 Windows 桌面本地运行',
+    deployEyebrow: '可复现的自部署',
+    deployTitle: '四个清晰步骤，从克隆到第一次桌面操作。',
+    deployBody: '一个本地 daemon、一个兼容的 native helper、一个 MCP 入口。不需要云端控制平面。',
+    step1Title: '准备 Windows', step1Body: '安装 Node.js 18+，并在机器上准备兼容的 helper。',
+    step2Title: '克隆并配置', step2Body: '在 config.json 中配置 helper 路径，或以 CUA_BIN 覆盖。',
+    step3Title: '启动控制平面', step3Body: '启动 daemon，在连接客户端前先验证本地健康端点。',
+    quickStartTitle: '快速启动', quickStartBody: '复制、粘贴、验证。',
+    mcpTitle: '连接 MCP 客户端', mcpBody: '将客户端指向 stdio 薄层服务，它会复用共享 daemon。',
+    copy: '复制', copied: '已复制',
+    deployNote: '使用无 Display Overlay 的 native host 时，请将二进制保留在本机，并把 overlayEnabled 设为 false。验证与安全说明见自部署指南。',
+    emptyActivity: '等待下一次桌面操作', emptyApproved: '还没有审批记录',
+    helperLive: '原生 helper 在线', helperIdle: '等待第一条请求',
+    unavailable: '无法连接', tryAgain: '请启动 daemon 后重试',
+  },
+  en: {
+    brandSub: 'Desktop automation control plane', connecting: 'Connecting', online: 'Local daemon connected', offline: 'Daemon offline',
+    navConsole: 'Control center', navDeploy: 'Self-host',
+    eyebrow: 'A persistent desktop control plane',
+    heroTitle: 'One warm helper. Every desktop action stays in rhythm.',
+    heroBody: 'FastCUA keeps a single native host alive so every connected client can automate the desktop with less setup and more continuity.',
+    kpiWarm: 'shared warm helper', kpiProtocol: 'transparent local protocol', kpiStop: 'instant turn recovery',
+    statusTitle: 'System pulse', statusWaiting: 'Waiting for daemon', statusLive: 'Ready for desktop actions',
+    statusPaused: 'Paused by user', statusApproval: 'Awaiting approval',
+    portLabel: 'Local endpoint',
+    metricClients: 'Connected clients', metricClientsHint: 'shared session count',
+    metricHelper: 'Native helper', metricHelperHint: 'one cursor, one state',
+    metricApproved: 'Approved apps', metricApprovedHint: 'cached across clients',
+    metricUptime: 'Uptime', metricUptimeHint: 'daemon lifetime',
+    activityTitle: 'Action timeline', activityBody: 'Recent requests across connected clients.',
+    approvedTitle: 'Approval memory', approvedBody: 'Apps approved for the shared helper.',
+    refresh: 'Refresh', clear: 'Clear',
+    runtimeTitle: 'Runtime & safety',
+    runtimeBody: 'Settings stay local. Port and helper path changes need a daemon restart.',
+    pause: 'Pause control', resume: 'Resume control', killHelper: 'Stop helper', shutdown: 'Exit FastCUA', restart: 'Restart daemon',
+    allowOnce: 'Allow once', trustApp: 'Trust app', deny: 'Deny',
+    costartLabel: 'Start policy', costartClaude: 'On demand', costartLogin: 'At sign-in', costartManual: 'Manual',
+    costartDesc: { claude: 'Starts on the first MCP request.', login: 'Stays available after Windows sign-in.', manual: 'Runs only when you start the daemon.' },
+    approvalLabel: 'Approval policy', approvalSafe: 'Safe access', approvalFull: 'Full access',
+    approvalHelp: 'Safe: unknown apps need approval. Full: no prompts (high risk).',
+    idleLabel: 'Idle shutdown (minutes)', idleHelp: 'Use 0 to keep the daemon alive.',
+    portHelp: 'Restart the daemon after changing this value.',
+    helperLabel: 'Native helper path', helperHelp: 'Leave empty to auto-discover; CUA_BIN takes precedence.',
+    overlayLabel: 'Enable FastCUA status overlay', overlayHelp: 'Disable when using the native no-display host.',
+    overlayTitleLabel: 'Overlay title',
+    whitelistLabel: 'Whitelist', whitelistHelp: 'One executable name or absolute path per line.',
+    save: 'Save settings', saved: 'Saved', localOnly: 'Runs locally on your Windows desktop',
+    deployEyebrow: 'Repeatable self-hosting',
+    deployTitle: 'From clone to first desktop action in four clear steps.',
+    deployBody: 'A local daemon, a compatible native helper, and one MCP entry point. No cloud control plane required.',
+    step1Title: 'Prepare Windows', step1Body: 'Install Node.js 18+ and place a compatible helper on the machine.',
+    step2Title: 'Clone and configure', step2Body: 'Set the helper path in config.json or use CUA_BIN for a local override.',
+    step3Title: 'Start the control plane', step3Body: 'Run the daemon, then verify its local health endpoint before connecting a client.',
+    quickStartTitle: 'Quick start', quickStartBody: 'Built for copy, paste, verify.',
+    mcpTitle: 'Connect an MCP client', mcpBody: 'Point your client to the thin stdio server; it reuses the shared daemon.',
+    copy: 'Copy', copied: 'Copied',
+    deployNote: 'For the native no-display host, keep the binary local and set overlayEnabled to false. See the self-hosting guide for verification and safety notes.',
+    emptyActivity: 'Waiting for the next desktop action', emptyApproved: 'No approvals yet',
+    helperLive: 'Native helper online', helperIdle: 'Waiting for first request',
+    unavailable: 'Unavailable', tryAgain: 'Start the daemon and try again',
+  }
+};
+
+const $ = (id) => document.getElementById(id);
+let cfg = {};
+let lang = localStorage.getItem('fastcua-lang') || ((navigator.language || '').startsWith('zh') ? 'zh' : 'en');
+let events = [];
+let pendingApproval = null;
+
+const t = (k) => {
+  const v = I18N[lang] && I18N[lang][k];
+  return v == null ? k : v;
+};
+
+const api = (path, body) => fetch(path, body ? {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(body),
+} : undefined).then(async (r) => {
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+});
+
+function applyLanguage() {
+  document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
+  document.title = 'FastCUA · ' + (lang === 'zh' ? '控制中心' : 'Control Center');
+  $('locale').textContent = lang === 'zh' ? 'EN' : '中文';
+  document.querySelectorAll('[data-i18n]').forEach((el) => {
+    const v = t(el.dataset.i18n);
+    if (typeof v === 'string') el.textContent = v;
+  });
+  if (cfg.costartMode && t('costartDesc') && typeof t('costartDesc') === 'object') {
+    $('costart-desc').textContent = t('costartDesc')[cfg.costartMode] || '';
+  }
+  renderEvents();
+}
+
+function selectSegment(id, value) {
+  const group = $(id);
+  if (!group) return;
+  [...group.children].forEach((button) => button.classList.toggle('active', button.dataset.v === value));
+  group.onclick = (e) => {
+    if (!e.target.dataset.v) return;
+    [...group.children].forEach((button) => button.classList.remove('active'));
+    e.target.classList.add('active');
+    if (id === 'costart' && t('costartDesc') && typeof t('costartDesc') === 'object') {
+      $('costart-desc').textContent = t('costartDesc')[e.target.dataset.v] || '';
+    }
+  };
+}
+
+function renderEvents() {
+  const box = $('activity');
+  box.replaceChildren();
+  if (!events.length) {
+    const e = document.createElement('div');
+    e.className = 'empty';
+    e.textContent = t('emptyActivity');
+    box.append(e);
+    return;
+  }
+  events.slice(-40).reverse().forEach((event) => {
+    const row = document.createElement('div');
+    row.className = 'event';
+    const dot = document.createElement('span');
+    dot.className = 'event-dot ' + (event.ok === false ? 'bad' : event.type === 'action_end' ? 'ok' : '');
+    const text = document.createElement('div');
+    const a = document.createElement('div');
+    a.className = 'action';
+    a.textContent = event.action || event.type || 'event';
+    const s = document.createElement('div');
+    s.className = 'summary';
+    s.textContent = event.summary || event.error || event.client || '';
+    text.append(a, s);
+    const time = document.createElement('time');
+    time.textContent = new Date(event.ts || Date.now()).toLocaleTimeString([], {
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+    });
+    row.append(dot, text, time);
+    box.append(row);
+  });
+}
+
+function renderApproved(apps) {
+  const box = $('approved');
+  box.replaceChildren();
+  if (!apps || !apps.length) {
+    const empty = document.createElement('span');
+    empty.className = 'muted';
+    empty.textContent = t('emptyApproved');
+    box.append(empty);
+    return;
+  }
+  apps.forEach((app) => {
+    const chip = document.createElement('span');
+    chip.className = 'chip';
+    chip.textContent = app;
+    box.append(chip);
+  });
+}
+
+function setPulse(state) {
+  const control = state.controlState || 'running';
+  const hasPending = (state.pendingApprovals || []).length > 0;
+  if (control === 'paused_by_user') {
+    $('dot').className = 'dot paused';
+    $('big-status').textContent = t('statusPaused');
+    $('status-copy').textContent = t('statusPaused');
+    $('act-pause').hidden = true;
+    $('act-resume').hidden = false;
+  } else if (hasPending || control === 'awaiting_approval') {
+    $('dot').className = 'dot approval';
+    $('big-status').textContent = t('statusApproval');
+    $('status-copy').textContent = t('statusApproval');
+    $('act-pause').hidden = false;
+    $('act-resume').hidden = true;
+  } else {
+    $('dot').className = 'dot live';
+    $('big-status').textContent = state.binaryPid ? t('helperLive') : t('helperIdle');
+    $('status-copy').textContent = state.binaryPid ? t('statusLive') : t('statusWaiting');
+    $('act-pause').hidden = false;
+    $('act-resume').hidden = true;
+  }
+  pendingApproval = (state.pendingApprovals || [])[0] || null;
+  const callout = $('approval-callout');
+  if (pendingApproval) {
+    callout.hidden = false;
+    $('pending-app').textContent = pendingApproval.app || pendingApproval.summary || 'app';
+  } else {
+    callout.hidden = true;
+  }
+}
+
+async function load() {
+  cfg = await api('/api/config');
+  selectSegment('costart', cfg.costartMode || 'claude');
+  selectSegment('approval', cfg.approvalPolicy === 'full' ? 'full' : 'safe');
+  $('idle').value = cfg.idleTimeoutMin;
+  $('port').value = cfg.port;
+  $('whitelist').value = (cfg.whitelist || []).join('\n');
+  $('overlay-en').checked = cfg.overlayEnabled !== false;
+  $('overlay-title').value = cfg.overlayTitle || '';
+  $('cuabin').value = cfg.cuaBinPath || '';
+  applyLanguage();
+}
+
+async function refresh() {
+  try {
+    const [state, feed] = await Promise.all([
+      api('/api/state'),
+      api('/api/events?since=0'),
+    ]);
+    events = feed.events || [];
+    $('connection').textContent = t('online');
+    $('endpoint').textContent = '127.0.0.1:' + (cfg.port || 8420);
+    $('s-clients').textContent = state.clients;
+    $('s-binary').textContent = state.binaryPid ? (lang === 'zh' ? '运行' : 'Live') : (lang === 'zh' ? '空闲' : 'Idle');
+    $('s-approved').textContent = (state.approvedApps || []).length;
+    $('s-uptime').textContent = state.uptime || '—';
+    setPulse(state);
+    renderApproved(state.approvedApps || []);
+    renderEvents();
+  } catch {
+    $('dot').className = 'dot';
+    $('connection').textContent = t('offline');
+    $('big-status').textContent = t('unavailable');
+    $('status-copy').textContent = t('tryAgain');
+    $('act-pause').hidden = false;
+    $('act-resume').hidden = true;
+    $('approval-callout').hidden = true;
+  }
+}
+
+async function save() {
+  const costart = [...$('costart').children].find((b) => b.classList.contains('active'))?.dataset.v;
+  const approval = [...$('approval').children].find((b) => b.classList.contains('active'))?.dataset.v;
+  cfg = await api('/api/config', {
+    costartMode: costart,
+    approvalPolicy: approval,
+    idleTimeoutMin: +$('idle').value,
+    port: +$('port').value,
+    whitelist: $('whitelist').value.split('\n').map((s) => s.trim()).filter(Boolean),
+    bannerEnabled: !!cfg.bannerEnabled,
+    overlayEnabled: $('overlay-en').checked,
+    overlayTitle: $('overlay-title').value,
+    overlayLanguage: cfg.overlayLanguage || 'auto',
+    cuaBinPath: $('cuabin').value.trim(),
+  });
+  $('saved').classList.add('show');
+  setTimeout(() => $('saved').classList.remove('show'), 1500);
+  applyLanguage();
+  await refresh();
+}
+
+async function control(action, token) {
+  await api('/api/action', { action, token });
+  await refresh();
+}
+
+document.querySelectorAll('.nav button').forEach((button) => {
+  button.onclick = () => {
+    document.querySelectorAll('.nav button').forEach((b) => b.classList.toggle('active', b === button));
+    document.querySelectorAll('.view').forEach((v) => v.classList.toggle('active', v.id === button.dataset.view));
+  };
+});
+$('locale').onclick = () => {
+  lang = lang === 'zh' ? 'en' : 'zh';
+  localStorage.setItem('fastcua-lang', lang);
+  applyLanguage();
+  refresh();
+};
+$('save').onclick = () => save().catch((error) => alert(error.message));
+$('act-pause').onclick = () => control('pause').catch((error) => alert(error.message));
+$('act-resume').onclick = () => control('resume').catch((error) => alert(error.message));
+$('approve-once').onclick = () => pendingApproval && control('allowOnce', pendingApproval.token).catch((e) => alert(e.message));
+$('approve-trust').onclick = () => pendingApproval && control('allowAndWhitelist', pendingApproval.token).catch((e) => alert(e.message));
+$('approve-deny').onclick = () => pendingApproval && control('denyApproval', pendingApproval.token).catch((e) => alert(e.message));
+$('act-shutdown').onclick = () => api('/api/action', { action: 'shutdown' }).catch(() => {});
+$('act-restart').onclick = () => api('/api/action', { action: 'restart' }).catch(() => {});
+$('act-killbin').onclick = () => control('killBinary').catch((error) => alert(error.message));
+$('act-clear').onclick = () => control('clearApprovals').catch((error) => alert(error.message));
+$('clear-events').onclick = refresh;
+document.querySelectorAll('.copy').forEach((button) => {
+  button.onclick = async () => {
+    try {
+      await navigator.clipboard.writeText($(button.dataset.copy).textContent);
+      const before = button.textContent;
+      button.textContent = t('copied');
+      setTimeout(() => { button.textContent = before; }, 1200);
+    } catch {}
+  };
+});
+
+load().then(refresh).catch(refresh);
+setInterval(refresh, 1500);
 </script>
+
 </body>
 </html>
