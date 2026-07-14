@@ -61,6 +61,11 @@ let nextEventId = 1;
 const startedAt = Date.now();
 let currentAction = null; // in-flight: {action, summary, startedAt, client}
 let pendingInterjection = null; // text from overlay interjection input
+// Safety net: if an agent retries the exact same type_text into the same window
+// within a short window (common when a11y placeholders look "unchanged"), skip
+// the second injection. Primary idempotency is native type_text reading first.
+const recentTypeText = new Map(); // `${sessionId}:${windowId}` -> { text, ts }
+const TYPE_TEXT_DEDUPE_MS = 3000;
 function emitEvent(type, data) {
   const e = { id: nextEventId++, ts: Date.now(), type, ...data };
   events.push(e);
@@ -367,6 +372,20 @@ async function handleClientReq(c, req) {
     reply(c, id, { error: msg });
     return;
   }
+  if (method === "type_text") {
+    const wid = params?.window?.id;
+    const text = typeof params?.text === "string" ? params.text : "";
+    if (wid != null && text.length >= 2) {
+      const key = `${c.sessionId}:${wid}`;
+      const now = Date.now();
+      const prev = recentTypeText.get(key);
+      if (prev && prev.text === text && (now - prev.ts) < TYPE_TEXT_DEDUPE_MS) {
+        log("type_text deduped (same window+text within", TYPE_TEXT_DEDUPE_MS, "ms)");
+        reply(c, id, { result: { ok: true, deduped: true } });
+        return;
+      }
+    }
+  }
   const meta = { session_id: c.sessionId, turn_id: String(c.turnId) };
   const app = params?.window?.app || params?.app;
   if (app && isApproved(app)) meta[APPROVED_KEY] = app;
@@ -378,6 +397,17 @@ async function handleClientReq(c, req) {
     const result = await sendToBinary(method, params, meta, {});
     const dur = Date.now() - t0;
     currentAction = null;
+    if (method === "type_text") {
+      const wid = params?.window?.id;
+      const text = typeof params?.text === "string" ? params.text : "";
+      if (wid != null && text.length >= 2) {
+        recentTypeText.set(`${c.sessionId}:${wid}`, { text, ts: Date.now() });
+        if (recentTypeText.size > 200) {
+          const cutoff = Date.now() - TYPE_TEXT_DEDUPE_MS * 2;
+          for (const [k, v] of recentTypeText) if (v.ts < cutoff) recentTypeText.delete(k);
+        }
+      }
+    }
     emitEvent("action_end", { client: c.sessionId.slice(0,8), action: method, duration_ms: dur, summary, ok: true });
     reply(c, id, { result });
   } catch (e) {

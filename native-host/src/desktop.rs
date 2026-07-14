@@ -657,9 +657,41 @@ pub fn type_text(params: &Value) -> Result<(), String> {
         .get("text")
         .and_then(Value::as_str)
         .ok_or_else(|| "missing field `text`".to_string())?;
+    // replace defaults to true: form-filling agents mean "set this field".
+    // Pass replace:false to append (e.g. continue typing into a document).
+    let replace = params
+        .get("replace")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+
+    // 1) READ first — if the focused control already holds the desired text,
+    //    do nothing. Makes agent retries idempotent (prevents
+    //    mempalace→mempalacemempalace on Electron forms).
+    if let Some(current) = uia::focused_value() {
+        if current == text {
+            return Ok(());
+        }
+    }
+    // 2) Clear when replacing, then WRITE.
+    if replace {
+        clear_focused_text()?;
+    }
     for unit in text.encode_utf16() {
         send_unicode(unit)?;
     }
+    Ok(())
+}
+
+/// Select-all + delete on the focused control (key events, not UIA).
+fn clear_focused_text() -> Result<(), String> {
+    send_vk(VK_CONTROL, false)?;
+    send_vk(0x41, false)?; // VK for 'A'
+    send_vk(0x41, true)?;
+    send_vk(VK_CONTROL, true)?;
+    unsafe { Sleep(25) };
+    send_vk(VK_DELETE, false)?;
+    send_vk(VK_DELETE, true)?;
+    unsafe { Sleep(15) };
     Ok(())
 }
 

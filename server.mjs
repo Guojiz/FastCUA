@@ -242,7 +242,7 @@ const TOOLS = [
   { name: "get_window_state", desc: "Capture accessibility tree (with element indexes) and/or screenshot for an open window. Stable labeled controls can be clicked with their latest [N] element_index.", inputSchema: { type: "object", properties: { window: W, include_screenshot: { type: "boolean", default: true }, include_text: { type: "boolean", default: true } }, required: ["window"] } },
   { name: "click", desc: "Click an indexed element (element_index from latest get_window_state) OR a coordinate (x,y) in the window screenshot.", inputSchema: { type: "object", properties: { window: W, element_index: { type: "number" }, x: { type: "number" }, y: { type: "number" }, mouse_button: { type: "string", enum: ["left", "right", "middle", "l", "r", "m"] }, click_count: { type: "number" }, screenshotId: { type: "string" } }, required: ["window"] } },
   { name: "press_key", desc: "Press a key or +-separated chord (e.g. 'Return', 'Control_L+a', 'Ctrl+s', 'space').", inputSchema: { type: "object", properties: { window: W, key: { type: "string" } }, required: ["window", "key"] } },
-  { name: "type_text", desc: "Type text into the current focus in the window.", inputSchema: { type: "object", properties: { window: W, text: { type: "string" } }, required: ["window", "text"] } },
+  { name: "type_text", desc: "Type into the focused control. Reads the current value first (UIA ValuePattern): if it already matches `text`, does nothing. Otherwise clears then types (replace:true default). Pass replace:false to append. Daemon also dedupes identical retries within ~3s.", inputSchema: { type: "object", properties: { window: W, text: { type: "string" }, replace: { type: "boolean", default: true, description: "Clear field before typing when true (default). Set false to append." } }, required: ["window", "text"] } },
   { name: "scroll", desc: "Scroll by a delta from a coordinate in the window screenshot. scrollY: negative=up positive=down. scrollX: negative=left positive=right.", inputSchema: { type: "object", properties: { window: W, x: { type: "number" }, y: { type: "number" }, scrollX: { type: "number" }, scrollY: { type: "number" }, screenshotId: { type: "string" } }, required: ["window", "x", "y", "scrollX", "scrollY"] } },
   { name: "drag", desc: "Drag from one window coordinate to another.", inputSchema: { type: "object", properties: { window: W, from_x: { type: "number" }, from_y: { type: "number" }, to_x: { type: "number" }, to_y: { type: "number" }, screenshotId: { type: "string" } }, required: ["window", "from_x", "from_y", "to_x", "to_y"] } },
   { name: "perform_secondary_action", desc: "Raise the target window. This release supports only action='Raise' on the root element_index 0.", inputSchema: { type: "object", properties: { window: W, element_index: { type: "number", enum: [0] }, action: { type: "string", enum: ["Raise"] } }, required: ["window", "element_index", "action"] } },
@@ -262,7 +262,7 @@ async function callTool(name, args) {
     case "get_window_state": return await sky.get_window_state({ window: w, include_screenshot: args.include_screenshot ?? true, include_text: args.include_text ?? true });
     case "click": return await sky.click({ window: w, element_index: args.element_index, x: args.x, y: args.y, mouse_button: args.mouse_button, click_count: args.click_count, screenshotId: args.screenshotId });
     case "press_key": return await sky.press_key({ window: w, key: args.key });
-    case "type_text": return await sky.type_text({ window: w, text: args.text });
+    case "type_text": return await sky.type_text({ window: w, text: args.text, replace: args.replace });
     case "scroll": return await sky.scroll({ window: w, x: args.x, y: args.y, scrollX: args.scrollX, scrollY: args.scrollY, screenshotId: args.screenshotId });
     case "set_value": return await sky.set_value({ window: w, element_index: args.element_index, value: args.value });
     case "drag": return await sky.drag({ window: w, from_x: args.from_x, from_y: args.from_y, to_x: args.to_x, to_y: args.to_y, screenshotId: args.screenshotId });
@@ -319,7 +319,7 @@ async function handle(line) {
     let result;
     let closeAfterResponse = false;
     if (method === "initialize") {
-      result = { protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "sky-computer-use", version: "0.1.5" } };
+      result = { protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "sky-computer-use", version: "0.1.6" } };
     } else if (method === "initialized" || method === "notifications/initialized") {
       return;
     } else if (method === "tools/list") {

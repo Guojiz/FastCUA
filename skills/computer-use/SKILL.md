@@ -56,17 +56,19 @@ Do not spawn the native host directly, search for its executable, or build a sep
 3. For canvases, images, custom-rendered controls, drawing surfaces, and elements not exposed through accessibility, use screenshot coordinates.
 4. After an action that changes layout, focus, modality, or the element list, request a fresh accessibility snapshot before reusing element indexes.
 
-For normal text editing in this release, do not use `set_value`. Click the editable control or work surface, press `Control_L+a` when replacing existing text, then call `type_text` **once**.
+For normal text editing in this release, do not use `set_value`. Click the editable control, then call `type_text` **once**.
 
-### Text entry — no duplicate typing
+### Text entry — read first, type once
 
-`type_text` injects keystrokes into the currently focused control. It does **not** clear the field by itself.
+`type_text` (v0.1.6+) **reads** the focused field value first (UIA ValuePattern):
 
-- **Replace** existing text: focus the field → `press_key Control_L+a` → `type_text` once.
-- **Never** call `type_text` with the same string repeatedly on the same field in one turn (that appends and produces duplicated garbage).
-- Electron / web forms (ChatGPT, browsers, VS Code webviews) often keep placeholder labels in the accessibility tree after typing. Do **not** treat unchanged a11y placeholder text as proof that typing failed, and do **not** re-type.
-- Verify after **one** type by screenshot or `document_text` / focused value when available — not by re-sending the same text.
-- Prefer a single `js` cell that focuses, clears (Ctrl+A), types once, then snapshots — not many separate MCP `type_text` retries.
+1. If the current value already equals `text` → no-op (safe for retries).
+2. Else, with `replace:true` (default) → clear selection, then type.
+3. With `replace:false` → append without clearing.
+
+- Call `type_text` **once** per field after focus. Do not loop retries because a11y still shows a placeholder name.
+- Electron / web forms often keep placeholder labels in the accessibility tree after typing — that is **not** proof of failure.
+- Verify with a screenshot when needed, not by re-sending the same text.
 
 ### Interjection / pause
 
@@ -108,10 +110,10 @@ When computer-use work is done, call `close` once. It ends the current turn and 
 - If computer use reports that the Windows desktop is locked, stop immediately and ask the user to unlock the desktop. Do not try to interact through `LockApp.exe`.
 - When opening or launching a Windows app by name, call `list_apps` before launching anything.
 - Call `get_window_state` again only when you need to verify progress, focus may have changed, a modal or launcher may have appeared, the user interrupted, or the prior state is otherwise stale. Choose screenshot, accessibility text, or both based on the next decision; avoid requesting both by default.
-- `type_text` sends literal text. Use `press_key` for controls such as `Enter`, `Tab`, arrows, Escape, and keyboard chords instead of embedding control characters in a typed string.
+- `type_text` reads the focused value first, then replaces by default (`replace:true`). Use `replace:false` to append. Use `press_key` for controls such as `Enter`, `Tab`, arrows, Escape, and keyboard chords.
 - Prefer X Window System keysym-style names for key input, especially `KP_0` through `KP_9` for apps that distinguish numpad keys from the number row. Common aliases such as `period`, `greater`, `less`, `comma`, `slash`, `question`, `Numpad_0`, `Numpad_Add`, `Numpad_Subtract`, `Numpad_Multiply`, `Numpad_Divide`, `Numpad_Decimal`, and `Numpad_Enter` are also supported. For shifted punctuation shortcuts, include `Shift`, for example `Control_L+Shift_L+period` for Ctrl+Shift+`.` / `>`.
 - For stable labeled controls from the latest accessibility snapshot, prefer `element_index`. Coordinate `click` and `drag` use window-relative pixels for the window captured by `get_window_state`; `(0, 0)` is the top-left of the window. Use coordinates for canvases, images, custom-rendered surfaces, and targets not exposed through accessibility. The property is `element_index`, not `element`.
-- Do not use `set_value` for normal text editing in this release. Click the editable control or work surface, press `Control_L+a` when replacing text, then use `type_text` **once**. Never re-send the same `type_text` payload to the same field in one turn.
+- Do not use `set_value` for normal text editing in this release. Click the field, then `type_text` once (default replace). Do not re-send the same text to the same field.
 - On user interjection or `paused_by_user`, stop desktop work immediately; wait for resume or a new user instruction.
 - `scroll` scrolls with input injection from a specific screenshot coordinate, matching Browser Use's coordinate scroll shape. Use `sky.scroll({ window, x, y, scrollX: 0, scrollY: 600 })` to scroll down from `(x, y)`. Negative `scrollY` scrolls up; negative `scrollX` scrolls left. Do not pass `element_index` to `scroll`; if a specific pane needs focus, click it first with coordinates, then scroll from inside that pane.
 - Use keyboard navigation when it is faster than hunting UI pixels.
@@ -266,7 +268,7 @@ type GetWindowStateInput = { include_screenshot?: boolean; include_text?: boolea
 type WindowState = { accessibility: AccessibilityState | null; screenshots: Array<Screenshot>; window: Window };
 type ClickInput = { click_count?: number; element_index?: number; mouse_button?: MouseButton; screenshotId?: string; window: Window; x?: number; y?: number };
 type PressKeyInput = { key: string; window: Window };
-type TypeTextInput = { text: string; window: Window };
+type TypeTextInput = { text: string; window: Window; replace?: boolean };
 type ScrollInput = { screenshotId?: string; scrollX: number; scrollY: number; window: Window; x: number; y: number };
 type SetValueInput = { element_index: number; value: string; window: Window };
 type DragInput = { from_x: number; from_y: number; screenshotId?: string; to_x: number; to_y: number; window: Window };

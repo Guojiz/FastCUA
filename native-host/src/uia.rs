@@ -77,6 +77,15 @@ const IID_IUI_AUTOMATION: Guid = Guid {
     data3: 0x452a,
     data4: [0xab, 0x13, 0x7a, 0xc5, 0xac, 0x48, 0x25, 0xee],
 };
+/// IUIAutomationValuePattern
+const IID_IUI_AUTOMATION_VALUE_PATTERN: Guid = Guid {
+    data1: 0xa94cd8b1,
+    data2: 0x0844,
+    data3: 0x4cd6,
+    data4: [0x9d, 0x32, 0x56, 0x67, 0x22, 0x9e, 0xaf, 0x6a],
+};
+/// UIA_ValuePatternId
+const UIA_VALUE_PATTERN_ID: i32 = 10002;
 
 #[link(name = "ole32")]
 unsafe extern "system" {
@@ -127,6 +136,108 @@ pub fn snapshot(hwnd: HWND, title: &str, app_name: &str) -> Result<Snapshot, Str
     receiver
         .recv_timeout(Duration::from_millis(1_500))
         .map_err(|_| "UI Automation provider timed out".to_string())?
+}
+
+/// Read the focused control's current text via UIA ValuePattern (works for many
+/// Win32 + Chromium/Electron edit fields). Returns None when unavailable.
+pub fn focused_value() -> Option<String> {
+    let (sender, receiver) = mpsc::channel();
+    if thread::Builder::new()
+        .name("cua-uia-focused-value".into())
+        .spawn(move || {
+            let result = unsafe { focused_value_inner() };
+            let _ = sender.send(result);
+        })
+        .is_err()
+    {
+        return None;
+    }
+    receiver.recv_timeout(Duration::from_millis(800)).ok().flatten()
+}
+
+unsafe fn focused_value_inner() -> Option<String> {
+    let init = unsafe { CoInitializeEx(ptr::null_mut(), COINIT_MULTITHREADED) };
+    if init < 0 && init != RPC_E_CHANGED_MODE {
+        return None;
+    }
+    let should_uninitialize = init == S_OK || init == S_FALSE;
+    let mut automation = ptr::null_mut();
+    let created = unsafe {
+        CoCreateInstance(
+            &CLSID_CUI_AUTOMATION,
+            ptr::null_mut(),
+            CLSCTX_INPROC_SERVER,
+            &IID_IUI_AUTOMATION,
+            &mut automation,
+        )
+    };
+    if created < 0 || automation.is_null() {
+        if should_uninitialize {
+            unsafe { CoUninitialize() };
+        }
+        return None;
+    }
+    // IUIAutomation::GetFocusedElement is vtable slot 8
+    let get_focused: unsafe extern "system" fn(ComPtr, *mut ComPtr) -> HRESULT =
+        unsafe { method(automation, 8) };
+    let mut focused = ptr::null_mut();
+    if unsafe { get_focused(automation, &mut focused) } < 0 || focused.is_null() {
+        unsafe { release(automation) };
+        if should_uninitialize {
+            unsafe { CoUninitialize() };
+        }
+        return None;
+    }
+    // IUIAutomationElement::GetCurrentPattern is vtable slot 16
+    let get_pattern: unsafe extern "system" fn(ComPtr, i32, *mut ComPtr) -> HRESULT =
+        unsafe { method(focused, 16) };
+    let mut pattern_unknown = ptr::null_mut();
+    let pattern_hr =
+        unsafe { get_pattern(focused, UIA_VALUE_PATTERN_ID, &mut pattern_unknown) };
+    let value = if pattern_hr >= 0 && !pattern_unknown.is_null() {
+        // QI to IUIAutomationValuePattern
+        let qi: unsafe extern "system" fn(ComPtr, *const Guid, *mut ComPtr) -> HRESULT =
+            unsafe { method(pattern_unknown, 0) };
+        let mut value_pattern = ptr::null_mut();
+        let qi_hr = unsafe {
+            qi(
+                pattern_unknown,
+                &IID_IUI_AUTOMATION_VALUE_PATTERN,
+                &mut value_pattern,
+            )
+        };
+        let result = if qi_hr >= 0 && !value_pattern.is_null() {
+            // IUIAutomationValuePattern::get_CurrentValue is vtable slot 3
+            let get_value: unsafe extern "system" fn(ComPtr, *mut *mut u16) -> HRESULT =
+                unsafe { method(value_pattern, 3) };
+            let mut bstr = ptr::null_mut();
+            let value_hr = unsafe { get_value(value_pattern, &mut bstr) };
+            let text = if value_hr >= 0 && !bstr.is_null() {
+                let length = unsafe { SysStringLen(bstr) } as usize;
+                let s = String::from_utf16_lossy(unsafe { slice::from_raw_parts(bstr, length) });
+                unsafe { SysFreeString(bstr) };
+                Some(s)
+            } else {
+                None
+            };
+            unsafe { release(value_pattern) };
+            text
+        } else {
+            None
+        };
+        unsafe { release(pattern_unknown) };
+        result
+    } else {
+        None
+    };
+    unsafe {
+        release(focused);
+        release(automation);
+    }
+    if should_uninitialize {
+        unsafe { CoUninitialize() };
+    }
+    value
 }
 
 unsafe fn snapshot_inner(hwnd: HWND, title: &str, app_name: &str) -> Result<Snapshot, String> {

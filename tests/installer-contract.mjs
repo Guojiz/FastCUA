@@ -9,7 +9,7 @@ const selfHostingZh = fs.readFileSync(new URL("../docs/SELF_HOSTING_zh.md", impo
 const readme = fs.readFileSync(new URL("../README.md", import.meta.url), "utf8");
 const readmeZh = fs.readFileSync(new URL("../README_zh.md", import.meta.url), "utf8");
 
-assert.match(installer, /\$Version\s*=\s*'v0\.1\.5'/);
+assert.match(installer, /\$Version\s*=\s*'v0\.1\.6'/);
 assert.match(installer, /archive\/refs\/tags\/\$Version\.zip/);
 assert.match(installer, /releases\/download\/\$Version/);
 assert.doesNotMatch(installer, /refs\/heads\/main|releases\/latest/);
@@ -52,4 +52,4 @@ assert.match(selfHostingZh, /完整安装必须同时包含 Skill 和 MCP/);
 assert.match(readme, /install both the complete `computer-use` Skill and the `sky-computer-use` MCP server/i);
 assert.match(readmeZh, /必须把完整 `computer-use` Skill 和 `sky-computer-use` MCP Server 都安装到自己的活动配置中/);
 
-console.log("PASS installer contract: v0.1.5 pin, verified host, mandatory self Skill + MCP setup prompt, scoped uninstall");
+console.log("PASS installer contract: v0.1.6 pin, verified host, mandatory self Skill + MCP setup prompt, scoped uninstall");
