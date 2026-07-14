@@ -277,6 +277,11 @@ globalThis.targetWindow = state.window;
 - `type_text` types literal text. Use `press_key` for `Enter`, `Tab`, arrows, Escape, and chords — do not embed control characters in `type_text`.
 - Prefer X Window System keysym-style names for keys, especially `KP_0`–`KP_9` when apps distinguish numpad keys. Common aliases (`period`, `Numpad_0`, …) are accepted. For shifted punctuation shortcuts include `Shift` (e.g. `Control_L+Shift_L+period`).
 - Prefer input injection / coordinates when UIA indexes are flaky; for stable labeled controls prefer `element_index` from the latest tree. Property name is `element_index`, not `element`.
+- **Coordinate space:** `click`/`drag`/`scroll` x,y are **window screenshot pixels** (origin top-left), identical to `get_window_state().viewport` / `screenshots[0].{width,height}`. Never use uncalibrated guesses.
+- **Resolution first:** after every relevant `get_window_state`, record `viewport.width/height` (or screenshot size) before any pixel click.
+- **Letter grid (when UIA fails):** `sky.grid({width,height,cols:3,rows:3})` → pick cell id from the screenshot → `sky.grid_refine(grid, id, 3, 3)` repeatedly → `sky.click_cell({window, grid, cell})` at the cell center. Same idea as Apple Voice Control grid zoom.
+- **Normalized coords:** both `x` and `y` in `0..1` are treated as fractions of the viewport.
+- Out-of-bounds clicks error with viewport bounds; recompute instead of retrying the same bad point.
 - Do not use `set_value` for normal text editing in this release (limited to classic Win32 Edit). Prefer click → read → decide → `type_text`.
 - `scroll` uses window-relative coordinates: `sky.scroll({ window, x, y, scrollX: 0, scrollY: 600 })`. Negative `scrollY` is up. Do not pass `element_index` to `scroll`.
 - Use keyboard navigation when it is faster than hunting UI pixels.

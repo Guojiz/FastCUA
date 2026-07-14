@@ -343,21 +343,78 @@ pub fn get_window_state(
     } else {
         json!({})
     };
+    let bounds = window_bounds(window.id)?;
     let screenshots = if include_screenshot {
         vec![capture_window(window.id)?]
     } else {
         Vec::new()
     };
+    // Prefer screenshot pixel size as the coordinate space (matches capture bitmap).
+    let (coord_w, coord_h) = if let Some(shot) = screenshots.first() {
+        (
+            shot.get("width").and_then(Value::as_i64).unwrap_or(bounds.width as i64) as i32,
+            shot.get("height").and_then(Value::as_i64).unwrap_or(bounds.height as i64) as i32,
+        )
+    } else {
+        (bounds.width, bounds.height)
+    };
     Ok(json!({
         "window": window,
         "accessibility": accessibility,
         "screenshots": screenshots,
+        // Explicit coordinate space for agents: click/drag/scroll x,y are in this space.
+        "viewport": {
+            "width": coord_w,
+            "height": coord_h,
+            "originX": bounds.left,
+            "originY": bounds.top,
+            "screenLeft": bounds.left,
+            "screenTop": bounds.top,
+            "screenRight": bounds.right,
+            "screenBottom": bounds.bottom,
+            "coordinate_space": "window_screenshot_pixels",
+            "origin": "top_left",
+            "click_xy": "x,y are relative to window top-left; same units as screenshots[0].width/height",
+            "normalized": "optional: pass x,y in 0..1 to mean fractions of width/height",
+            "grid_hint": "When UIA indexes are unusable, subdivide the viewport into a letter grid (see sky.grid in js) and click cell centers"
+        },
         "cacheDiagnostics": {
             "accessibilityRevision": 1,
             "accessibilitySnapshotCount": if include_text { 1 } else { 0 },
             "captureCachedSessionCount": 0
         }
     }))
+}
+
+#[derive(Clone, Copy)]
+struct WindowBounds {
+    left: i32,
+    top: i32,
+    right: i32,
+    bottom: i32,
+    width: i32,
+    height: i32,
+}
+
+fn window_bounds(id: u64) -> Result<WindowBounds, String> {
+    let hwnd = id as usize as HWND;
+    let mut rect = RECT::default();
+    if unsafe { GetWindowRect(hwnd, &mut rect) } == 0 {
+        return Err("GetWindowRect failed".into());
+    }
+    let width = rect.right - rect.left;
+    let height = rect.bottom - rect.top;
+    if width <= 0 || height <= 0 {
+        return Err("window has invalid bounds or is not visible".into());
+    }
+    Ok(WindowBounds {
+        left: rect.left,
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom,
+        width,
+        height,
+    })
 }
 
 fn cache_uia_elements(window: &WindowRef, snapshot: &uia::Snapshot) -> Result<(), String> {
@@ -552,10 +609,7 @@ pub fn click(params: &Value) -> Result<(), String> {
     let element_index = params.get("element_index").and_then(Value::as_u64);
     activate_window(window.id)?;
     let (x, y) = match (params.get("x"), params.get("y")) {
-        (Some(_), Some(_)) => {
-            let (x, y) = screen_point(&window, number(params, "x")?, number(params, "y")?)?;
-            (x, y)
-        }
+        (Some(_), Some(_)) => screen_point_from_params(&window, params)?,
         _ => {
             let index =
                 element_index.ok_or_else(|| "parse click params: missing field `x`".to_string())?;
@@ -719,7 +773,7 @@ pub fn press_key(params: &Value) -> Result<(), String> {
 pub fn scroll(params: &Value) -> Result<(), String> {
     let window = params_window(params)?;
     activate_window(window.id)?;
-    let (x, y) = screen_point(&window, number(params, "x")?, number(params, "y")?)?;
+    let (x, y) = screen_point_from_params(&window, params)?;
     unsafe { SetCursorPos(x, y) };
     let vertical = params.get("scrollY").and_then(Value::as_i64).unwrap_or(0) as i32;
     let horizontal = params.get("scrollX").and_then(Value::as_i64).unwrap_or(0) as i32;
@@ -735,12 +789,13 @@ pub fn scroll(params: &Value) -> Result<(), String> {
 pub fn drag(params: &Value) -> Result<(), String> {
     let window = params_window(params)?;
     activate_window(window.id)?;
-    let (from_x, from_y) = screen_point(
-        &window,
-        number(params, "from_x")?,
-        number(params, "from_y")?,
-    )?;
-    let (to_x, to_y) = screen_point(&window, number(params, "to_x")?, number(params, "to_y")?)?;
+    let bounds = window_bounds(window.id)?;
+    let from_x = map_axis(params, "from_x", bounds.width)?;
+    let from_y = map_axis(params, "from_y", bounds.height)?;
+    let to_x = map_axis(params, "to_x", bounds.width)?;
+    let to_y = map_axis(params, "to_y", bounds.height)?;
+    let (from_x, from_y) = screen_point(&window, from_x, from_y)?;
+    let (to_x, to_y) = screen_point(&window, to_x, to_y)?;
     unsafe { SetCursorPos(from_x, from_y) };
     send_mouse(MOUSEEVENTF_LEFTDOWN, 0)?;
     for step in 1..=20 {
@@ -829,11 +884,68 @@ mod tests {
 }
 
 fn screen_point(window: &WindowRef, x: i32, y: i32) -> Result<(i32, i32), String> {
-    let mut rect = RECT::default();
-    if unsafe { GetWindowRect(window.id as usize as HWND, &mut rect) } == 0 {
-        return Err("GetWindowRect failed".into());
+    let bounds = window_bounds(window.id)?;
+    if x < 0 || y < 0 || x >= bounds.width || y >= bounds.height {
+        return Err(format!(
+            "coordinate out of window bounds: ({x},{y}) not in [0..{w}) x [0..{h}). \
+             Use get_window_state().viewport (width={w}, height={h}) or normalized 0..1 fractions. \
+             Prefer element_index when UIA is available; otherwise use a letter-grid refine then click the cell center.",
+            w = bounds.width,
+            h = bounds.height
+        ));
     }
-    Ok((rect.left + x, rect.top + y))
+    Ok((bounds.left + x, bounds.top + y))
+}
+
+/// Map one axis: pixels, or 0..=1 fraction of axis_size when the value is in that range
+/// and the caller is using normalized mode (both axes 0..=1).
+fn map_axis(params: &Value, key: &str, _axis_size: i32) -> Result<i32, String> {
+    let value = params
+        .get(key)
+        .ok_or_else(|| format!("missing field `{key}`"))?;
+    let f = value
+        .as_f64()
+        .or_else(|| value.as_i64().map(|i| i as f64))
+        .ok_or_else(|| format!("invalid coordinate field `{key}`"))?;
+    Ok(f.round() as i32)
+}
+
+fn map_axis_normalized(params: &Value, key: &str, axis_size: i32) -> Result<i32, String> {
+    let value = params
+        .get(key)
+        .ok_or_else(|| format!("missing field `{key}`"))?;
+    let f = value
+        .as_f64()
+        .or_else(|| value.as_i64().map(|i| i as f64))
+        .ok_or_else(|| format!("invalid coordinate field `{key}`"))?;
+    if axis_size <= 0 {
+        return Err("invalid axis size".into());
+    }
+    let px = (f * (axis_size as f64 - 1.0)).round() as i32;
+    Ok(px.clamp(0, axis_size.saturating_sub(1)))
+}
+
+fn screen_point_from_params(window: &WindowRef, params: &Value) -> Result<(i32, i32), String> {
+    let bounds = window_bounds(window.id)?;
+    let x_raw = params
+        .get("x")
+        .and_then(|v| v.as_f64().or_else(|| v.as_i64().map(|i| i as f64)))
+        .ok_or_else(|| "missing field `x`".to_string())?;
+    let y_raw = params
+        .get("y")
+        .and_then(|v| v.as_f64().or_else(|| v.as_i64().map(|i| i as f64)))
+        .ok_or_else(|| "missing field `y`".to_string())?;
+    // Normalized mode only when BOTH coords are in 0..=1 (Apple-style relative targeting).
+    let normalized = (0.0..=1.0).contains(&x_raw) && (0.0..=1.0).contains(&y_raw);
+    let (x, y) = if normalized {
+        (
+            map_axis_normalized(params, "x", bounds.width)?,
+            map_axis_normalized(params, "y", bounds.height)?,
+        )
+    } else {
+        (map_axis(params, "x", bounds.width)?, map_axis(params, "y", bounds.height)?)
+    };
+    screen_point(window, x, y)
 }
 
 fn send_mouse(flags: DWORD, data: DWORD) -> Result<(), String> {
@@ -919,6 +1031,7 @@ fn key_to_vk(token: &str) -> Option<WORD> {
     Some(key)
 }
 
+#[allow(dead_code)]
 fn number(params: &Value, key: &str) -> Result<i32, String> {
     params
         .get(key)

@@ -66,6 +66,20 @@ type WindowState = {
   accessibility: AccessibilityState | null;
   screenshots: Array<Screenshot>;
   window: Window;
+  /** Present when host supports it: explicit pixel coordinate space for click/drag/scroll. */
+  viewport?: {
+    width: number;
+    height: number;
+    originX?: number;
+    originY?: number;
+    screenLeft?: number;
+    screenTop?: number;
+    coordinate_space: "window_screenshot_pixels";
+    origin: "top_left";
+    click_xy?: string;
+    normalized?: string;
+    grid_hint?: string;
+  };
 };
 
 type ClickInput = {
@@ -74,9 +88,15 @@ type ClickInput = {
   mouse_button?: MouseButton;
   screenshotId?: string;
   window: Window;
+  /** Screenshot/window pixel X, or 0..1 fraction when both x and y are in 0..1. */
   x?: number;
+  /** Screenshot/window pixel Y, or 0..1 fraction when both x and y are in 0..1. */
   y?: number;
 };
+
+// js-only helpers on sky (no daemon round-trip except click_cell):
+// sky.viewport(state) / sky.grid({width,height,cols,rows,left?,top?,right?,bottom?})
+// sky.grid_refine(grid, cellId, cols?, rows?) / sky.click_cell({window, grid, cell})
 
 type PressKeyInput = {
   key: string;

@@ -100,6 +100,74 @@ class DaemonClient {
 }
 const daemon = new DaemonClient();
 
+// Letter grid for coordinate targeting (Apple Voice Control style refine).
+// Region is in screenshot/window pixel space (same as click x,y).
+const GRID_LABELS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+function buildGrid(input = {}) {
+  const width = Math.max(1, Math.round(Number(input.width) || 0));
+  const height = Math.max(1, Math.round(Number(input.height) || 0));
+  const cols = Math.min(10, Math.max(2, Math.round(Number(input.cols) || 3)));
+  const rows = Math.min(10, Math.max(2, Math.round(Number(input.rows) || 3)));
+  const left = Math.max(0, Math.round(Number(input.left) || 0));
+  const top = Math.max(0, Math.round(Number(input.top) || 0));
+  const right = Math.min(width, Math.round(input.right != null ? Number(input.right) : width));
+  const bottom = Math.min(height, Math.round(input.bottom != null ? Number(input.bottom) : height));
+  if (right <= left || bottom <= top) throw new Error("invalid grid region");
+  const cellW = (right - left) / cols;
+  const cellH = (bottom - top) / rows;
+  const cells = [];
+  let n = 0;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const L = left + c * cellW;
+      const T = top + r * cellH;
+      const R = left + (c + 1) * cellW;
+      const B = top + (r + 1) * cellH;
+      const id = n < GRID_LABELS.length ? GRID_LABELS[n] : `${r}${c}`;
+      n++;
+      cells.push({
+        id,
+        row: r,
+        col: c,
+        left: Math.round(L),
+        top: Math.round(T),
+        right: Math.round(R),
+        bottom: Math.round(B),
+        cx: Math.round((L + R) / 2),
+        cy: Math.round((T + B) / 2),
+        width: Math.round(R - L),
+        height: Math.round(B - T),
+      });
+    }
+  }
+  return {
+    width, height, cols, rows,
+    region: { left, top, right, bottom },
+    cells,
+    howto: "Pick the cell id containing the target, then sky.grid({..., left, top, right, bottom, cols, rows}) to refine, or sky.click({ window, x: cell.cx, y: cell.cy }).",
+  };
+}
+function cellById(grid, id) {
+  const cell = (grid?.cells || []).find((c) => String(c.id).toUpperCase() === String(id).toUpperCase());
+  if (!cell) throw new Error("unknown grid cell id: " + id);
+  return cell;
+}
+function viewportFromState(state) {
+  if (state?.viewport) return state.viewport;
+  const s = state?.screenshots?.[0];
+  if (s?.width && s?.height) {
+    return {
+      width: s.width,
+      height: s.height,
+      originX: s.originX,
+      originY: s.originY,
+      coordinate_space: "window_screenshot_pixels",
+      origin: "top_left",
+    };
+  }
+  throw new Error("no viewport: call get_window_state with include_screenshot:true first");
+}
+
 // thin sky-like wrapper; sky.* forwards to the daemon
 const sky = {
   list_apps: () => daemon.request("list_apps", {}),
@@ -116,6 +184,37 @@ const sky = {
   perform_secondary_action: (i) => daemon.request("perform_secondary_action", i),
   activate_window: (i) => daemon.request("activate_window", i),
   close: async () => { await daemon.close(); return { ok: true }; },
+  // Coordinate helpers (local — no daemon round-trip)
+  viewport: viewportFromState,
+  grid: buildGrid,
+  grid_cell: cellById,
+  /** Refine: return a sub-grid of one cell (Apple-style drill-down). */
+  grid_refine: (grid, cellId, cols = 3, rows = 3) => {
+    const cell = cellById(grid, cellId);
+    return buildGrid({
+      width: grid.width,
+      height: grid.height,
+      cols,
+      rows,
+      left: cell.left,
+      top: cell.top,
+      right: cell.right,
+      bottom: cell.bottom,
+    });
+  },
+  /** Click the center of a grid cell. */
+  click_cell: async (input) => {
+    const { window, grid, cell: cellId, mouse_button, click_count, screenshotId } = input || {};
+    const cell = cellById(grid, cellId);
+    return daemon.request("click", {
+      window,
+      x: cell.cx,
+      y: cell.cy,
+      mouse_button,
+      click_count,
+      screenshotId,
+    });
+  },
 };
 
 // ---- persistent JS REPL (independent `js` tool) ----
@@ -239,8 +338,8 @@ const TOOLS = [
   { name: "list_windows", desc: "List open windows that can be targeted by the window2 API.", inputSchema: { type: "object", properties: {} } },
   { name: "get_window", desc: "Rehydrate a currently open window by id (after losing a window binding).", inputSchema: { type: "object", properties: { app: { type: "string" }, id: { type: "number" } }, required: ["id"] } },
   { name: "launch_app", desc: "Launch an app by id from list_apps, an explicit .exe path, the `paint` alias, or a shell:AppsFolder\\<AUMID> packaged-app target. Its window appears in list_apps() afterwards.", inputSchema: { type: "object", properties: { app: { type: "string", description: "app id, .exe process path, `paint`, or shell:AppsFolder\\<AUMID>" } }, required: ["app"] } },
-  { name: "get_window_state", desc: "Capture accessibility tree and/or screenshot. When include_text is true, also returns accessibility.focused_value (UIA ValuePattern text of the focused control) so the model can read the field and decide whether to edit.", inputSchema: { type: "object", properties: { window: W, include_screenshot: { type: "boolean", default: true }, include_text: { type: "boolean", default: true } }, required: ["window"] } },
-  { name: "click", desc: "Click an indexed element (element_index from latest get_window_state) OR a coordinate (x,y) in the window screenshot.", inputSchema: { type: "object", properties: { window: W, element_index: { type: "number" }, x: { type: "number" }, y: { type: "number" }, mouse_button: { type: "string", enum: ["left", "right", "middle", "l", "r", "m"] }, click_count: { type: "number" }, screenshotId: { type: "string" } }, required: ["window"] } },
+  { name: "get_window_state", desc: "Capture accessibility tree and/or screenshot. Returns viewport {width,height,coordinate_space} — click x,y use that pixel space (origin top-left). Also focused_value when include_text. Prefer element_index; if UIA is empty use sky.grid letter-grid refine then click cell center.", inputSchema: { type: "object", properties: { window: W, include_screenshot: { type: "boolean", default: true }, include_text: { type: "boolean", default: true } }, required: ["window"] } },
+  { name: "click", desc: "Click element_index from latest tree OR screenshot pixel x,y (same units as viewport/screenshot width×height; or both in 0..1 as fractions). Out-of-bounds returns an error with viewport size.", inputSchema: { type: "object", properties: { window: W, element_index: { type: "number" }, x: { type: "number" }, y: { type: "number" }, mouse_button: { type: "string", enum: ["left", "right", "middle", "l", "r", "m"] }, click_count: { type: "number" }, screenshotId: { type: "string" } }, required: ["window"] } },
   { name: "press_key", desc: "Press a key or +-separated chord (e.g. 'Return', 'Control_L+a', 'Ctrl+s', 'space').", inputSchema: { type: "object", properties: { window: W, key: { type: "string" } }, required: ["window", "key"] } },
   { name: "type_text", desc: "Write into the focused control AFTER the model has read focused_value via get_window_state and decided to edit. replace:true (default) clears the field then types; replace:false appends. Host does not decide whether to edit.", inputSchema: { type: "object", properties: { window: W, text: { type: "string" }, replace: { type: "boolean", default: true, description: "When true (default), clear focused field then type. When false, append." } }, required: ["window", "text"] } },
   { name: "scroll", desc: "Scroll by a delta from a coordinate in the window screenshot. scrollY: negative=up positive=down. scrollX: negative=left positive=right.", inputSchema: { type: "object", properties: { window: W, x: { type: "number" }, y: { type: "number" }, scrollX: { type: "number" }, scrollY: { type: "number" }, screenshotId: { type: "string" } }, required: ["window", "x", "y", "scrollX", "scrollY"] } },
@@ -248,7 +347,7 @@ const TOOLS = [
   { name: "perform_secondary_action", desc: "Raise the target window. This release supports only action='Raise' on the root element_index 0.", inputSchema: { type: "object", properties: { window: W, element_index: { type: "number", enum: [0] }, action: { type: "string", enum: ["Raise"] } }, required: ["window", "element_index", "action"] } },
   { name: "activate_window", desc: "Bring an open window to the foreground. Input methods activate their target window automatically; use this only as an escape hatch.", inputSchema: { type: "object", properties: { window: W }, required: ["window"] } },
   { name: "close", desc: "Finish the current computer-use turn and close this MCP client connection. Call once after the task is verified. The shared FastCUA daemon and helper remain available to other clients.", inputSchema: { type: "object", properties: {} } },
-  { name: "js", desc: "Run JavaScript in a persistent REPL with `sky` (the window2 API) and `nodeRepl` in scope. Top-level await supported. globalThis state persists across calls. Print with nodeRepl.write(x) / console.log(x); get_window_state screenshots auto-display as images. Use for multi-step/dependent logic, polling loops, tree filtering, batched actions. Example: globalThis.apps = await sky.list_apps(); nodeRepl.write(apps.length);", inputSchema: { type: "object", properties: { code: { type: "string", description: "JavaScript to execute. Use await for sky calls. Assign cross-cell state to globalThis." } }, required: ["code"] } },
+  { name: "js", desc: "Persistent JS REPL with sky + nodeRepl. Includes sky.grid / sky.grid_refine / sky.click_cell for letter-grid targeting when UIA fails. Example: const st=await sky.get_window_state({window,include_text:false}); const g=sky.grid(st.viewport); await sky.click_cell({window, grid:g, cell:'B'});", inputSchema: { type: "object", properties: { code: { type: "string", description: "JavaScript to execute. Use await for sky calls. Assign cross-cell state to globalThis." } }, required: ["code"] } },
 ];
 
 function win(a) { return a && typeof a === "object" ? { app: a.app, id: a.id } : a; }
@@ -274,11 +373,25 @@ async function callTool(name, args) {
 }
 function stateToContent(state) {
   const content = [];
+  if (state?.viewport) {
+    const v = state.viewport;
+    content.push({
+      type: "text",
+      text: [
+        "Coordinate space (required for pixel clicks):",
+        `  viewport: ${v.width}x${v.height}  origin=top_left  space=${v.coordinate_space || "window_screenshot_pixels"}`,
+        `  screen origin: (${v.screenLeft ?? v.originX},${v.screenTop ?? v.originY})`,
+        "  click({x,y}) uses these pixel units (or x,y in 0..1 as fractions).",
+        "  When UIA indexes are empty/unusable: sky.grid({width,height,cols:3,rows:3}) → pick cell → sky.grid_refine / sky.click_cell.",
+      ].join("\n"),
+    });
+  }
   if (state?.accessibility?.tree) content.push({ type: "text", text: "Accessibility tree (use [N] as element_index):\n" + state.accessibility.tree });
   if (state?.accessibility) {
     const a = state.accessibility;
     const parts = [];
     if (a.focused_element) parts.push("Focused: " + a.focused_element);
+    if (a.focused_value != null && a.focused_value !== "") parts.push("Focused value: " + a.focused_value);
     if (a.selected_text) parts.push("Selected text: " + a.selected_text);
     if (a.document_text) parts.push("Document: " + a.document_text);
     if (parts.length) content.push({ type: "text", text: parts.join("\n") });
@@ -290,6 +403,10 @@ function stateToContent(state) {
       const m = /^data:([^;]+);base64,(.*)$/s.exec(s.url || "");
       if (m) content.push({ type: "image", data: m[2], mimeType: m[1] });
       else content.push({ type: "text", text: "[screenshot id=" + s.id + " " + (s.width || "?") + "x" + (s.height || "?") + "]" });
+      content.push({
+        type: "text",
+        text: `screenshot ${s.id}: ${s.width}x${s.height} (click x,y are in this size; pass screenshotId when clicking)`,
+      });
     }
     if (ids.length) content.push({ type: "text", text: "screenshotIds: " + JSON.stringify(ids) });
   }
@@ -319,7 +436,7 @@ async function handle(line) {
     let result;
     let closeAfterResponse = false;
     if (method === "initialize") {
-      result = { protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "sky-computer-use", version: "0.1.8" } };
+      result = { protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "sky-computer-use", version: "0.1.9" } };
     } else if (method === "initialized" || method === "notifications/initialized") {
       return;
     } else if (method === "tools/list") {
