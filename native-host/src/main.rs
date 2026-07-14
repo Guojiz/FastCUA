@@ -152,6 +152,7 @@ fn dispatch(method: &str, params: &Value) -> Result<Value, String> {
                 .unwrap_or(true);
             desktop::get_window_state(window, include_screenshot, include_text)
         }
+        "grid_view" => desktop::grid_view(params),
         "click" | "click_element" => {
             desktop::click(params)?;
             Ok(json!({}))

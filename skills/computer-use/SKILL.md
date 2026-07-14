@@ -57,31 +57,26 @@ When desktop work for this turn is done, call MCP **`close` once**. That ends th
 
 1. Always read `state.viewport` (or screenshot size) **before** coordinate clicks.
 2. Prefer `element_index` from the accessibility tree when labels exist.
-3. If the tree is empty/useless (many Electron apps): use **Apple Voice Control–style square number grid**:
+3. If the tree is empty/useless (many Electron apps): use **visual square grid** (one annotated image only — save tokens):
 
 ```js
-globalThis.state = await sky.get_window_state({ window: targetWindow, include_text: false });
-globalThis.targetWindow = state.window;
-const vp = state.viewport; // { width, height, ... }
+// ONE image: semi-transparent square outlines + small outlined numbers (UI still visible).
+let gv = await sky.grid_view({ window: targetWindow });
+// Look at the single grid image → SELECT a number only (no click).
 
-// Initial: SQUARE cells, prefer 3 rows (fallback 2). Numbers 1..N. Does NOT click.
-let grid = sky.grid({ width: vp.width, height: vp.height }); // mode square by default
-// Look at screenshot → SELECT a number only (e.g. "4"). No click yet.
-
-// Refine: 3×3 SQUARES only inside that cell — not the whole window again.
-grid = sky.grid_refine(grid, "4");
-// SELECT again (new 1..9). Repeat refine until small enough.
+// Refine: crops to that cell, draws 3×3 squares — still ONE image (not the whole window again).
+gv = await sky.grid_refine({ window: targetWindow, grid: gv.grid, cell: "4" });
+// Repeat until small enough.
 
 // Explicit click only when ready (like saying "click" in Voice Control):
-await sky.click_cell({ window: targetWindow, grid, cell: "5", screenshotId: state.screenshots[0].id });
+await sky.click_cell({ window: targetWindow, grid: gv.grid, cell: "5" });
 ```
 
 Rules:
-- Cells are **squares**, not stretched rectangles matching the window aspect ratio.
-- `grid_refine` returns **only the chosen cell’s interior** subdivided; parent viewport size stays for absolute x,y.
-- **Select ≠ click.** Never call `click_cell` until the target cell is precise enough.
-- Optional: pass `x,y` both in `0..1` as fractions of the viewport.
-- Out-of-bounds coordinates error with viewport size — recompute, do not thrash.
+- Overlay draws **square cell borders** (not numbers alone): thin semi-transparent lines + outlined digits so content is not blocked.
+- Refine **crops** to the selected cell (no full-window re-send).
+- **Select ≠ click.** Never `click_cell` until precise enough.
+- Prefer `grid_view` over raw full screenshots when targeting by eye.
 
 ### Text fields (read → decide → write)
 

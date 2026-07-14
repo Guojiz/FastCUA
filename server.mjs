@@ -144,49 +144,10 @@ function buildGrid(input = {}) {
 
   const rw = right - left;
   const rh = bottom - top;
-  const mode = input.mode === "rect" ? "rect" : "square"; // default square (Apple-like)
   const refine = input.refine === true || input.phase === "refine";
   const cells = [];
 
-  if (mode === "rect") {
-    // Legacy: stretch cols×rows to fill region (non-square). Prefer square.
-    const cols = Math.min(10, Math.max(2, Math.round(Number(input.cols) || 3)));
-    const rows = Math.min(10, Math.max(2, Math.round(Number(input.rows) || 3)));
-    const cellW = rw / cols;
-    const cellH = rh / rows;
-    let n = 1;
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        const L = left + c * cellW;
-        const T = top + r * cellH;
-        const R = left + (c + 1) * cellW;
-        const B = top + (r + 1) * cellH;
-        cells.push({
-          id: String(n++),
-          row: r,
-          col: c,
-          left: Math.round(L),
-          top: Math.round(T),
-          right: Math.round(R),
-          bottom: Math.round(B),
-          cx: Math.round((L + R) / 2),
-          cy: Math.round((T + B) / 2),
-          width: Math.round(R - L),
-          height: Math.round(B - T),
-          square: false,
-        });
-      }
-    }
-    return {
-      width, height, cols, rows, mode: "rect", phase: refine ? "refine" : "initial",
-      region: { left, top, right, bottom },
-      cells,
-      select_only: true,
-      howto: "SELECT a cell id (no click yet). Refine with sky.grid_refine(grid, id). Click only via sky.click_cell when precise enough.",
-    };
-  }
-
-  // --- square mode (default) ---
+  // Square-only packing (Apple Voice Control style). No stretched rect mode.
   let cols;
   let rows;
   let side;
@@ -248,10 +209,10 @@ function buildGrid(input = {}) {
     cells,
     select_only: true,
     howto: [
-      "Cells are SQUARES numbered 1..N (Apple Voice Control style).",
-      "SELECT a number only — this does NOT click.",
-      "Refine: sky.grid_refine(grid, id) → new 3×3 squares ONLY inside that cell (not the whole window).",
-      "Repeat refine until small enough, then sky.click_cell({ window, grid, cell: id }) to click the center.",
+      "Prefer sky.grid_view({window}) for ONE image with square outlines + numbers (semi-transparent).",
+      "SELECT a number only — does NOT click.",
+      "Refine: await sky.grid_refine({window, grid, cell:id}) → crops to that cell, draws 3×3 squares only.",
+      "Click only: sky.click_cell({window, grid, cell:id}).",
     ].join(" "),
   };
 }
@@ -293,29 +254,32 @@ const sky = {
   perform_secondary_action: (i) => daemon.request("perform_secondary_action", i),
   activate_window: (i) => daemon.request("activate_window", i),
   close: async () => { await daemon.close(); return { ok: true }; },
-  // Coordinate helpers (local — no daemon round-trip)
+  // Coordinate helpers
   viewport: viewportFromState,
   grid: buildGrid,
   grid_cell: cellById,
   /**
-   * Select a cell and return a NEW 3×3 square grid covering only that cell.
-   * Does NOT click. Parent viewport width/height stay for absolute coordinates.
+   * Capture ONCE with visual square-grid overlay (semi-transparent lines + outlined numbers).
+   * path: string[] of selected cell ids to drill in; each refine crops to that cell (one image, fewer tokens).
+   * Does NOT click. Prefer this over get_window_state + separate raw screenshots for targeting.
    */
-  grid_refine: (grid, cellId) => {
-    const cell = cellById(grid, cellId);
-    // Always 3×3 squares inside the chosen cell (infinite drill-down).
-    return buildGrid({
-      width: grid.width,
-      height: grid.height,
-      left: cell.left,
-      top: cell.top,
-      right: cell.right,
-      bottom: cell.bottom,
-      refine: true,
-      mode: "square",
-    });
+  grid_view: async (input = {}) => {
+    const window = input.window;
+    const path = Array.isArray(input.path) ? input.path.map(String) : [];
+    return daemon.request("grid_view", { window, path });
   },
-  /** Explicit click at cell center — only call when the user/agent intends to click. */
+  /**
+   * Drill into a cell: appends id to path and returns a NEW grid_view (single cropped annotated image).
+   * Does NOT click.
+   */
+  grid_refine: async (input) => {
+    const { window, grid, cell: cellId } = input || {};
+    if (!window) throw new Error("grid_refine requires { window, grid, cell }");
+    cellById(grid, cellId); // validate
+    const path = [...(grid.path || []), String(cellId)];
+    return daemon.request("grid_view", { window, path });
+  },
+  /** Explicit click at cell center — only when ready (select ≠ click). */
   click_cell: async (input) => {
     const { window, grid, cell: cellId, mouse_button, click_count, screenshotId } = input || {};
     const cell = cellById(grid, cellId);
@@ -325,7 +289,7 @@ const sky = {
       y: cell.cy,
       mouse_button,
       click_count,
-      screenshotId,
+      screenshotId: screenshotId || "grid-0",
     });
   },
 };
@@ -387,8 +351,15 @@ const skyProxy = new Proxy(sky, {
         return r;
       }
       if (cell && !cell.active) throw new Error("js cell is no longer active");
-      if (prop === "get_window_state" && r && Array.isArray(r.screenshots)) {
-        for (const s of r.screenshots) {
+      // Emit images: grid_view = single annotated frame only (save tokens).
+      // get_window_state still emits screenshots as before.
+      if ((prop === "get_window_state" || prop === "grid_view" || prop === "grid_refine") && r && Array.isArray(r.screenshots)) {
+        // Prefer annotated grid image only when present.
+        const shots = prop === "grid_view" || prop === "grid_refine"
+          ? r.screenshots.filter((s) => s.annotated || s.id === "grid-0").slice(0, 1)
+          : r.screenshots;
+        const use = shots.length ? shots : r.screenshots.slice(0, 1);
+        for (const s of use) {
           const m = /^data:([^;]+);base64,(.*)$/s.exec(s.url || "");
           if (m) replSession.images.push({ data: m[2], mimeType: m[1] });
         }
@@ -460,7 +431,8 @@ const TOOLS = [
   { name: "perform_secondary_action", desc: "Raise the target window. This release supports only action='Raise' on the root element_index 0.", inputSchema: { type: "object", properties: { window: W, element_index: { type: "number", enum: [0] }, action: { type: "string", enum: ["Raise"] } }, required: ["window", "element_index", "action"] } },
   { name: "activate_window", desc: "Bring an open window to the foreground. Input methods activate their target window automatically; use this only as an escape hatch.", inputSchema: { type: "object", properties: { window: W }, required: ["window"] } },
   { name: "close", desc: "Finish the current computer-use turn and close this MCP client connection. Call once after the task is verified. The shared FastCUA daemon and helper remain available to other clients.", inputSchema: { type: "object", properties: {} } },
-  { name: "js", desc: "Persistent JS REPL with sky + nodeRepl. Apple-style square number grid: sky.grid(viewport) → select id (no click) → sky.grid_refine(grid,id) 3×3 inside cell only → sky.click_cell when ready. Example: let g=sky.grid(st.viewport); g=sky.grid_refine(g,'4'); await sky.click_cell({window,grid:g,cell:'5'});", inputSchema: { type: "object", properties: { code: { type: "string", description: "JavaScript to execute. Use await for sky calls. Assign cross-cell state to globalThis." } }, required: ["code"] } },
+  { name: "js", desc: "Persistent JS REPL with sky + nodeRepl. Prefer sky.grid_view({window}) for ONE annotated square-grid image (semi-transparent outlines + outlined numbers). Refine: sky.grid_refine({window,grid,cell}). Click only: sky.click_cell. Example: let gv=await sky.grid_view({window}); gv=await sky.grid_refine({window,grid:gv.grid,cell:'4'}); await sky.click_cell({window,grid:gv.grid,cell:'5'});", inputSchema: { type: "object", properties: { code: { type: "string", description: "JavaScript to execute. Use await for sky calls. Assign cross-cell state to globalThis." } }, required: ["code"] } },
+  { name: "grid_view", desc: "Capture window once with visual SQUARE number grid overlaid (semi-transparent cell outlines + outlined digits). Optional path drills into prior cell ids (crops + 3x3). Returns one annotated image only. Does not click.", inputSchema: { type: "object", properties: { window: W, path: { type: "array", items: { type: "string" }, description: "Prior selected cell ids for drill-down" } }, required: ["window"] } },
 ];
 
 function win(a) { return a && typeof a === "object" ? { app: a.app, id: a.id } : a; }
@@ -472,6 +444,7 @@ async function callTool(name, args) {
     case "get_window": return await sky.get_window({ app: args.app, id: args.id });
     case "launch_app": return await sky.launch_app({ app: args.app });
     case "get_window_state": return await sky.get_window_state({ window: w, include_screenshot: args.include_screenshot ?? true, include_text: args.include_text ?? true });
+    case "grid_view": return await sky.grid_view({ window: w, path: args.path || [] });
     case "click": return await sky.click({ window: w, element_index: args.element_index, x: args.x, y: args.y, mouse_button: args.mouse_button, click_count: args.click_count, screenshotId: args.screenshotId });
     case "press_key": return await sky.press_key({ window: w, key: args.key });
     case "type_text": return await sky.type_text({ window: w, text: args.text, replace: args.replace });
@@ -486,6 +459,28 @@ async function callTool(name, args) {
 }
 function stateToContent(state) {
   const content = [];
+  // grid_view result: one annotated image + compact text (no raw duplicate shot).
+  if (state?.grid && Array.isArray(state?.screenshots)) {
+    const g = state.grid;
+    const ids = (g.cells || []).map((c) => c.id).join(",");
+    content.push({
+      type: "text",
+      text: [
+        `GRID ${g.phase || "initial"} mode=square ${g.rows}x${g.cols} side=${g.side} path=${JSON.stringify(g.path || state.path || [])}`,
+        `viewport ${state.viewport?.width}x${state.viewport?.height}  crop=${state.view?.width}x${state.view?.height}`,
+        `cells: ${ids}`,
+        "SELECT a number only (no click). Refine: grid_view with path+[id]. Click: click_cell when ready.",
+        "Overlay: semi-transparent square outlines + small outlined digits (UI still visible underneath).",
+      ].join("\n"),
+    });
+    const s = state.screenshots.find((x) => x.annotated || x.id === "grid-0") || state.screenshots[0];
+    if (s) {
+      const m = /^data:([^;]+);base64,(.*)$/s.exec(s.url || "");
+      if (m) content.push({ type: "image", data: m[2], mimeType: m[1] });
+    }
+    content.push({ type: "text", text: "grid=" + JSON.stringify({ path: g.path, cells: g.cells, select_only: true }) });
+    return content;
+  }
   if (state?.viewport) {
     const v = state.viewport;
     content.push({
@@ -494,10 +489,7 @@ function stateToContent(state) {
         "Coordinate space (required for pixel clicks):",
         `  viewport: ${v.width}x${v.height}  origin=top_left  space=${v.coordinate_space || "window_screenshot_pixels"}`,
         `  screen origin: (${v.screenLeft ?? v.originX},${v.screenTop ?? v.originY})`,
-        "  click({x,y}) uses these pixel units (or x,y in 0..1 as fractions).",
-        "  When UIA is unusable: sky.grid(viewport) → SQUARE number cells (3 rows, or 2 if tight).",
-        "  SELECT number only (no click). sky.grid_refine(grid, id) → 3×3 squares INSIDE that cell only.",
-        "  Repeat refine; only then sky.click_cell({window, grid, cell:id}) to click the center.",
+        "  Prefer grid_view for targeting (one annotated square-grid image).",
       ].join("\n"),
     });
   }
@@ -566,7 +558,9 @@ async function handle(line) {
         delete result.closeRequested;
       } else {
         const out = await callTool(name, args);
-        const content = (name === "get_window_state" && out) ? stateToContent(out) : [{ type: "text", text: JSON.stringify(out, null, 2) }];
+        const content = ((name === "get_window_state" || name === "grid_view") && out)
+          ? stateToContent(out)
+          : [{ type: "text", text: JSON.stringify(out, null, 2) }];
         result = { content, isError: false };
         closeAfterResponse = name === "close";
       }

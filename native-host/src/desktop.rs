@@ -518,7 +518,15 @@ fn uia_snapshot(window: &WindowRef) -> Result<uia::Snapshot, String> {
     result
 }
 
-fn capture_window(id: u64) -> Result<Value, String> {
+struct CapturedRgb {
+    width: i32,
+    height: i32,
+    origin_x: i32,
+    origin_y: i32,
+    rgb: Vec<u8>,
+}
+
+fn capture_window_rgb(id: u64) -> Result<CapturedRgb, String> {
     let hwnd = id as usize as HWND;
     let mut rect = RECT::default();
     if unsafe { GetWindowRect(hwnd, &mut rect) } == 0 {
@@ -585,24 +593,441 @@ fn capture_window(id: u64) -> Result<Value, String> {
         return Err("GetDIBits failed".into());
     }
 
-    let mut rgb_data = Vec::with_capacity(width as usize * height as usize * 3);
+    let mut rgb = Vec::with_capacity(width as usize * height as usize * 3);
     for pixel in bgra.chunks_exact(4) {
-        rgb_data.extend_from_slice(&[pixel[2], pixel[1], pixel[0]]);
+        rgb.extend_from_slice(&[pixel[2], pixel[1], pixel[0]]);
     }
+    Ok(CapturedRgb {
+        width,
+        height,
+        origin_x: rect.left,
+        origin_y: rect.top,
+        rgb,
+    })
+}
+
+fn encode_jpeg_rgb(rgb: &[u8], width: i32, height: i32, quality: u8) -> Result<Vec<u8>, String> {
     let mut jpeg = Vec::new();
-    Encoder::new(&mut jpeg, 82)
-        .encode(&rgb_data, width as u16, height as u16, ColorType::Rgb)
+    Encoder::new(&mut jpeg, quality)
+        .encode(rgb, width as u16, height as u16, ColorType::Rgb)
         .map_err(|error| format!("JPEG encode failed: {error}"))?;
+    Ok(jpeg)
+}
+
+fn capture_window(id: u64) -> Result<Value, String> {
+    let cap = capture_window_rgb(id)?;
+    let jpeg = encode_jpeg_rgb(&cap.rgb, cap.width, cap.height, 82)?;
     Ok(json!({
         "id": "screenshot-0",
         "url": format!("data:image/jpeg;base64,{}", BASE64.encode(jpeg)),
-        "width": width,
-        "height": height,
-        "originX": rect.left,
-        "originY": rect.top,
+        "width": cap.width,
+        "height": cap.height,
+        "originX": cap.origin_x,
+        "originY": cap.origin_y,
         "zIndex": 0
     }))
 }
+
+#[derive(Clone, Debug)]
+struct GridCell {
+    id: String,
+    row: i32,
+    col: i32,
+    left: i32,
+    top: i32,
+    right: i32,
+    bottom: i32,
+    cx: i32,
+    cy: i32,
+    side: i32,
+}
+
+/// Apple-like square packing. `refine`: force 3×3 squares inside the region.
+fn pack_square_cells(left: i32, top: i32, right: i32, bottom: i32, refine: bool) -> (i32, i32, i32, Vec<GridCell>) {
+    let rw = (right - left).max(1);
+    let rh = (bottom - top).max(1);
+    let (rows, cols, side, origin_left, origin_top) = if refine {
+        let side = (rw.min(rh) as f64) / 3.0;
+        let side_i = side.max(1.0);
+        let gl = left as f64 + (rw as f64 - side_i * 3.0) / 2.0;
+        let gt = top as f64 + (rh as f64 - side_i * 3.0) / 2.0;
+        (3, 3, side_i, gl, gt)
+    } else {
+        // Prefer 3 rows of squares; if width too tight, 2 rows.
+        let mut rows = 3i32;
+        let mut side = rh as f64 / 3.0;
+        let mut cols = (rw as f64 / side + 1e-6).floor() as i32;
+        if cols < 2 {
+            rows = 2;
+            side = rh as f64 / 2.0;
+            cols = (rw as f64 / side + 1e-6).floor() as i32;
+        }
+        if cols < 1 {
+            rows = 1;
+            cols = 1;
+            side = rw.min(rh) as f64;
+        }
+        let side_i = side.max(1.0);
+        let gl = left as f64 + (rw as f64 - side_i * cols as f64) / 2.0;
+        let gt = top as f64 + (rh as f64 - side_i * rows as f64) / 2.0;
+        (rows, cols, side_i, gl, gt)
+    };
+
+    let mut cells = Vec::new();
+    let mut id = 1i32;
+    for r in 0..rows {
+        for c in 0..cols {
+            let l = origin_left + c as f64 * side;
+            let t = origin_top + r as f64 * side;
+            let rr = l + side;
+            let bb = t + side;
+            let li = l.round() as i32;
+            let ti = t.round() as i32;
+            let ri = rr.round() as i32;
+            let bi = bb.round() as i32;
+            cells.push(GridCell {
+                id: id.to_string(),
+                row: r,
+                col: c,
+                left: li,
+                top: ti,
+                right: ri,
+                bottom: bi,
+                cx: (li + ri) / 2,
+                cy: (ti + bi) / 2,
+                side: (ri - li).max(1),
+            });
+            id += 1;
+        }
+    }
+    (rows, cols, side.round() as i32, cells)
+}
+
+fn crop_rgb(
+    rgb: &[u8],
+    full_w: i32,
+    full_h: i32,
+    left: i32,
+    top: i32,
+    right: i32,
+    bottom: i32,
+) -> Result<(i32, i32, Vec<u8>), String> {
+    let l = left.clamp(0, full_w);
+    let t = top.clamp(0, full_h);
+    let r = right.clamp(0, full_w).max(l + 1);
+    let b = bottom.clamp(0, full_h).max(t + 1);
+    let cw = r - l;
+    let ch = b - t;
+    let mut out = vec![0u8; (cw * ch * 3) as usize];
+    for y in 0..ch {
+        let src_y = t + y;
+        if src_y < 0 || src_y >= full_h {
+            continue;
+        }
+        let src_off = ((src_y * full_w + l) * 3) as usize;
+        let dst_off = (y * cw * 3) as usize;
+        let n = (cw * 3) as usize;
+        out[dst_off..dst_off + n].copy_from_slice(&rgb[src_off..src_off + n]);
+    }
+    Ok((cw, ch, out))
+}
+
+/// Blend a color onto RGB with alpha in 0..1 (UI stays readable under the grid).
+fn blend_px(rgb: &mut [u8], w: i32, h: i32, x: i32, y: i32, r: u8, g: u8, b: u8, a: f32) {
+    if x < 0 || y < 0 || x >= w || y >= h {
+        return;
+    }
+    let i = ((y * w + x) * 3) as usize;
+    let a = a.clamp(0.0, 1.0);
+    let ia = 1.0 - a;
+    rgb[i] = (rgb[i] as f32 * ia + r as f32 * a).round() as u8;
+    rgb[i + 1] = (rgb[i + 1] as f32 * ia + g as f32 * a).round() as u8;
+    rgb[i + 2] = (rgb[i + 2] as f32 * ia + b as f32 * a).round() as u8;
+}
+
+fn draw_hline(rgb: &mut [u8], w: i32, h: i32, y: i32, x0: i32, x1: i32, thick: i32, r: u8, g: u8, b: u8, a: f32) {
+    let half = thick / 2;
+    for dy in -half..=(thick - 1 - half) {
+        for x in x0..=x1 {
+            blend_px(rgb, w, h, x, y + dy, r, g, b, a);
+        }
+    }
+}
+
+fn draw_vline(rgb: &mut [u8], w: i32, h: i32, x: i32, y0: i32, y1: i32, thick: i32, r: u8, g: u8, b: u8, a: f32) {
+    let half = thick / 2;
+    for dx in -half..=(thick - 1 - half) {
+        for y in y0..=y1 {
+            blend_px(rgb, w, h, x + dx, y, r, g, b, a);
+        }
+    }
+}
+
+// 5×7 bitmap digits 0-9 (row-major, bit 0 = left).
+const DIGIT_FONT: [[u8; 7]; 10] = [
+    [0b01110, 0b10001, 0b10011, 0b10101, 0b11001, 0b10001, 0b01110], // 0
+    [0b00100, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110], // 1
+    [0b01110, 0b10001, 0b00001, 0b00010, 0b00100, 0b01000, 0b11111], // 2
+    [0b01110, 0b10001, 0b00001, 0b00110, 0b00001, 0b10001, 0b01110], // 3
+    [0b00010, 0b00110, 0b01010, 0b10010, 0b11111, 0b00010, 0b00010], // 4
+    [0b11111, 0b10000, 0b11110, 0b00001, 0b00001, 0b10001, 0b01110], // 5
+    [0b00110, 0b01000, 0b10000, 0b11110, 0b10001, 0b10001, 0b01110], // 6
+    [0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b01000, 0b01000], // 7
+    [0b01110, 0b10001, 0b10001, 0b01110, 0b10001, 0b10001, 0b01110], // 8
+    [0b01110, 0b10001, 0b10001, 0b01111, 0b00001, 0b00010, 0b01100], // 9
+];
+
+fn draw_digit(
+    rgb: &mut [u8],
+    w: i32,
+    h: i32,
+    digit: u8,
+    cx: i32,
+    cy: i32,
+    scale: i32,
+    fill: (u8, u8, u8),
+    outline: (u8, u8, u8),
+) {
+    if digit > 9 {
+        return;
+    }
+    let scale = scale.max(1);
+    let gw = 5 * scale;
+    let gh = 7 * scale;
+    let ox = cx - gw / 2;
+    let oy = cy - gh / 2;
+    let font = &DIGIT_FONT[digit as usize];
+    // Outline first (1px ring), then fill — keeps numbers readable without solid plate.
+    for pass in 0..2 {
+        let (r, g, b) = if pass == 0 { outline } else { fill };
+        let a = if pass == 0 { 0.55 } else { 0.72 };
+        for row in 0..7 {
+            let bits = font[row];
+            for col in 0..5 {
+                if (bits >> (4 - col)) & 1 == 0 {
+                    continue;
+                }
+                for sy in 0..scale {
+                    for sx in 0..scale {
+                        let px = ox + col * scale + sx;
+                        let py = oy + row as i32 * scale + sy;
+                        if pass == 0 {
+                            for dy in -1..=1 {
+                                for dx in -1..=1 {
+                                    if dx == 0 && dy == 0 {
+                                        continue;
+                                    }
+                                    blend_px(rgb, w, h, px + dx, py + dy, r, g, b, a * 0.7);
+                                }
+                            }
+                        } else {
+                            blend_px(rgb, w, h, px, py, r, g, b, a);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Draw square cell borders (semi-transparent) + outlined numbers. Does not fill cell interiors.
+fn draw_square_grid_overlay(rgb: &mut [u8], w: i32, h: i32, cells: &[GridCell]) {
+    if cells.is_empty() {
+        return;
+    }
+    let side = cells[0].side.max(1);
+    // Thin lines relative to cell size — visible but not a heavy cage.
+    let thick = (side / 90).clamp(1, 2);
+    // Cyan-ish stroke at ~38% so UI underneath stays legible.
+    let (lr, lg, lb, la) = (80u8, 220u8, 255u8, 0.38f32);
+    for cell in cells {
+        // Rectangle outline only (no fill).
+        draw_hline(rgb, w, h, cell.top, cell.left, cell.right, thick, lr, lg, lb, la);
+        draw_hline(rgb, w, h, cell.bottom - 1, cell.left, cell.right, thick, lr, lg, lb, la);
+        draw_vline(rgb, w, h, cell.left, cell.top, cell.bottom, thick, lr, lg, lb, la);
+        draw_vline(rgb, w, h, cell.right - 1, cell.top, cell.bottom, thick, lr, lg, lb, la);
+    }
+    for cell in cells {
+        // Number scale: small — about 18–22% of cell, capped so it never dominates.
+        let scale = (side as f64 * 0.07).round() as i32;
+        let scale = scale.clamp(2, 6);
+        // Multi-digit: draw centered sequence.
+        let digits: Vec<u8> = cell
+            .id
+            .chars()
+            .filter_map(|ch| ch.to_digit(10).map(|d| d as u8))
+            .collect();
+        if digits.is_empty() {
+            continue;
+        }
+        let digit_w = 5 * scale + scale; // glyph + gap
+        let total_w = digits.len() as i32 * digit_w - scale;
+        let mut x = cell.cx - total_w / 2 + (5 * scale) / 2;
+        for d in digits {
+            draw_digit(
+                rgb,
+                w,
+                h,
+                d,
+                x,
+                cell.cy,
+                scale,
+                (255, 255, 255), // soft white fill
+                (0, 0, 0),       // dark outline
+            );
+            x += digit_w;
+        }
+    }
+}
+
+/// One screenshot with square number grid overlaid. Optional `path` of cell ids drills in
+/// (crop to selection → 3×3 squares only inside). Single image to save tokens.
+pub fn grid_view(params: &Value) -> Result<Value, String> {
+    let window = params_window(params)?;
+    activate_window(window.id)?;
+    let cap = capture_window_rgb(window.id)?;
+
+    let path: Vec<String> = params
+        .get("path")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|x| x.as_str().map(|s| s.trim().to_string()))
+                .filter(|s| !s.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // Walk path on full-window coordinates to find the crop region.
+    let mut region_l = 0i32;
+    let mut region_t = 0i32;
+    let mut region_r = cap.width;
+    let mut region_b = cap.height;
+    for (depth, id) in path.iter().enumerate() {
+        // depth 0: initial square pack; depth>=1: 3×3 refine inside previous cell.
+        let (_rows, _cols, _side, cells) =
+            pack_square_cells(region_l, region_t, region_r, region_b, depth > 0);
+        let cell = cells.iter().find(|c| c.id == *id).ok_or_else(|| {
+            format!(
+                "unknown grid cell id `{id}` at depth {depth}; valid: {}",
+                cells
+                    .iter()
+                    .map(|c| c.id.as_str())
+                    .collect::<Vec<_>>()
+                    .join(",")
+            )
+        })?;
+        region_l = cell.left;
+        region_t = cell.top;
+        region_r = cell.right;
+        region_b = cell.bottom;
+    }
+
+    // Display: crop to current region (token-friendly zoom) and draw CURRENT level grid.
+    let display_refine = !path.is_empty();
+    let (rows, cols, side, cells_abs) =
+        pack_square_cells(region_l, region_t, region_r, region_b, display_refine);
+
+    let (cw, ch, mut crop) = crop_rgb(
+        &cap.rgb,
+        cap.width,
+        cap.height,
+        region_l,
+        region_t,
+        region_r,
+        region_b,
+    )?;
+
+    let cells_local: Vec<GridCell> = cells_abs
+        .iter()
+        .map(|c| GridCell {
+            id: c.id.clone(),
+            row: c.row,
+            col: c.col,
+            left: c.left - region_l,
+            top: c.top - region_t,
+            right: c.right - region_l,
+            bottom: c.bottom - region_t,
+            cx: c.cx - region_l,
+            cy: c.cy - region_t,
+            side: c.side,
+        })
+        .collect();
+
+    draw_square_grid_overlay(&mut crop, cw, ch, &cells_local);
+
+    let jpeg = encode_jpeg_rgb(&crop, cw, ch, 72)?;
+    let cells_json: Vec<Value> = cells_abs
+        .iter()
+        .map(|c| {
+            json!({
+                "id": c.id,
+                "row": c.row,
+                "col": c.col,
+                "left": c.left,
+                "top": c.top,
+                "right": c.right,
+                "bottom": c.bottom,
+                "cx": c.cx,
+                "cy": c.cy,
+                "width": c.side,
+                "height": c.side,
+                "square": true
+            })
+        })
+        .collect();
+
+    Ok(json!({
+        "window": window,
+        "path": path,
+        "select_only": true,
+        "phase": if display_refine { "refine" } else { "initial" },
+        "viewport": {
+            "width": cap.width,
+            "height": cap.height,
+            "originX": cap.origin_x,
+            "originY": cap.origin_y,
+            "coordinate_space": "window_screenshot_pixels",
+            "origin": "top_left",
+            "click_xy": "grid cells use absolute window pixels (cx,cy); click_cell uses those"
+        },
+        "view": {
+            "cropLeft": region_l,
+            "cropTop": region_t,
+            "cropRight": region_r,
+            "cropBottom": region_b,
+            "width": cw,
+            "height": ch,
+            "note": "Single annotated image: semi-transparent square outlines + outlined numbers. Crop zooms current region."
+        },
+        "grid": {
+            "width": cap.width,
+            "height": cap.height,
+            "cols": cols,
+            "rows": rows,
+            "side": side,
+            "mode": "square",
+            "phase": if display_refine { "refine" } else { "initial" },
+            "path": path,
+            "region": { "left": region_l, "top": region_t, "right": region_r, "bottom": region_b },
+            "cells": cells_json,
+            "select_only": true,
+            "howto": "SELECT a number (no click). Refine: grid_view path+[id]. Click: click_cell only when ready."
+        },
+        "screenshots": [{
+            "id": "grid-0",
+            "url": format!("data:image/jpeg;base64,{}", BASE64.encode(jpeg)),
+            "width": cw,
+            "height": ch,
+            "originX": cap.origin_x + region_l,
+            "originY": cap.origin_y + region_t,
+            "zIndex": 0,
+            "annotated": true,
+            "overlay": "square_cells_semi_transparent_lines_outlined_numbers"
+        }]
+    }))
+}
+
 
 pub fn click(params: &Value) -> Result<(), String> {
     let window = params_window(params)?;
