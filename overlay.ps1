@@ -66,6 +66,7 @@ $app = & $NF "AppText"
 $approvalPanel = & $NF "ApprovalPanel"
 $allowOnce = & $NF "AllowOnceBtn"
 $trust = & $NF "TrustBtn"
+$fullAccess = & $NF "FullAccessBtn"
 $deny = & $NF "DenyBtn"
 $pause = & $NF "PauseBtn"
 $resume = & $NF "ResumeBtn"
@@ -88,8 +89,8 @@ $script:keyWasDown = @{}
 function B([string]$value) { return [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($value)) }
 
 function T([string]$key) {
-  $zh = @{ "using"=(B "RmFzdENVQSDmraPlnKjkvb/nlKjkvaDnmoTnlLXohJE="); "paused"=(B "RmFzdENVQSDlt7LmmoLlgZw="); "approval"=(B "RmFzdENVQSDpnIDopoHmjojmnYM="); "offline"=(B "RmFzdENVQSDlt7Lnprvnur8="); "settings"=(B "Rjcg6K6+572u"); "pause"=(B "Rjgg5pqC5YGc"); "resume"=(B "Rjgg5oGi5aSN"); "interject"=(B "Rjkg5o+S6K+d"); "exit"=(B "RjEwIOmAgOWHug=="); "active"=(B "5qGM6Z2i5o6n5Yi26L+b6KGM5Lit"); "blocked"=(B "5qGM6Z2i6L6T5YWl5bey6ZSB5a6a77yM5oGi5aSN5ZCO57un57ut44CC"); "choose"=(B "MSDkuIDmrKEgfCAyIOWni+e7iCB8IDMg5ouS57ud"); "waiting"=(B "5q2j5Zyo562J5b6F5L2g55qE5Yaz5a6a"); "inputTip"=(B "6L6T5YWl5oyH5Luk77yM5oyJIEVudGVyIOWPkemAgQ==") }
-  $en = @{ "using"="FastCUA is using your computer"; "paused"="FastCUA is paused"; "approval"="FastCUA needs approval"; "offline"="FastCUA is offline"; "settings"="F7 settings"; "pause"="F8 pause"; "resume"="F8 resume"; "interject"="F9 interject"; "exit"="F10 exit"; "active"="Desktop control is active"; "blocked"="Desktop input is blocked until you resume."; "choose"="1 once  |  2 always approve  |  3 deny"; "waiting"="is waiting for your decision"; "inputTip"="Type an instruction and press Enter" }
+  $zh = @{ "using"=(B "RmFzdENVQSDmraPlnKjkvb/nlKjkvaDnmoTnlLXohJE="); "paused"=(B "RmFzdENVQSDlt7LmmoLlgZw="); "approval"=(B "RmFzdENVQSDpnIDopoHmjojmnYM="); "offline"=(B "RmFzdENVQSDlt7Lnprvnur8="); "settings"=(B "Rjcg6K6+572u"); "pause"=(B "Rjgg5pqC5YGc"); "resume"=(B "Rjgg5oGi5aSN"); "interject"=(B "Rjkg5o+S6K+d"); "exit"=(B "RjEwIOmAgOWHug=="); "active"=(B "5qGM6Z2i5o6n5Yi26L+b6KGM5Lit"); "blocked"=(B "5qGM6Z2i6L6T5YWl5bey6ZSB5a6a77yM5oGi5aSN5ZCO57un57ut44CC"); "choose"=(B "MSDkuIDmrKEgfCAyIOWni+e7iCB8IDMg5a6M5YWoIHwgNCDmi5Lnu50="); "waiting"=(B "5q2j5Zyo562J5b6F5L2g55qE5Yaz5a6a"); "inputTip"=(B "6L6T5YWl5oyH5Luk77yM5oyJIEVudGVyIOWPkemAgQ==") }
+  $en = @{ "using"="FastCUA is using your computer"; "paused"="FastCUA is paused"; "approval"="FastCUA needs approval"; "offline"="FastCUA is offline"; "settings"="F7 settings"; "pause"="F8 pause"; "resume"="F8 resume"; "interject"="F9 interject"; "exit"="F10 exit"; "active"="Desktop control is active"; "blocked"="Desktop input is blocked until you resume."; "choose"="1 once  |  2 always  |  3 full access  |  4 deny"; "waiting"="is waiting for your decision"; "inputTip"="Type an instruction and press Enter" }
   return $(if ($script:language -eq "zh") { $zh[$key] } else { $en[$key] })
 }
 
@@ -101,7 +102,8 @@ function Apply-StaticLabels {
   $exitButton.Content = $(if ($script:language -eq "zh") { B "6YCA5Ye6" } else { "Exit" })
   $allowOnce.Content = $(if ($script:language -eq "zh") { B "MSDCtyDlhYHorrjkuIDmrKE=" } else { "1 · Allow once" })
   $trust.Content = $(if ($script:language -eq "zh") { B "MiDCtyDlp4vnu4jmibnlh4Y=" } else { "2 · Always approve" })
-  $deny.Content = $(if ($script:language -eq "zh") { B "MyDCtyDmi5Lnu50=" } else { "3 · Deny" })
+  $fullAccess.Content = $(if ($script:language -eq "zh") { B "MyDCtyDlrozlhajorr/pl64=" } else { "3 · Full access" })
+  $deny.Content = $(if ($script:language -eq "zh") { B "NCDCtyDmi5Lnu50=" } else { "4 · Deny" })
   $inputBox.ToolTip = T "inputTip"
 }
 
@@ -135,8 +137,8 @@ function Set-IslandPosition {
 function Set-IslandExpanded([bool]$expand, [bool]$focusInput = $false) {
   $script:manualExpanded = $expand
   if ($expand) {
-    $win.Width = 560
-    $win.Height = if ($approvalPanel.Visibility -eq "Visible") { 274 } else { 200 }
+    $win.Width = 580
+    $win.Height = if ($approvalPanel.Visibility -eq "Visible") { 300 } else { 200 }
     $expanded.Visibility = "Visible"
     $root.Background = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#F2111522")
     $root.Padding = [System.Windows.Thickness]::new(16, 11, 16, 12)
@@ -345,10 +347,11 @@ $stop.Add_Click({ Post-Action "stopAll"; $script:manualExpanded = $false; Set-Is
 $exitButton.Add_Click({ Post-Action "shutdown" })
 $allowOnce.Add_Click({ Decide-Approval "allowOnce" })
 $trust.Add_Click({ Decide-Approval "alwaysApprove" })
+$fullAccess.Add_Click({ Decide-Approval "fullAccess" })
 $deny.Add_Click({ Decide-Approval "denyApproval" })
 $inputBox.Add_KeyDown({ param($sender, $event) if ($event.Key -eq "Return") { Send-Interjection; $event.Handled = $true } })
 
-# Approval keyboard: 1 once / 2 always approve / 3 deny (when approval panel is up and input is not focused)
+# Approval keyboard: 1 once / 2 always / 3 full access / 4 deny
 $win.Add_PreviewKeyDown({
   param($sender, $event)
   if ($approvalPanel.Visibility -ne "Visible" -or -not $script:pending) { return }
@@ -358,8 +361,10 @@ $win.Add_PreviewKeyDown({
     "NumPad1" { Decide-Approval "allowOnce"; $event.Handled = $true }
     "D2" { Decide-Approval "alwaysApprove"; $event.Handled = $true }
     "NumPad2" { Decide-Approval "alwaysApprove"; $event.Handled = $true }
-    "D3" { Decide-Approval "denyApproval"; $event.Handled = $true }
-    "NumPad3" { Decide-Approval "denyApproval"; $event.Handled = $true }
+    "D3" { Decide-Approval "fullAccess"; $event.Handled = $true }
+    "NumPad3" { Decide-Approval "fullAccess"; $event.Handled = $true }
+    "D4" { Decide-Approval "denyApproval"; $event.Handled = $true }
+    "NumPad4" { Decide-Approval "denyApproval"; $event.Handled = $true }
   }
 })
 
@@ -386,7 +391,7 @@ $keyTimer.Add_Tick({
   }
   # Global approval keys (work even when island does not have keyboard focus)
   if ($approvalPanel.Visibility -eq "Visible" -and $script:pending -and -not $inputBox.IsKeyboardFocused) {
-    foreach ($item in @(@("ap1",0x31,"allowOnce"),@("ap2",0x32,"alwaysApprove"),@("ap3",0x33,"denyApproval"))) {
+    foreach ($item in @(@("ap1",0x31,"allowOnce"),@("ap2",0x32,"alwaysApprove"),@("ap3",0x33,"fullAccess"),@("ap4",0x34,"denyApproval"))) {
       $id = $item[0]; $vk = $item[1]; $actionName = $item[2]
       $down = ([IslandWinApi]::GetAsyncKeyState($vk) -band 0x8000) -ne 0
       if ($down -and -not $script:keyWasDown[$id]) { Decide-Approval $actionName }

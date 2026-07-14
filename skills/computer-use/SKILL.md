@@ -72,7 +72,7 @@ FastCUA has several user-side controls. Only some of them deliver a **prompt/ins
 | **Interject** (F9, then text + Enter) | An explicit instruction: `User interjected: "…"`. Control is already paused. | Stop current work. **Follow only that interjection text.** Do not resume desktop actions until the user resumes or chats again. |
 | **Stop task** | Stopped-by-user message (end this turn’s Computer Use). | End desktop work for this turn; report that the user stopped Computer Use. |
 | **Exit** (F10 / Exit FastCUA) | Shutdown message: FastCUA was shut down. | **Stop permanently for this turn.** Do **not** restart FastCUA, reconnect the daemon, re-launch the helper, re-run install, or continue desktop automation on your own. Wait for the user. |
-| **Approval waiting** | Block while the user decides Allow once / Always approve / Deny. | Do not retry the blocked call in a loop. Wait. |
+| **Approval waiting** | Block while the user decides Allow once / Always approve / Full access / Deny. | Do not retry the blocked call in a loop. Wait. |
 
 Rules of thumb:
 

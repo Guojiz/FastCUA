@@ -127,6 +127,26 @@ function resolvePendingApproval(token, decision) {
     const basename = approval.app.slice(Math.max(approval.app.lastIndexOf("\\"), approval.app.lastIndexOf("/")) + 1);
     if (basename && !isWhitelisted(approval.app)) { config = { ...config, whitelist: [...(config.whitelist || []), basename] }; saveConfig(config); }
   }
+  if (decision === "full_access") {
+    // Switch control plane to full access (no further per-app prompts) and allow this request.
+    if (config.approvalPolicy !== "full") {
+      config = { ...config, approvalPolicy: "full" };
+      saveConfig(config);
+      emitEvent("policy", { approvalPolicy: "full" });
+      log("approval: switched to FULL ACCESS from approval island");
+    }
+    // Allow any other pending prompts as well — full access means no more waiting.
+    for (const [otherToken, other] of [...pendingApprovals.entries()]) {
+      if (otherToken === token) continue;
+      pendingApprovals.delete(otherToken);
+      clearTimeout(other.timer);
+      if (other.app) approvedApps.add(other.app);
+      emitEvent("approval_allowed", { action: other.method, summary: other.summary, app: other.app, decision: "full_access" });
+      sendToBinary(other.entry.method, other.entry.params, other.entry.meta, { [APPROVED_KEY]: other.app })
+        .then(other.entry.resolve, other.entry.reject);
+    }
+  }
+  if (approval.app) approvedApps.add(approval.app);
   emitEvent("approval_allowed", { action: approval.method, summary: approval.summary, app: approval.app, decision });
   sendToBinary(approval.entry.method, approval.entry.params, approval.entry.meta, { [APPROVED_KEY]: approval.app })
     .then(approval.entry.resolve, approval.entry.reject);
@@ -526,10 +546,11 @@ const httpServer = http.createServer((req, res) => {
             log("action: user paused desktop control (block only — no agent prompt)");
           }
           else if (action === "resume") { isUserPaused = false; emitEvent("resumed", { client: "user" }); log("action: user resumed desktop control"); }
-          else if (action === "allowOnce" || action === "allowAndWhitelist" || action === "alwaysApprove" || action === "denyApproval") {
-            // alwaysApprove is an alias of allowAndWhitelist (persist app to whitelist).
+          else if (action === "allowOnce" || action === "allowAndWhitelist" || action === "alwaysApprove" || action === "fullAccess" || action === "denyApproval") {
+            // alwaysApprove = whitelist this app; fullAccess = set approvalPolicy to full + allow.
             const decision = (action === "allowAndWhitelist" || action === "alwaysApprove")
               ? "allow_and_whitelist"
+              : action === "fullAccess" ? "full_access"
               : action === "allowOnce" ? "allow_once" : "deny";
             await resolvePendingApproval(token, decision);
           }

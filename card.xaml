@@ -30,11 +30,12 @@
         <Border x:Name="ApprovalPanel" Background="#12FFFFFF" CornerRadius="12" Padding="11,9" Margin="0,10,0,0" Visibility="Collapsed">
           <StackPanel>
             <TextBlock x:Name="AppText" Text="Unknown application" Foreground="#F8D782" FontSize="11" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
-            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
-              <Button x:Name="AllowOnceBtn" Content="1 · Allow once" FontSize="10.5" Padding="11,5" Foreground="#08121D" Background="#F8D782" BorderBrush="Transparent" Cursor="Hand" ToolTip="Keyboard: 1"/>
-              <Button x:Name="TrustBtn" Content="2 · Always approve" FontSize="10.5" Padding="11,5" Margin="7,0,0,0" Foreground="#F6F8FF" Background="#27FFFFFF" BorderBrush="#35FFFFFF" Cursor="Hand" ToolTip="Keyboard: 2 — whitelist this app forever"/>
-              <Button x:Name="DenyBtn" Content="3 · Deny" FontSize="10.5" Padding="11,5" Margin="7,0,0,0" Foreground="#FFB0B9" Background="#18FF6E7F" BorderBrush="#33FF6E7F" Cursor="Hand" ToolTip="Keyboard: 3"/>
-            </StackPanel>
+            <WrapPanel Orientation="Horizontal" Margin="0,8,0,0">
+              <Button x:Name="AllowOnceBtn" Content="1 · Allow once" FontSize="10.5" Padding="10,5" Margin="0,0,6,6" Foreground="#08121D" Background="#F8D782" BorderBrush="Transparent" Cursor="Hand" ToolTip="Keyboard: 1"/>
+              <Button x:Name="TrustBtn" Content="2 · Always approve" FontSize="10.5" Padding="10,5" Margin="0,0,6,6" Foreground="#F6F8FF" Background="#27FFFFFF" BorderBrush="#35FFFFFF" Cursor="Hand" ToolTip="Keyboard: 2 — whitelist this app forever"/>
+              <Button x:Name="FullAccessBtn" Content="3 · Full access" FontSize="10.5" Padding="10,5" Margin="0,0,6,6" Foreground="#FFD6F0" Background="#28FF70C6" BorderBrush="#55FF70C6" Cursor="Hand" ToolTip="Keyboard: 3 — allow all apps without further prompts"/>
+              <Button x:Name="DenyBtn" Content="4 · Deny" FontSize="10.5" Padding="10,5" Margin="0,0,0,6" Foreground="#FFB0B9" Background="#18FF6E7F" BorderBrush="#33FF6E7F" Cursor="Hand" ToolTip="Keyboard: 4"/>
+            </WrapPanel>
           </StackPanel>
         </Border>
         <Grid x:Name="InterjectPanel" Margin="0,10,0,0">

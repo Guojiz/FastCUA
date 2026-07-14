@@ -87,7 +87,7 @@ FastCUA is agent-neutral, but the complete deployment flow requires a client tha
 | State | Visual signal | Behavior |
 |---|---|---|
 | Active | Compact translucent island + screen border | AI is using the computer; the border remains click-through |
-| Approval | Amber | `1` allow once, `2` always approve (whitelist), `3` deny |
+| Approval | Amber | `1` once · `2` always approve · `3` full access · `4` deny |
 | Full access | Purple / pink | No per-app prompts until you disable the mode |
 | Paused | Red | New actions are blocked and can be resumed in one step |
 
