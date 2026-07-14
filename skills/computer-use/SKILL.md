@@ -56,19 +56,22 @@ Do not spawn the native host directly, search for its executable, or build a sep
 3. For canvases, images, custom-rendered controls, drawing surfaces, and elements not exposed through accessibility, use screenshot coordinates.
 4. After an action that changes layout, focus, modality, or the element list, request a fresh accessibility snapshot before reusing element indexes.
 
-For normal text editing in this release, do not use `set_value`. Click the editable control, then call `type_text` **once**.
+For normal text editing in this release, do not use `set_value`.
 
-### Text entry — read first, type once
+### Text entry — model reads, then decides
 
-`type_text` (v0.1.6+) **reads** the focused field value first (UIA ValuePattern):
+Correct control loop (host does **not** decide for you):
 
-1. If the current value already equals `text` → no-op (safe for retries).
-2. Else, with `replace:true` (default) → clear selection, then type.
-3. With `replace:false` → append without clearing.
+1. **Focus** the field (`click` on the edit control).
+2. **Read** with `get_window_state({ include_text: true })` and inspect `accessibility.focused_value` (and `focused_element` / tree as needed).
+3. **Decide** (you, the model): if `focused_value` is already correct, do **nothing** — do not call `type_text`.
+4. **If** you need to change it: call `type_text` **once** with `replace: true` (default) so the host clears then types. Use `replace: false` only to append.
 
-- Call `type_text` **once** per field after focus. Do not loop retries because a11y still shows a placeholder name.
-- Electron / web forms often keep placeholder labels in the accessibility tree after typing — that is **not** proof of failure.
-- Verify with a screenshot when needed, not by re-sending the same text.
+Rules:
+
+- Never call `type_text` before you have read `focused_value` for that field in this turn.
+- Never re-send the same `type_text` because the tree still shows a placeholder name — placeholders are not the field value; use `focused_value` and/or a screenshot to verify.
+- Host `type_text` always executes clear+type when `replace:true`; it does **not** silently skip when values match. Skipping is your decision after reading.
 
 ### Interjection / pause
 
@@ -101,7 +104,7 @@ When computer-use work is done, call `close` once. It ends the current turn and 
 - By default, `get_window_state({ window })` captures and automatically displays a screenshot and requests accessibility text. Set `include_text: false` when only pixels are needed, or `include_screenshot: false` when only the accessibility tree will drive the next action.
 - If you need accessibility text or element indexes, call `get_window_state({ window, include_screenshot: false, include_text: true })`. Request both only when you truly need both the screenshot and accessibility text for the next decision.
 - Accessibility text is returned as `state.accessibility.tree`. The tree format is: first line `Window: "...", App: ...`, then indexed element tree lines, then at most one critical tail block: `Selected text`, `Selected`, `Document text`, or `The focused UI element is ...`.
-- Important accessibility context is also extracted as structured fields: `focused_element`, `selected_text`, `selected_elements`, and `document_text`. Check these fields before filtering a large tree.
+- Important accessibility context is also extracted as structured fields: `focused_element`, `focused_value` (current text of the focused control via UIA ValuePattern), `selected_text`, `selected_elements`, and `document_text`. For form fields, prefer `focused_value` over the element Name in the tree (names are often placeholders).
 - When `include_text: true` returns a large accessibility tree, parse or filter `state.accessibility.tree` in JS and print only the relevant excerpt or candidate elements. Do not dump the full tree unless it is small or the user explicitly needs the whole tree. If you do not yet know the right filter, print the front matter, the structured critical fields, and a bounded tree excerpt for orientation, then narrow from there.
 - Every screenshot requested through `get_window_state` is displayed automatically. Do not decode `state.screenshots[*].url`, do not write it to disk, do not print a local file path just to inspect it. Do not call `await nodeRepl.emitImage(...)` after `get_window_state`; that duplicates large image payloads and slows the session. Only emit a screenshot manually if you are redisplaying a prior state without calling `get_window_state` again. Do not install or probe image libraries just to find screenshot dimensions; use the screenshots returned by `get_window_state` directly.
 - Element indexes come from the latest `get_window_state({ include_text: true })` accessibility tree. After an action that may change layout, focus, modality, or the element list, take another accessibility snapshot before using more element indexes. Keyboard, text, and stable coordinate actions can be batched against the captured window when the target window geometry is stable.
@@ -110,10 +113,10 @@ When computer-use work is done, call `close` once. It ends the current turn and 
 - If computer use reports that the Windows desktop is locked, stop immediately and ask the user to unlock the desktop. Do not try to interact through `LockApp.exe`.
 - When opening or launching a Windows app by name, call `list_apps` before launching anything.
 - Call `get_window_state` again only when you need to verify progress, focus may have changed, a modal or launcher may have appeared, the user interrupted, or the prior state is otherwise stale. Choose screenshot, accessibility text, or both based on the next decision; avoid requesting both by default.
-- `type_text` reads the focused value first, then replaces by default (`replace:true`). Use `replace:false` to append. Use `press_key` for controls such as `Enter`, `Tab`, arrows, Escape, and keyboard chords.
+- Text workflow: read `focused_value` via `get_window_state` → model decides → if changing, `type_text` once with `replace:true` (clear then type). Use `replace:false` to append. Use `press_key` for `Enter`, `Tab`, arrows, Escape, and chords.
 - Prefer X Window System keysym-style names for key input, especially `KP_0` through `KP_9` for apps that distinguish numpad keys from the number row. Common aliases such as `period`, `greater`, `less`, `comma`, `slash`, `question`, `Numpad_0`, `Numpad_Add`, `Numpad_Subtract`, `Numpad_Multiply`, `Numpad_Divide`, `Numpad_Decimal`, and `Numpad_Enter` are also supported. For shifted punctuation shortcuts, include `Shift`, for example `Control_L+Shift_L+period` for Ctrl+Shift+`.` / `>`.
 - For stable labeled controls from the latest accessibility snapshot, prefer `element_index`. Coordinate `click` and `drag` use window-relative pixels for the window captured by `get_window_state`; `(0, 0)` is the top-left of the window. Use coordinates for canvases, images, custom-rendered surfaces, and targets not exposed through accessibility. The property is `element_index`, not `element`.
-- Do not use `set_value` for normal text editing in this release. Click the field, then `type_text` once (default replace). Do not re-send the same text to the same field.
+- Do not use `set_value` for normal text editing. Click → read `focused_value` → decide → `type_text` only if changing.
 - On user interjection or `paused_by_user`, stop desktop work immediately; wait for resume or a new user instruction.
 - `scroll` scrolls with input injection from a specific screenshot coordinate, matching Browser Use's coordinate scroll shape. Use `sky.scroll({ window, x, y, scrollX: 0, scrollY: 600 })` to scroll down from `(x, y)`. Negative `scrollY` scrolls up; negative `scrollX` scrolls left. Do not pass `element_index` to `scroll`; if a specific pane needs focus, click it first with coordinates, then scroll from inside that pane.
 - Use keyboard navigation when it is faster than hunting UI pixels.
@@ -275,7 +278,7 @@ type DragInput = { from_x: number; from_y: number; screenshotId?: string; to_x: 
 type PerformSecondaryActionInput = { action: string; element_index: number; window: Window };
 type ActivateWindowInput = { window: Window };
 type AppIdentifier = string;
-type AccessibilityState = { document_text?: string; focused_element?: string; selected_elements?: Array<string>; selected_text?: string; tree: string };
+type AccessibilityState = { document_text?: string; focused_element?: string; focused_value?: string; selected_elements?: Array<string>; selected_text?: string; tree: string };
 type Screenshot = { height?: number; id: string; originX?: number; originY?: number; url: string; width?: number; zIndex: number };
 type MouseButton = "left" | "right" | "middle" | "l" | "r" | "m";
 ```

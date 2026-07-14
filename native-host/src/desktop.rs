@@ -330,9 +330,13 @@ pub fn get_window_state(
                 (tree, String::new(), document_text)
             }
         };
+        // Read focused control value and return it to the model. The model decides
+        // whether to edit; type_text must not silently no-op based on this value.
+        let focused_value = uia::focused_value().unwrap_or_default();
         json!({
             "tree": tree,
             "focused_element": focused_element,
+            "focused_value": focused_value,
             "selected_text": "",
             "document_text": document_text,
         })
@@ -657,22 +661,16 @@ pub fn type_text(params: &Value) -> Result<(), String> {
         .get("text")
         .and_then(Value::as_str)
         .ok_or_else(|| "missing field `text`".to_string())?;
-    // replace defaults to true: form-filling agents mean "set this field".
-    // Pass replace:false to append (e.g. continue typing into a document).
+    // Control flow (model decides, host executes):
+    //   1. Model READs via get_window_state.accessibility.focused_value
+    //   2. Model decides whether to change the field
+    //   3. If changing: type_text with replace:true (default) → clear then type
+    //   4. If appending: type_text with replace:false
+    // Host must NOT silently skip based on current value — that hides state from the model.
     let replace = params
         .get("replace")
         .and_then(Value::as_bool)
         .unwrap_or(true);
-
-    // 1) READ first — if the focused control already holds the desired text,
-    //    do nothing. Makes agent retries idempotent (prevents
-    //    mempalace→mempalacemempalace on Electron forms).
-    if let Some(current) = uia::focused_value() {
-        if current == text {
-            return Ok(());
-        }
-    }
-    // 2) Clear when replacing, then WRITE.
     if replace {
         clear_focused_text()?;
     }
