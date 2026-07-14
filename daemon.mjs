@@ -53,16 +53,18 @@ function resolveCuaBin() {
   return discoverCuaBin();
 }
 const TIMEOUT_MS = 30000;
-// Messages returned to the *agent* (MCP client). Keep these distinct:
-// - PAUSE_BLOCK: silent control-plane block. Not a new user instruction. Agent must wait.
-// - INTERJECT: the only pause-related path that delivers a real instruction for the agent.
-// - ESC/STOP: user stopped the turn; end Computer Use for this turn.
-// - SHUTDOWN: FastCUA exited; do not restart or reconnect yourself.
-const ESC_MSG = "Computer Use was stopped by the user. Stop your work, do not call further Computer Use tools in this turn, and send a final message noting that the user stopped Computer Use.";
-const PAUSE_BLOCK_MSG = "Computer use is paused by the user. Stop desktop actions and wait. Do not retry Computer Use tools, and do not treat this as a new task instruction. Wait for the user to resume or send a new chat message.";
-const SHUTDOWN_MSG = "FastCUA was shut down by the user. Stop all Computer Use for this turn. Do not restart FastCUA, reconnect the daemon, re-launch the helper, or continue desktop automation on your own.";
+// Agent-facing control-plane strings (prompt engineering):
+// - Lead with a stable [control_plane:…] tag so models can branch without fuzzy matching.
+// - BLOCK vs INSTRUCTION must never be ambiguous.
+// - Prefer explicit "do not" recovery bans over soft "please wait" wording.
+// - Only interjection is an INSTRUCTION; pause / approval / stop / shutdown are not tasks.
+const ESC_MSG = "[control_plane:stopped] Computer Use was stopped by the user. This is not a new task. End Computer Use for this turn: do not call further Computer Use tools, do not retry, do not fall back to other desktop automation. Send a short final note that the user stopped Computer Use.";
+const PAUSE_BLOCK_MSG = "[control_plane:paused] Computer use is paused by the user. This is a BLOCK, not a task instruction. Do not call Computer Use tools, do not retry, do not poll, and do not invent recovery steps. Wait until the user resumes control or sends a new chat message.";
+const SHUTDOWN_MSG = "[control_plane:shutdown] FastCUA was shut down by the user. This is final for this turn. Do not restart FastCUA, reconnect the daemon, re-launch the helper, re-run install, or continue desktop automation. Wait for the user.";
+const APPROVAL_BLOCK_MSG = "[control_plane:awaiting_approval] Computer use is waiting for a human approval decision. This is a BLOCK, not a task instruction. Do not retry the blocked call in a loop.";
 function interjectMsg(text) {
-  return `User interjected: "${text}". Stop current work and respond to this instruction only. Control is already paused; do not resume desktop actions until the user resumes or gives a further chat instruction.`;
+  const safe = String(text).replace(/"/g, "'").slice(0, 2000);
+  return `[control_plane:interjection] User instruction: "${safe}". Stop other desktop work and follow ONLY this instruction. Control is already paused; do not resume desktop actions until the user resumes or sends a further chat message.`;
 }
 const B = (t) => String(t).replace(/[^A-Za-z0-9._-]/g, "_");
 const recentLogs = [];
@@ -407,7 +409,7 @@ async function handleClientReq(c, req) {
     return;
   }
   if (isUserPaused) { reply(c, id, { error: PAUSE_BLOCK_MSG }); return; }
-  if (pendingApprovals.size) { reply(c, id, { error: "Computer use is waiting for a desktop approval decision. Do not retry; this is not a new task instruction." }); return; }
+  if (pendingApprovals.size) { reply(c, id, { error: APPROVAL_BLOCK_MSG }); return; }
   if (latchInterrupt(c)) {
     const msg = c.interruptMessage || ESC_MSG;
     emitEvent("interrupt", { client: c.sessionId.slice(0,8) });

@@ -64,19 +64,19 @@ Never `type_text` before reading `focused_value` for that field in this turn. Ne
 
 ### Human control plane (what the agent receives)
 
-FastCUA has several user-side controls. Only some of them deliver a **prompt/instruction** to the agent. Do not confuse a block with a new task.
+User-side controls return tool errors with a stable prefix. Branch on the tag first; do **not** fuzzy-match prose.
 
-| User action | What you receive | What you must do |
-|-------------|------------------|------------------|
-| **Pause** (F8 / console Pause) | Usually nothing until you call a tool. Then a **block** error: paused — not a new instruction. In-flight calls may cancel with the same block text. | **Stop** all desktop tools. **Do not retry.** Wait for the user to resume or send a new **chat** message. Do not invent follow-up desktop work. |
-| **Interject** (F9, then text + Enter) | An explicit instruction: `User interjected: "…"`. Control is already paused. | Stop current work. **Follow only that interjection text.** Do not resume desktop actions until the user resumes or chats again. |
-| **Stop task** | Stopped-by-user message (end this turn’s Computer Use). | End desktop work for this turn; report that the user stopped Computer Use. |
-| **Exit** (F10 / Exit FastCUA) | Shutdown message: FastCUA was shut down. | **Stop permanently for this turn.** Do **not** restart FastCUA, reconnect the daemon, re-launch the helper, re-run install, or continue desktop automation on your own. Wait for the user. |
-| **Approval waiting** | Block while the user decides Allow once / Always approve / Full access / Deny. | Do not retry the blocked call in a loop. Wait. |
+| Tag | Meaning | Agent behavior |
+|-----|---------|----------------|
+| `[control_plane:paused]` | **BLOCK** only (F8 / Pause). Not a task. | Stop desktop tools. No retry, no poll, no invented recovery. Wait for resume or a new **chat** message. |
+| `[control_plane:interjection]` | **INSTRUCTION** (F9 text). Only control-plane path that is a new task. | Stop other work. Follow **only** the quoted user instruction. Stay paused until user resumes or chats again. |
+| `[control_plane:stopped]` | Turn stop (Stop task). Not a new task. | End Computer Use for this turn. No further tools. Brief note that the user stopped. |
+| `[control_plane:shutdown]` | FastCUA exited (F10). Final for this turn. | Stop permanently. Do **not** restart FastCUA, reconnect, reinstall, or continue desktop automation. |
+| `[control_plane:awaiting_approval]` | Human approval pending. **BLOCK**. | Do not retry in a loop. Wait. |
 
 Rules of thumb:
 
-1. **Only interjection text is a new agent instruction** from the control plane. Pause/approval/exit blocks are **not** tasks to complete.
-2. If the user **exited** FastCUA, **stop**. Never immediately self-restart Computer Use.
-3. If **paused**, do not keep polling desktop tools. Silence is correct until resume or a new chat message.
-4. After any interrupt/stop/exit message, call MCP **`close` once** if the turn is done, then report to the user in chat — do not thrash tools.
+1. **Only** `[control_plane:interjection]` is an instruction. Every other tag is a block or stop — not something to “fix” by acting on the desktop.
+2. On **shutdown**, never self-restart Computer Use.
+3. On **paused**, silence is correct; do not thrash tools.
+4. When the turn is done after stop/shutdown, call MCP **`close` once**, then report in chat.
