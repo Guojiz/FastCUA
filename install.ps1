@@ -1,5 +1,5 @@
 #requires -Version 5.1
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MIT
 
 [CmdletBinding()]
 param(
@@ -11,7 +11,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $repo = 'https://github.com/Guojiz/FastCUA'
-$Version = 'v0.1.9'
+$Version = 'v0.2.0'
 $appDir = Join-Path $InstallRoot 'app'
 $tempDir = Join-Path ([System.IO.Path]::GetTempPath()) ('fastcua-install-' + [guid]::NewGuid().ToString('N'))
 

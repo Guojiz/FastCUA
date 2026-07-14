@@ -543,7 +543,7 @@ async function handle(line) {
     let result;
     let closeAfterResponse = false;
     if (method === "initialize") {
-      result = { protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "sky-computer-use", version: "0.1.9" } };
+      result = { protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "sky-computer-use", version: "0.2.0" } };
     } else if (method === "initialized" || method === "notifications/initialized") {
       return;
     } else if (method === "tools/list") {

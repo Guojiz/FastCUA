@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MIT
 
 $ErrorActionPreference = 'Stop'
 $source = Join-Path $PSScriptRoot 'Fixture.cs'

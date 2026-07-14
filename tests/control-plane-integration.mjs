@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

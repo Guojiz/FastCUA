@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
 
 #![allow(non_camel_case_types, non_snake_case, dead_code)]
 

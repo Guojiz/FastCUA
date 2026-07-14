@@ -1,5 +1,5 @@
 #requires -Version 5.1
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MIT
 
 [CmdletBinding(SupportsShouldProcess)]
 param([string]$InstallRoot = (Join-Path $env:LOCALAPPDATA 'FastCUA'))

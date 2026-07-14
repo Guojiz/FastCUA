@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
 
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
@@ -81,7 +81,7 @@ function waitForChildExit() {
 try {
   const initialized = await rpc("initialize");
   assert.equal(initialized.serverInfo.name, "sky-computer-use");
-  assert.equal(initialized.serverInfo.version, "0.1.9");
+  assert.equal(initialized.serverInfo.version, "0.2.0");
 
   const listed = await rpc("tools/list");
   const names = listed.tools.map(tool => tool.name);
@@ -91,7 +91,7 @@ try {
   const secondary = listed.tools.find(tool => tool.name === "perform_secondary_action");
   assert.deepEqual(secondary.inputSchema.properties.action.enum, ["Raise"]);
   assert.match(listed.tools.find(tool => tool.name === "list_apps").description, /running apps/i);
-  console.log("PASS MCP contract matches v0.1.9 capabilities");
+  console.log("PASS MCP contract matches v0.2.0 capabilities");
 
   const timedOut = await rpc("tools/call", {
     name: "js",

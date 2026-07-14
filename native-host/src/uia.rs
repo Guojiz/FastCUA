@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
 
 //! Minimal raw COM bindings for UIAutomationCore.
 //!
@@ -379,7 +379,7 @@ unsafe fn walk_element(
     document_parts: &mut Vec<String>,
     elements: &mut Vec<ElementSnapshot>,
 ) {
-    if element.is_null() || depth > 12 || *visited >= 300 {
+    if element.is_null() || depth > 12 || *visited >= 600 {
         return;
     }
     *visited += 1;
@@ -404,6 +404,9 @@ unsafe fn walk_element(
     if index == 0 {
         tree.push_str(" Secondary Actions: Raise");
     }
+    if elements.last().and_then(|e| e.bounds).is_none() {
+        tree.push_str(" [no-hit]");
+    }
     tree.push('\n');
 
     if depth >= 12 {
@@ -417,7 +420,7 @@ unsafe fn walk_element(
     if unsafe { first_child(walker, element, &mut child) } < 0 {
         return;
     }
-    while !child.is_null() && *visited < 300 {
+    while !child.is_null() && *visited < 600 {
         unsafe {
             walk_element(
                 walker,

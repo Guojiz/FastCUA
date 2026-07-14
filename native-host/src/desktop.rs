@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
 
 use crate::{uia, win32::*};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
@@ -483,14 +483,27 @@ fn cache_hwnd_elements(window: &WindowRef, elements: &[HWND]) -> Result<(), Stri
 }
 
 fn uia_element_target(window: &WindowRef, index: u64) -> Result<UiaElementTarget, String> {
+    if let Some(target) = uia_element_target_cached(window, index) {
+        return Ok(target);
+    }
+    // One live re-snapshot after UI churn (common dialogs / virtualized trees).
+    if let Ok(snapshot) = uia_snapshot(window) {
+        let _ = cache_uia_elements(window, &snapshot);
+        if let Some(target) = uia_element_target_cached(window, index) {
+            return Ok(target);
+        }
+    }
+    Err(STALE_UIA_ELEMENT.to_string())
+}
+
+fn uia_element_target_cached(window: &WindowRef, index: u64) -> Option<UiaElementTarget> {
     UIA_ELEMENT_MAPS
         .get_or_init(|| Mutex::new(HashMap::new()))
         .lock()
-        .map_err(|_| "UIA element map cache poisoned".to_string())?
-        .get(&window.id)
-        .and_then(|elements| elements.get(&index))
+        .ok()?
+        .get(&window.id)?
+        .get(&index)
         .cloned()
-        .ok_or_else(|| STALE_UIA_ELEMENT.to_string())
 }
 
 fn uia_snapshot(window: &WindowRef) -> Result<uia::Snapshot, String> {
@@ -1049,14 +1062,17 @@ pub fn click(params: &Value) -> Result<(), String> {
             if unsafe { GetWindowRect(window.id as usize as HWND, &mut window_rect) } == 0 {
                 return Err(STALE_UIA_ELEMENT.into());
             }
-            let x = rect.left + (rect.right - rect.left) / 2;
-            let y = rect.top + (rect.bottom - rect.top) / 2;
+            // Prefer element center; clamp if slightly outside outer HWND
+            // (nav-pane / DirectUI often report partial or inflated bounds).
+            let mut x = rect.left + (rect.right - rect.left) / 2;
+            let mut y = rect.top + (rect.bottom - rect.top) / 2;
             if x < window_rect.left
                 || x >= window_rect.right
                 || y < window_rect.top
                 || y >= window_rect.bottom
             {
-                return Err(STALE_UIA_ELEMENT.into());
+                x = x.clamp(window_rect.left + 1, window_rect.right - 2);
+                y = y.clamp(window_rect.top + 1, window_rect.bottom - 2);
             }
             let _description = (&target.name, &target.role);
             (x, y)
@@ -1095,30 +1111,9 @@ pub fn click(params: &Value) -> Result<(), String> {
 }
 
 fn dispatch_click(target: HWND, screen_x: i32, screen_y: i32, button: &str) -> Result<(), String> {
-    let class = class_name(target);
-    if class.eq_ignore_ascii_case("button") && matches!(button, "left" | "l") {
-        unsafe { SendMessageW(target, BM_CLICK, 0, 0) };
-        return Ok(());
-    }
-    if class.eq_ignore_ascii_case("edit") {
-        let mut point = POINT {
-            x: screen_x,
-            y: screen_y,
-        };
-        unsafe { ScreenToClient(target, &mut point) };
-        let coordinates = ((point.y as u32 & 0xffff) << 16) | (point.x as u32 & 0xffff);
-        let (down_message, up_message, mask) = match button {
-            "right" | "r" => (WM_RBUTTONDOWN, WM_RBUTTONUP, MK_RBUTTON),
-            "middle" | "m" => (WM_MBUTTONDOWN, WM_MBUTTONUP, MK_MBUTTON),
-            "left" | "l" => (WM_LBUTTONDOWN, WM_LBUTTONUP, MK_LBUTTON),
-            _ => return Err(format!("unsupported mouse button: {button}")),
-        };
-        unsafe {
-            SendMessageW(target, down_message, mask, coordinates as LPARAM);
-            SendMessageW(target, up_message, 0, coordinates as LPARAM);
-        }
-        return Ok(());
-    }
+    // Prefer real injected input. Common item dialogs / DirectUI often ignore
+    // SendMessage(BM_CLICK) / synthetic WM_LBUTTON* while still accepting SendInput.
+    let _ = (target, screen_x, screen_y);
     dispatch_input_click(button)
 }
 
