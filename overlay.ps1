@@ -134,9 +134,13 @@ function Set-IslandPosition {
   $win.Top = $work.Top + 14
 }
 
-function Set-IslandExpanded([bool]$expand, [bool]$focusInput = $false) {
-  $script:manualExpanded = $expand
+# Expand/collapse the Dynamic Island.
+# - $asManual=$true  → user opened it (F9); sticky until user collapses or exceptional state ends
+# - $asManual=$false → system force (approval / pause). Must NOT stick after the state ends,
+#   otherwise the panel stays open and blocks the screen (e.g. after Full access / Allow once).
+function Set-IslandExpanded([bool]$expand, [bool]$focusInput = $false, [bool]$asManual = $false) {
   if ($expand) {
+    if ($asManual) { $script:manualExpanded = $true } else { $script:manualExpanded = $false }
     $win.Width = 580
     $win.Height = if ($approvalPanel.Visibility -eq "Visible") { 300 } else { 200 }
     $expanded.Visibility = "Visible"
@@ -149,14 +153,22 @@ function Set-IslandExpanded([bool]$expand, [bool]$focusInput = $false) {
       $inputBox.Focus() | Out-Null
     }
   } else {
+    $script:manualExpanded = $false
+    $script:forceExpanded = $false
     $expanded.Visibility = "Collapsed"
     $win.Width = 410
     $win.Height = 68
     $root.Background = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#A8111522")
     $root.Padding = [System.Windows.Thickness]::new(14, 9, 14, 9)
     $win.ShowActivated = $false
+    try { $inputBox.Text = "" } catch {}
     Set-IslandPosition
   }
+}
+
+# Collapse when leaving exceptional UI states (approval resolved, resume, deny, etc.).
+function Collapse-Island {
+  Set-IslandExpanded $false
 }
 
 function Set-StateStyle([string]$state) {
@@ -207,12 +219,25 @@ function Open-Interjection {
     Post-Action "pause" | Out-Null
     $script:controlState = "paused_by_user"
   }
-  Set-IslandExpanded $true $true
+  # User-initiated expand (sticky while paused so they can type).
+  Set-IslandExpanded $true $true $true
 }
 
 function Decide-Approval([string]$name) {
   if (-not $script:pending) { return }
-  Post-Action $name $script:pending.token | Out-Null
+  $token = $script:pending.token
+  # Optimistic collapse: hide approval UI immediately so the panel does not keep
+  # blocking the screen after Full access / Allow once / Always / Deny.
+  $script:pending = $null
+  $approvalPanel.Visibility = "Collapsed"
+  Collapse-Island
+  Post-Action $name $token | Out-Null
+}
+
+function Resume-Control {
+  Post-Action "resume" | Out-Null
+  $script:controlState = "running"
+  Collapse-Island
 }
 
 function Send-Interjection {
@@ -227,9 +252,10 @@ function Send-Interjection {
     Invoke-RestMethod -Uri "$base/api/interject" -Method Post -ContentType "application/json" -Body (@{ text = $text } | ConvertTo-Json -Compress) -TimeoutSec 3 | Out-Null
     Post-Action "stopAll" | Out-Null
     $inputBox.Text = ""
-    $script:manualExpanded = $false
-    Set-IslandExpanded $false
     $script:controlState = "paused_by_user"
+    # After send: stay compact unless pause UI needs the expanded resume controls.
+    # Refresh-Island will re-open compact-or-expanded for paused state next tick.
+    Collapse-Island
     try {
       $status.Text = T "paused"
       $action.Text = "Interjected and paused"
@@ -249,8 +275,12 @@ function Refresh-Island {
       if ($event.id -gt $script:lastEventId) { $script:lastEventId = $event.id }
     }
     $pending = @($feed.pendingApprovals)[0]
+    # PowerShell may yield $null for empty pendingApprovals[0]
+    if ($null -eq $pending -or ($pending -is [string] -and [string]::IsNullOrWhiteSpace($pending))) { $pending = $null }
     $script:controlState = $feed.controlState
+    $prevForce = $script:forceExpanded
     $script:forceExpanded = $false
+
     if ($feed.controlState -eq "paused_by_user") {
       Set-StateStyle "paused_by_user"
       $status.Text = T "paused"
@@ -261,7 +291,8 @@ function Refresh-Island {
       $resume.Visibility = "Visible"
       $script:pending = $null
       $script:forceExpanded = $true
-      if ($expanded.Visibility -ne "Visible") { Set-IslandExpanded $true }
+      # System force-expand for pause controls (not sticky after resume).
+      if ($expanded.Visibility -ne "Visible") { Set-IslandExpanded $true $false $false }
     } elseif ($pending) {
       Set-StateStyle "awaiting_approval"
       $status.Text = T "approval"
@@ -273,27 +304,31 @@ function Refresh-Island {
       $resume.Visibility = "Collapsed"
       $script:pending = $pending
       $script:forceExpanded = $true
-      if ($expanded.Visibility -ne "Visible" -or $win.Height -lt 170) { Set-IslandExpanded $true }
-    } elseif ($feed.inflight) {
-      Set-StateStyle $(if ($feed.approvalPolicy -eq "full") { "full_access" } else { "working" })
-      $status.Text = T "using"
-      $shortcut.Text = $(if ($feed.approvalPolicy -eq "full") { "FULL ACCESS  |  $(T 'settings')  |  $(T 'pause')  |  $(T 'interject')  |  $(T 'exit')" } else { "$(T 'settings')  |  $(T 'pause')  |  $(T 'interject')  |  $(T 'exit')" })
-      $action.Text = $feed.inflight.summary
-      $approvalPanel.Visibility = "Collapsed"
-      $pause.Visibility = "Visible"
-      $resume.Visibility = "Collapsed"
-      $script:pending = $null
-      if (-not $script:manualExpanded -and $expanded.Visibility -eq "Visible") { Set-IslandExpanded $false }
+      # System force-expand for approval (not sticky after decision).
+      if ($expanded.Visibility -ne "Visible" -or $win.Height -lt 170 -or $approvalPanel.Visibility -ne "Visible") {
+        Set-IslandExpanded $true $false $false
+      } else {
+        # Keep size correct while approval panel is showing.
+        $win.Height = 300
+      }
     } else {
-      Set-StateStyle $(if ($feed.approvalPolicy -eq "full") { "full_access" } else { "ready" })
+      # Normal / full-access / working: island must go compact unless user kept it open (F9).
+      Set-StateStyle $(if ($feed.approvalPolicy -eq "full") { "full_access" } elseif ($feed.inflight) { "working" } else { "ready" })
       $status.Text = T "using"
       $shortcut.Text = $(if ($feed.approvalPolicy -eq "full") { "FULL ACCESS  |  $(T 'settings')  |  $(T 'pause')  |  $(T 'interject')  |  $(T 'exit')" } else { "$(T 'settings')  |  $(T 'pause')  |  $(T 'interject')  |  $(T 'exit')" })
-      $action.Text = T "active"
+      $action.Text = $(if ($feed.inflight) { $feed.inflight.summary } else { T "active" })
       $approvalPanel.Visibility = "Collapsed"
       $pause.Visibility = "Visible"
       $resume.Visibility = "Collapsed"
       $script:pending = $null
-      if (-not $script:manualExpanded -and $expanded.Visibility -eq "Visible") { Set-IslandExpanded $false }
+      $script:forceExpanded = $false
+      # Leaving exceptional UI (approval resolved, resume, deny, offline recovery):
+      # system force-expand must never stick; only pure F9 manual expand may remain.
+      if ($prevForce) {
+        Collapse-Island
+      } elseif ($expanded.Visibility -eq "Visible" -and -not $script:manualExpanded) {
+        Collapse-Island
+      }
     }
   } catch {
     $script:forceExpanded = $false
@@ -303,6 +338,8 @@ function Refresh-Island {
     $approvalPanel.Visibility = "Collapsed"
     $pause.Visibility = "Collapsed"
     $resume.Visibility = "Collapsed"
+    # Offline: collapse so a large dead panel does not cover the desktop.
+    if ($expanded.Visibility -eq "Visible" -and -not $script:manualExpanded) { Collapse-Island }
   }
 }
 
@@ -327,7 +364,7 @@ $win.Add_SourceInitialized({
     if ($message -eq [IslandWinApi]::WM_HOTKEY) {
       switch ($w.ToInt32()) {
         1 { Open-Settings }
-        2 { if ($script:controlState -eq "paused_by_user") { Post-Action "resume" } else { Post-Action "pause" } }
+        2 { Toggle-PauseResume }
         3 { Open-Interjection }
         4 { Post-Action "shutdown" }
       }
@@ -339,11 +376,19 @@ $win.Add_SourceInitialized({
   Keep-Topmost
 })
 
+function Toggle-PauseResume {
+  if ($script:controlState -eq "paused_by_user") {
+    Resume-Control
+  } else {
+    Post-Action "pause" | Out-Null
+  }
+}
+
 $compact.Add_MouseLeftButtonUp({ Open-Settings })
 $settings.Add_Click({ Open-Settings })
 $pause.Add_Click({ Post-Action "pause" })
-$resume.Add_Click({ Post-Action "resume"; $script:manualExpanded = $false })
-$stop.Add_Click({ Post-Action "stopAll"; $script:manualExpanded = $false; Set-IslandExpanded $false })
+$resume.Add_Click({ Resume-Control })
+$stop.Add_Click({ Post-Action "stopAll"; Collapse-Island })
 $exitButton.Add_Click({ Post-Action "shutdown" })
 $allowOnce.Add_Click({ Decide-Approval "allowOnce" })
 $trust.Add_Click({ Decide-Approval "alwaysApprove" })
@@ -382,7 +427,7 @@ $keyTimer.Add_Tick({
     if ($down -and -not $script:keyWasDown[$id]) {
       switch ($id) {
         1 { Open-Settings }
-        2 { if ($script:controlState -eq "paused_by_user") { Post-Action "resume" } else { Post-Action "pause" } }
+        2 { Toggle-PauseResume }
         3 { Open-Interjection }
         4 { Post-Action "shutdown" }
       }
