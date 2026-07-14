@@ -58,7 +58,7 @@ const I18N = {
     runtimeTitle: '运行参数与安全边界',
     runtimeBody: '设置仅存于本机。端口与 helper 路径修改后需重启 daemon。',
     pause: '暂停控制', resume: '恢复控制', killHelper: '停止 helper', shutdown: '退出 FastCUA', restart: '重启 daemon',
-    allowOnce: '允许一次', trustApp: '信任应用', deny: '拒绝',
+    allowOnce: '1 · 允许一次', trustApp: '2 · 始终批准', deny: '3 · 拒绝',
     costartLabel: '启动策略', costartClaude: '按需启动', costartLogin: '登录时启动', costartManual: '手动启动',
     costartDesc: { claude: '由 MCP 客户端首次请求时拉起。', login: 'Windows 登录后常驻运行。', manual: '仅在你主动启动 daemon 时运行。' },
     approvalLabel: '审批策略', approvalSafe: '安全模式', approvalFull: '完全访问',
@@ -104,7 +104,7 @@ const I18N = {
     runtimeTitle: 'Runtime & safety',
     runtimeBody: 'Settings stay local. Port and helper path changes need a daemon restart.',
     pause: 'Pause control', resume: 'Resume control', killHelper: 'Stop helper', shutdown: 'Exit FastCUA', restart: 'Restart daemon',
-    allowOnce: 'Allow once', trustApp: 'Trust app', deny: 'Deny',
+    allowOnce: '1 · Allow once', trustApp: '2 · Always approve', deny: '3 · Deny',
     costartLabel: 'Start policy', costartClaude: 'On demand', costartLogin: 'At sign-in', costartManual: 'Manual',
     costartDesc: { claude: 'Starts on the first MCP request.', login: 'Stays available after Windows sign-in.', manual: 'Runs only when you start the daemon.' },
     approvalLabel: 'Approval policy', approvalSafe: 'Safe access', approvalFull: 'Full access',
@@ -344,7 +344,7 @@ $('save').onclick = () => save().catch((error) => alert(error.message));
 $('act-pause').onclick = () => control('pause').catch((error) => alert(error.message));
 $('act-resume').onclick = () => control('resume').catch((error) => alert(error.message));
 $('approve-once').onclick = () => pendingApproval && control('allowOnce', pendingApproval.token).catch((e) => alert(e.message));
-$('approve-trust').onclick = () => pendingApproval && control('allowAndWhitelist', pendingApproval.token).catch((e) => alert(e.message));
+$('approve-trust').onclick = () => pendingApproval && control('alwaysApprove', pendingApproval.token).catch((e) => alert(e.message));
 $('approve-deny').onclick = () => pendingApproval && control('denyApproval', pendingApproval.token).catch((e) => alert(e.message));
 $('act-shutdown').onclick = () => api('/api/action', { action: 'shutdown' }).catch(() => {});
 $('act-restart').onclick = () => api('/api/action', { action: 'restart' }).catch(() => {});
@@ -360,6 +360,23 @@ document.querySelectorAll('.copy').forEach((button) => {
       setTimeout(() => { button.textContent = before; }, 1200);
     } catch {}
   };
+});
+
+// Approval keyboard: 1 once / 2 always approve / 3 deny (skip when typing in a field)
+document.addEventListener('keydown', (event) => {
+  if (!pendingApproval) return;
+  const tag = (event.target && event.target.tagName || '').toLowerCase();
+  if (tag === 'input' || tag === 'textarea' || tag === 'select' || event.target?.isContentEditable) return;
+  if (event.key === '1') {
+    event.preventDefault();
+    control('allowOnce', pendingApproval.token).catch((e) => alert(e.message));
+  } else if (event.key === '2') {
+    event.preventDefault();
+    control('alwaysApprove', pendingApproval.token).catch((e) => alert(e.message));
+  } else if (event.key === '3') {
+    event.preventDefault();
+    control('denyApproval', pendingApproval.token).catch((e) => alert(e.message));
+  }
 });
 
 load().then(refresh).catch(refresh);

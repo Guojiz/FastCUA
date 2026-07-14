@@ -53,7 +53,17 @@ function resolveCuaBin() {
   return discoverCuaBin();
 }
 const TIMEOUT_MS = 30000;
-const ESC_MSG = "Computer Use was stopped by the user with the physical Escape key. Stop your work, do not call further Computer Use tools in this turn, and send a final message noting that the user stopped Computer Use.";
+// Messages returned to the *agent* (MCP client). Keep these distinct:
+// - PAUSE_BLOCK: silent control-plane block. Not a new user instruction. Agent must wait.
+// - INTERJECT: the only pause-related path that delivers a real instruction for the agent.
+// - ESC/STOP: user stopped the turn; end Computer Use for this turn.
+// - SHUTDOWN: FastCUA exited; do not restart or reconnect yourself.
+const ESC_MSG = "Computer Use was stopped by the user. Stop your work, do not call further Computer Use tools in this turn, and send a final message noting that the user stopped Computer Use.";
+const PAUSE_BLOCK_MSG = "Computer use is paused by the user. Stop desktop actions and wait. Do not retry Computer Use tools, and do not treat this as a new task instruction. Wait for the user to resume or send a new chat message.";
+const SHUTDOWN_MSG = "FastCUA was shut down by the user. Stop all Computer Use for this turn. Do not restart FastCUA, reconnect the daemon, re-launch the helper, or continue desktop automation on your own.";
+function interjectMsg(text) {
+  return `User interjected: "${text}". Stop current work and respond to this instruction only. Control is already paused; do not resume desktop actions until the user resumes or gives a further chat instruction.`;
+}
 const B = (t) => String(t).replace(/[^A-Za-z0-9._-]/g, "_");
 const recentLogs = [];
 const events = []; // structured events for overlay [{id,ts,type,action,client,duration_ms,summary}]
@@ -265,7 +275,7 @@ function latchInterrupt(c) {
   if (fs.existsSync(f)) {
     c.interrupted = true;
     c.interruptMessage = c.interjection
-      ? `User interjected: "${c.interjection}". Stop current work and respond to this instruction.`
+      ? interjectMsg(c.interjection)
       : ESC_MSG;
     return true;
   }
@@ -284,11 +294,28 @@ function clearClientInterrupt(c) {
  * When pause=true (interjection path), also enter paused_by_user so the
  * control plane blocks further desktop actions until the user resumes.
  */
+/**
+ * Abort in-flight helper work without latching interrupt markers on clients.
+ * Used by plain Pause: agent should not receive an "instruction" prompt—only a block
+ * if/when their in-flight call is cancelled or they try another desktop tool.
+ */
+function abortInFlightWithoutAgentPrompt(reason = PAUSE_BLOCK_MSG) {
+  currentAction = null;
+  const p = proc;
+  proc = null;
+  for (const e of pendingBin.values()) {
+    clearTimeout(e.timer);
+    e.reject(new Error(reason));
+  }
+  pendingBin.clear();
+  // Keep pendingApprovals: pause is not a deny. User may still decide on the approval island.
+  try { if (p) killProcessTree(p.pid); } catch {}
+}
+
 function applyStopAll({ pause = false } = {}) {
   const interjection = pendingInterjection;
-  const msg = interjection
-    ? `User interjected: "${interjection}". Stop current work and respond to this instruction.`
-    : ESC_MSG;
+  // Only interjection text is a real agent-facing instruction. Plain stop uses ESC_MSG.
+  const msg = interjection ? interjectMsg(interjection) : ESC_MSG;
   pendingInterjection = null;
   for (const [, c] of clients) {
     c.interjection = interjection;
@@ -359,8 +386,8 @@ async function handleClientReq(c, req) {
     closeClientAfterReply(c, id, { result: { ok: true } });
     return;
   }
-  if (isUserPaused) { reply(c, id, { error: "Computer use is paused by the user. Resume it before making another desktop request." }); return; }
-  if (pendingApprovals.size) { reply(c, id, { error: "Computer use is paused while a desktop approval is awaiting a user decision." }); return; }
+  if (isUserPaused) { reply(c, id, { error: PAUSE_BLOCK_MSG }); return; }
+  if (pendingApprovals.size) { reply(c, id, { error: "Computer use is waiting for a desktop approval decision. Do not retry; this is not a new task instruction." }); return; }
   if (latchInterrupt(c)) {
     const msg = c.interruptMessage || ESC_MSG;
     emitEvent("interrupt", { client: c.sessionId.slice(0,8) });
@@ -490,23 +517,32 @@ const httpServer = http.createServer((req, res) => {
           const { action, token } = JSON.parse(body);
           if (action === "killBinary") { resetBinary(); log("action: binary killed"); }
           else if (action === "clearApprovals") { approvedApps.clear(); log("action: approvals cleared"); }
-          else if (action === "pause") { isUserPaused = true; emitEvent("paused", { client: "user" }); log("action: user paused desktop control"); }
+          else if (action === "pause") {
+            isUserPaused = true;
+            // Abort in-flight desktop work, but do NOT latch interrupt prompts on clients.
+            // Agent only sees PAUSE_BLOCK_MSG if a call is cancelled or they try again.
+            abortInFlightWithoutAgentPrompt(PAUSE_BLOCK_MSG);
+            emitEvent("paused", { client: "user" });
+            log("action: user paused desktop control (block only — no agent prompt)");
+          }
           else if (action === "resume") { isUserPaused = false; emitEvent("resumed", { client: "user" }); log("action: user resumed desktop control"); }
-          else if (action === "allowOnce" || action === "allowAndWhitelist" || action === "denyApproval") {
-            const decision = action === "allowOnce" ? "allow_once" : action === "allowAndWhitelist" ? "allow_and_whitelist" : "deny";
+          else if (action === "allowOnce" || action === "allowAndWhitelist" || action === "alwaysApprove" || action === "denyApproval") {
+            // alwaysApprove is an alias of allowAndWhitelist (persist app to whitelist).
+            const decision = (action === "allowAndWhitelist" || action === "alwaysApprove")
+              ? "allow_and_whitelist"
+              : action === "allowOnce" ? "allow_once" : "deny";
             await resolvePendingApproval(token, decision);
           }
           else if (action === "restart") { log("action: restarting daemon"); resetBinary(); if (overlayProc) { try { overlayProc.kill(); } catch {} } setTimeout(() => process.exit(0), 200); }
           else if (action === "shutdown") {
-            const message = "FastCUA was shut down by the user.";
             isUserPaused = true;
             for (const [, client] of clients) {
               client.interrupted = true;
-              client.interruptMessage = message;
+              client.interruptMessage = SHUTDOWN_MSG;
               const marker = interruptFilePath(client.sessionId, client.turnId);
               try { fs.mkdirSync(path.dirname(marker), { recursive: true }); fs.writeFileSync(marker, ""); } catch {}
             }
-            resetBinary(message);
+            resetBinary(SHUTDOWN_MSG);
             currentAction = null;
             emitEvent("shutdown", { client: "user" });
             log("action: shutdown — releasing helper, overlay, pipe, and HTTP server");

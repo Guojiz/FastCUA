@@ -87,7 +87,7 @@ FastCUA is agent-neutral, but the complete deployment flow requires a client tha
 | State | Visual signal | Behavior |
 |---|---|---|
 | Active | Compact translucent island + screen border | AI is using the computer; the border remains click-through |
-| Approval | Amber | Allow once, add to trusted apps, or deny |
+| Approval | Amber | `1` allow once, `2` always approve (whitelist), `3` deny |
 | Full access | Purple / pink | No per-app prompts until you disable the mode |
 | Paused | Red | New actions are blocked and can be resumed in one step |
 
@@ -99,8 +99,8 @@ Safe mode is the default. Trusted applications run directly; unknown application
 |---|---|
 | `F7` | Pause and open the control center |
 | `F8` | Pause / resume |
-| `F9` | Expand the island and interject |
-| `F10` | Exit FastCUA completely |
+| `F9` | Pause first, then expand the island to interject |
+| `F10` | Exit FastCUA completely (agents must not self-restart) |
 
 Clicking the island also pauses and opens the control center for mouse takeover. Global keys remain available while the agent owns the pointer.
 

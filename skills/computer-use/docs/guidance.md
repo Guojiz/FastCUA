@@ -4,7 +4,12 @@ IMPORTANT: do NOT dig through source code or control Windows apps through unrela
 
 - Do not fall back to PowerShell, shell scripts, SendKeys, or other foreground keyboard/mouse automation just because those tools are visible. Read and attempt this workflow first.
 - If `sky-computer-use` MCP tools are missing, say that FastCUA is unavailable. Do not invent another desktop-control stack.
-- If Computer Use reports that the turn ended, that the user stopped Computer Use, that the user interjected, or that control is `paused_by_user`, stop the task and report that. Do not fall back to foreground keyboard/mouse automation such as PowerShell `SendKeys`.
+- If Computer Use reports that the turn ended, that the user stopped Computer Use, that the user interjected, that FastCUA was shut down, or that control is paused, **stop desktop tools** and report that. Do not fall back to PowerShell `SendKeys` or other automation.
+- **Pause vs interjection vs exit (agent-facing):**
+  - **Pause** = control-plane block only. Not a new instruction. Do not retry tools. Wait for resume or a new chat message.
+  - **Interjection** = the only pause-related path that delivers a real instruction (`User interjected: "…"`). Follow that text only; stay paused until the user resumes/chats.
+  - **Exit / shutdown** = permanent stop for this turn. **Do not restart** FastCUA, reconnect the daemon, or re-open Computer Use yourself.
+  - **Stop task** = end Computer Use for this turn and report that the user stopped it.
 
 On the first Computer Use task in a session, try a lightweight call after bootstrap:
 

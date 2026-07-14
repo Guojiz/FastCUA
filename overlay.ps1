@@ -88,8 +88,8 @@ $script:keyWasDown = @{}
 function B([string]$value) { return [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($value)) }
 
 function T([string]$key) {
-  $zh = @{ "using"=(B "RmFzdENVQSDmraPlnKjkvb/nlKjkvaDnmoTnlLXohJE="); "paused"=(B "RmFzdENVQSDlt7LmmoLlgZw="); "approval"=(B "RmFzdENVQSDpnIDopoHmjojmnYM="); "offline"=(B "RmFzdENVQSDlt7Lnprvnur8="); "settings"=(B "Rjcg6K6+572u"); "pause"=(B "Rjgg5pqC5YGc"); "resume"=(B "Rjgg5oGi5aSN"); "interject"=(B "Rjkg5o+S6K+d"); "exit"=(B "RjEwIOmAgOWHug=="); "active"=(B "5qGM6Z2i5o6n5Yi26L+b6KGM5Lit"); "blocked"=(B "5qGM6Z2i6L6T5YWl5bey6ZSB5a6a77yM5oGi5aSN5ZCO57un57ut44CC"); "choose"=(B "6YCJ5oup5LuF5LiA5qyh44CB5Yqg5YWl5Y+v5L+h5ZCN5Y2V5oiW5ouS57ud"); "waiting"=(B "5q2j5Zyo562J5b6F5L2g55qE5Yaz5a6a"); "inputTip"=(B "6L6T5YWl5oyH5Luk77yM5oyJIEVudGVyIOWPkemAgQ==") }
-  $en = @{ "using"="FastCUA is using your computer"; "paused"="FastCUA is paused"; "approval"="FastCUA needs approval"; "offline"="FastCUA is offline"; "settings"="F7 settings"; "pause"="F8 pause"; "resume"="F8 resume"; "interject"="F9 interject"; "exit"="F10 exit"; "active"="Desktop control is active"; "blocked"="Desktop input is blocked until you resume."; "choose"="Allow once, add to trusted, or deny"; "waiting"="is waiting for your decision"; "inputTip"="Type an instruction and press Enter" }
+  $zh = @{ "using"=(B "RmFzdENVQSDmraPlnKjkvb/nlKjkvaDnmoTnlLXohJE="); "paused"=(B "RmFzdENVQSDlt7LmmoLlgZw="); "approval"=(B "RmFzdENVQSDpnIDopoHmjojmnYM="); "offline"=(B "RmFzdENVQSDlt7Lnprvnur8="); "settings"=(B "Rjcg6K6+572u"); "pause"=(B "Rjgg5pqC5YGc"); "resume"=(B "Rjgg5oGi5aSN"); "interject"=(B "Rjkg5o+S6K+d"); "exit"=(B "RjEwIOmAgOWHug=="); "active"=(B "5qGM6Z2i5o6n5Yi26L+b6KGM5Lit"); "blocked"=(B "5qGM6Z2i6L6T5YWl5bey6ZSB5a6a77yM5oGi5aSN5ZCO57un57ut44CC"); "choose"=(B "MSDkuIDmrKEgfCAyIOWni+e7iCB8IDMg5ouS57ud"); "waiting"=(B "5q2j5Zyo562J5b6F5L2g55qE5Yaz5a6a"); "inputTip"=(B "6L6T5YWl5oyH5Luk77yM5oyJIEVudGVyIOWPkemAgQ==") }
+  $en = @{ "using"="FastCUA is using your computer"; "paused"="FastCUA is paused"; "approval"="FastCUA needs approval"; "offline"="FastCUA is offline"; "settings"="F7 settings"; "pause"="F8 pause"; "resume"="F8 resume"; "interject"="F9 interject"; "exit"="F10 exit"; "active"="Desktop control is active"; "blocked"="Desktop input is blocked until you resume."; "choose"="1 once  |  2 always approve  |  3 deny"; "waiting"="is waiting for your decision"; "inputTip"="Type an instruction and press Enter" }
   return $(if ($script:language -eq "zh") { $zh[$key] } else { $en[$key] })
 }
 
@@ -99,9 +99,9 @@ function Apply-StaticLabels {
   $resume.Content = $(if ($script:language -eq "zh") { B "5oGi5aSN" } else { "Resume" })
   $stop.Content = $(if ($script:language -eq "zh") { B "5YGc5q2i5Lu75Yqh" } else { "Stop task" })
   $exitButton.Content = $(if ($script:language -eq "zh") { B "6YCA5Ye6" } else { "Exit" })
-  $allowOnce.Content = $(if ($script:language -eq "zh") { B "5LuF5YWB6K645LiA5qyh" } else { "Allow once" })
-  $trust.Content = $(if ($script:language -eq "zh") { B "5Yqg5YWl5Y+v5L+h5ZCN5Y2V" } else { "Add to trusted" })
-  $deny.Content = $(if ($script:language -eq "zh") { B "5ouS57ud" } else { "Deny" })
+  $allowOnce.Content = $(if ($script:language -eq "zh") { B "MSDCtyDlhYHorrjkuIDmrKE=" } else { "1 · Allow once" })
+  $trust.Content = $(if ($script:language -eq "zh") { B "MiDCtyDlp4vnu4jmibnlh4Y=" } else { "2 · Always approve" })
+  $deny.Content = $(if ($script:language -eq "zh") { B "MyDCtyDmi5Lnu50=" } else { "3 · Deny" })
   $inputBox.ToolTip = T "inputTip"
 }
 
@@ -199,15 +199,29 @@ function Post-Action([string]$name, [string]$token = "") {
 }
 
 function Open-Interjection {
-  if ($script:forceExpanded) { return }
-  Set-IslandExpanded (-not $script:manualExpanded) (-not $script:manualExpanded)
+  # Always pause first so the agent stops while the user types.
+  # Pause is a silent block (no agent instruction). The typed text is the only prompt.
+  if ($script:controlState -ne "paused_by_user") {
+    Post-Action "pause" | Out-Null
+    $script:controlState = "paused_by_user"
+  }
+  Set-IslandExpanded $true $true
+}
+
+function Decide-Approval([string]$name) {
+  if (-not $script:pending) { return }
+  Post-Action $name $script:pending.token | Out-Null
 }
 
 function Send-Interjection {
   $text = $inputBox.Text.Trim()
   if (-not $text) { return }
   try {
-    # /api/interject is atomic (interrupt + pause) since v0.1.5; stopAll remains a safe follow-up.
+    # Ensure paused, then deliver interjection text as the agent-facing instruction.
+    # /api/interject is atomic (interrupt + pause); stopAll remains a safe follow-up.
+    if ($script:controlState -ne "paused_by_user") {
+      Post-Action "pause" | Out-Null
+    }
     Invoke-RestMethod -Uri "$base/api/interject" -Method Post -ContentType "application/json" -Body (@{ text = $text } | ConvertTo-Json -Compress) -TimeoutSec 3 | Out-Null
     Post-Action "stopAll" | Out-Null
     $inputBox.Text = ""
@@ -329,10 +343,25 @@ $pause.Add_Click({ Post-Action "pause" })
 $resume.Add_Click({ Post-Action "resume"; $script:manualExpanded = $false })
 $stop.Add_Click({ Post-Action "stopAll"; $script:manualExpanded = $false; Set-IslandExpanded $false })
 $exitButton.Add_Click({ Post-Action "shutdown" })
-$allowOnce.Add_Click({ if ($script:pending) { Post-Action "allowOnce" $script:pending.token } })
-$trust.Add_Click({ if ($script:pending) { Post-Action "allowAndWhitelist" $script:pending.token } })
-$deny.Add_Click({ if ($script:pending) { Post-Action "denyApproval" $script:pending.token } })
+$allowOnce.Add_Click({ Decide-Approval "allowOnce" })
+$trust.Add_Click({ Decide-Approval "alwaysApprove" })
+$deny.Add_Click({ Decide-Approval "denyApproval" })
 $inputBox.Add_KeyDown({ param($sender, $event) if ($event.Key -eq "Return") { Send-Interjection; $event.Handled = $true } })
+
+# Approval keyboard: 1 once / 2 always approve / 3 deny (when approval panel is up and input is not focused)
+$win.Add_PreviewKeyDown({
+  param($sender, $event)
+  if ($approvalPanel.Visibility -ne "Visible" -or -not $script:pending) { return }
+  if ($inputBox.IsKeyboardFocused) { return }
+  switch ($event.Key.ToString()) {
+    "D1" { Decide-Approval "allowOnce"; $event.Handled = $true }
+    "NumPad1" { Decide-Approval "allowOnce"; $event.Handled = $true }
+    "D2" { Decide-Approval "alwaysApprove"; $event.Handled = $true }
+    "NumPad2" { Decide-Approval "alwaysApprove"; $event.Handled = $true }
+    "D3" { Decide-Approval "denyApproval"; $event.Handled = $true }
+    "NumPad3" { Decide-Approval "denyApproval"; $event.Handled = $true }
+  }
+})
 
 $timer = [System.Windows.Threading.DispatcherTimer]::new()
 $timer.Interval = [TimeSpan]::FromMilliseconds(400)
@@ -354,6 +383,15 @@ $keyTimer.Add_Tick({
       }
     }
     $script:keyWasDown[$id] = $down
+  }
+  # Global approval keys (work even when island does not have keyboard focus)
+  if ($approvalPanel.Visibility -eq "Visible" -and $script:pending -and -not $inputBox.IsKeyboardFocused) {
+    foreach ($item in @(@("ap1",0x31,"allowOnce"),@("ap2",0x32,"alwaysApprove"),@("ap3",0x33,"denyApproval"))) {
+      $id = $item[0]; $vk = $item[1]; $actionName = $item[2]
+      $down = ([IslandWinApi]::GetAsyncKeyState($vk) -band 0x8000) -ne 0
+      if ($down -and -not $script:keyWasDown[$id]) { Decide-Approval $actionName }
+      $script:keyWasDown[$id] = $down
+    }
   }
 })
 $keyTimer.Start()

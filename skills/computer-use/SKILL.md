@@ -62,6 +62,21 @@ Host does **not** decide whether to edit a field. Correct loop:
 
 Never `type_text` before reading `focused_value` for that field in this turn. Never re-type because the tree still shows a placeholder.
 
-### Interrupt / pause
+### Human control plane (what the agent receives)
 
-If a tool error says the user interjected, stopped Computer Use, or `paused_by_user`, **stop all desktop actions** until the user resumes or gives a new instruction.
+FastCUA has several user-side controls. Only some of them deliver a **prompt/instruction** to the agent. Do not confuse a block with a new task.
+
+| User action | What you receive | What you must do |
+|-------------|------------------|------------------|
+| **Pause** (F8 / console Pause) | Usually nothing until you call a tool. Then a **block** error: paused — not a new instruction. In-flight calls may cancel with the same block text. | **Stop** all desktop tools. **Do not retry.** Wait for the user to resume or send a new **chat** message. Do not invent follow-up desktop work. |
+| **Interject** (F9, then text + Enter) | An explicit instruction: `User interjected: "…"`. Control is already paused. | Stop current work. **Follow only that interjection text.** Do not resume desktop actions until the user resumes or chats again. |
+| **Stop task** | Stopped-by-user message (end this turn’s Computer Use). | End desktop work for this turn; report that the user stopped Computer Use. |
+| **Exit** (F10 / Exit FastCUA) | Shutdown message: FastCUA was shut down. | **Stop permanently for this turn.** Do **not** restart FastCUA, reconnect the daemon, re-launch the helper, re-run install, or continue desktop automation on your own. Wait for the user. |
+| **Approval waiting** | Block while the user decides Allow once / Always approve / Deny. | Do not retry the blocked call in a loop. Wait. |
+
+Rules of thumb:
+
+1. **Only interjection text is a new agent instruction** from the control plane. Pause/approval/exit blocks are **not** tasks to complete.
+2. If the user **exited** FastCUA, **stop**. Never immediately self-restart Computer Use.
+3. If **paused**, do not keep polling desktop tools. Silence is correct until resume or a new chat message.
+4. After any interrupt/stop/exit message, call MCP **`close` once** if the turn is done, then report to the user in chat — do not thrash tools.
