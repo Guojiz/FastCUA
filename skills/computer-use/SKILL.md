@@ -56,13 +56,28 @@ Do not spawn the native host directly, search for its executable, or build a sep
 3. For canvases, images, custom-rendered controls, drawing surfaces, and elements not exposed through accessibility, use screenshot coordinates.
 4. After an action that changes layout, focus, modality, or the element list, request a fresh accessibility snapshot before reusing element indexes.
 
-For normal text editing in this release, do not use `set_value`. Click the editable control or work surface, press `Control_L+a` when replacing existing text, then call `type_text`.
+For normal text editing in this release, do not use `set_value`. Click the editable control or work surface, press `Control_L+a` when replacing existing text, then call `type_text` **once**.
+
+### Text entry — no duplicate typing
+
+`type_text` injects keystrokes into the currently focused control. It does **not** clear the field by itself.
+
+- **Replace** existing text: focus the field → `press_key Control_L+a` → `type_text` once.
+- **Never** call `type_text` with the same string repeatedly on the same field in one turn (that appends and produces duplicated garbage).
+- Electron / web forms (ChatGPT, browsers, VS Code webviews) often keep placeholder labels in the accessibility tree after typing. Do **not** treat unchanged a11y placeholder text as proof that typing failed, and do **not** re-type.
+- Verify after **one** type by screenshot or `document_text` / focused value when available — not by re-sending the same text.
+- Prefer a single `js` cell that focuses, clears (Ctrl+A), types once, then snapshots — not many separate MCP `type_text` retries.
+
+### Interjection / pause
+
+If a tool error says the user interjected or computer use is paused, **stop all desktop actions immediately**. Do not continue with more clicks/types until the user resumes or gives a new instruction.
 
 ## Troubleshooting
 
 - If a lightweight FastCUA call times out, wait two seconds and retry it once.
 - If the retry also fails, stop the task and report the exact FastCUA connection or helper error.
 - If the user stops computer use, the desktop is locked, or the turn is no longer available, stop immediately.
+- If FastCUA console (`http://127.0.0.1:8420`) is offline, report that the daemon is not running — do not invent alternate desktop control.
 - Never bypass a FastCUA failure by switching to PowerShell, SendKeys, pyautogui, shell scripts, browser automation, or another desktop-control stack.
 
 ## Ending
@@ -96,7 +111,8 @@ When computer-use work is done, call `close` once. It ends the current turn and 
 - `type_text` sends literal text. Use `press_key` for controls such as `Enter`, `Tab`, arrows, Escape, and keyboard chords instead of embedding control characters in a typed string.
 - Prefer X Window System keysym-style names for key input, especially `KP_0` through `KP_9` for apps that distinguish numpad keys from the number row. Common aliases such as `period`, `greater`, `less`, `comma`, `slash`, `question`, `Numpad_0`, `Numpad_Add`, `Numpad_Subtract`, `Numpad_Multiply`, `Numpad_Divide`, `Numpad_Decimal`, and `Numpad_Enter` are also supported. For shifted punctuation shortcuts, include `Shift`, for example `Control_L+Shift_L+period` for Ctrl+Shift+`.` / `>`.
 - For stable labeled controls from the latest accessibility snapshot, prefer `element_index`. Coordinate `click` and `drag` use window-relative pixels for the window captured by `get_window_state`; `(0, 0)` is the top-left of the window. Use coordinates for canvases, images, custom-rendered surfaces, and targets not exposed through accessibility. The property is `element_index`, not `element`.
-- Do not use `set_value` for normal text editing in this release. Click the editable control or work surface, press `Control_L+a` when replacing text, then use `type_text`.
+- Do not use `set_value` for normal text editing in this release. Click the editable control or work surface, press `Control_L+a` when replacing text, then use `type_text` **once**. Never re-send the same `type_text` payload to the same field in one turn.
+- On user interjection or `paused_by_user`, stop desktop work immediately; wait for resume or a new user instruction.
 - `scroll` scrolls with input injection from a specific screenshot coordinate, matching Browser Use's coordinate scroll shape. Use `sky.scroll({ window, x, y, scrollX: 0, scrollY: 600 })` to scroll down from `(x, y)`. Negative `scrollY` scrolls up; negative `scrollX` scrolls left. Do not pass `element_index` to `scroll`; if a specific pane needs focus, click it first with coordinates, then scroll from inside that pane.
 - Use keyboard navigation when it is faster than hunting UI pixels.
 - In Microsoft Office apps, especially Word, Excel, and PowerPoint, prefer keyboard shortcuts and Alt ribbon key sequences over direct ribbon element indexes. Office ribbon UI Automation can time out or fail while the ribbon refreshes after selection changes. For ribbon fields, rehydrate `targetWindow` if needed, then use the visible Alt path and text entry, such as `Alt`, `h`, `f`, `s`, type the font size, and `Return`.

@@ -148,8 +148,11 @@ try {
   console.log("PASS full access runs an unknown app without prompting");
 
   await api("/api/interject", { text: "integration redirect" });
-  await api("/api/action", { action: "stopAll" });
-  await assert.rejects(client.request("list_windows"), /integration redirect/i);
+  // Interject is atomic: interrupt + paused_by_user (stopAll is optional/idempotent).
+  assert.equal((await api("/api/state")).controlState, "paused_by_user");
+  await assert.rejects(client.request("list_windows"), /paused by the user|integration redirect/i);
+  await api("/api/action", { action: "resume" });
+  // After resume, the same client still holds the interjection latch until close.
   await assert.rejects(client.request("list_windows"), /integration redirect/i);
   await client.request("close");
   await client.closed;
@@ -157,6 +160,7 @@ try {
   await nextClient.ready();
   assert.ok(Array.isArray(await nextClient.request("list_windows")));
   nextClient.close();
+  console.log("PASS interjection interrupts and pauses; resume + new client can continue");
   console.log("PASS close ends the interrupted turn and the next client reconnects cleanly");
 } finally {
   await api("/api/action", { action: "resume" }).catch(() => {});

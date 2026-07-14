@@ -179,14 +179,23 @@ function Set-StateStyle([string]$state) {
 }
 
 function Open-Settings {
-  Post-Action "pause"
+  # Pause if daemon is up; still open the console URL so the user can diagnose offline state.
+  # Keep strings ASCII-only so PowerShell parsing stays encoding-safe.
+  try {
+    Invoke-RestMethod -Uri "$base/api/action" -Method Post -ContentType "application/json" -Body (@{ action = "pause" } | ConvertTo-Json -Compress) -TimeoutSec 2 | Out-Null
+  } catch {
+    try { $action.Text = "Console offline - opening page" } catch {}
+  }
   Start-Process "$base/" | Out-Null
 }
 
 function Post-Action([string]$name, [string]$token = "") {
   try {
     Invoke-RestMethod -Uri "$base/api/action" -Method Post -ContentType "application/json" -Body (@{ action = $name; token = $token } | ConvertTo-Json -Compress) -TimeoutSec 3 | Out-Null
-  } catch {}
+    return $true
+  } catch {
+    return $false
+  }
 }
 
 function Open-Interjection {
@@ -198,12 +207,23 @@ function Send-Interjection {
   $text = $inputBox.Text.Trim()
   if (-not $text) { return }
   try {
-    Invoke-RestMethod -Uri "$base/api/interject" -Method Post -ContentType "application/json" -Body (@{ text = $text } | ConvertTo-Json -Compress) -TimeoutSec 2 | Out-Null
-    Post-Action "stopAll"
+    # /api/interject is atomic (interrupt + pause) since v0.1.5; stopAll remains a safe follow-up.
+    Invoke-RestMethod -Uri "$base/api/interject" -Method Post -ContentType "application/json" -Body (@{ text = $text } | ConvertTo-Json -Compress) -TimeoutSec 3 | Out-Null
+    Post-Action "stopAll" | Out-Null
     $inputBox.Text = ""
     $script:manualExpanded = $false
     Set-IslandExpanded $false
-  } catch {}
+    $script:controlState = "paused_by_user"
+    try {
+      $status.Text = T "paused"
+      $action.Text = "Interjected and paused"
+    } catch {}
+  } catch {
+    try {
+      $action.Text = "Interject failed: daemon unavailable"
+      $status.Text = T "offline"
+    } catch {}
+  }
 }
 
 function Refresh-Island {

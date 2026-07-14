@@ -279,6 +279,40 @@ function clearClientInterrupt(c) {
   c.interjection = null;
 }
 
+/**
+ * Interrupt every connected client and reject in-flight helper work.
+ * When pause=true (interjection path), also enter paused_by_user so the
+ * control plane blocks further desktop actions until the user resumes.
+ */
+function applyStopAll({ pause = false } = {}) {
+  const interjection = pendingInterjection;
+  const msg = interjection
+    ? `User interjected: "${interjection}". Stop current work and respond to this instruction.`
+    : ESC_MSG;
+  pendingInterjection = null;
+  for (const [, c] of clients) {
+    c.interjection = interjection;
+    c.interrupted = true;
+    c.interruptMessage = msg;
+    const f = interruptFilePath(c.sessionId, c.turnId);
+    try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, ""); } catch {}
+  }
+  resetBinary(msg);
+  currentAction = null;
+  if (pause) {
+    isUserPaused = true;
+    emitEvent("paused", { client: "user", reason: interjection ? "interjection" : "stop" });
+  }
+  emitEvent("interrupt", { client: "stop", paused: Boolean(pause) });
+  log(
+    "action: stopAll — interrupted",
+    clients.size,
+    "clients",
+    pause ? "(paused_by_user)" : "(running latch only)",
+    interjection ? `interjection="${String(interjection).slice(0, 60)}"` : ""
+  );
+}
+
 function makeClient(socket) {
   const c = { sessionId: crypto.randomUUID(), turnId: 1, buf: "", socket, interjection: null, interrupted: false, interruptMessage: null };
   clients.set(socket, c);
@@ -485,22 +519,7 @@ const httpServer = http.createServer((req, res) => {
             }, 250);
           }
           else if (action === "stopAll") {
-            const interjection = pendingInterjection;
-            const msg = interjection
-              ? `User interjected: "${interjection}". Stop current work and respond to this instruction.`
-              : ESC_MSG;
-            pendingInterjection = null;
-            for (const [, c] of clients) {
-              c.interjection = interjection;
-              c.interrupted = true;
-              c.interruptMessage = msg;
-              const f = interruptFilePath(c.sessionId, c.turnId);
-              try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, ""); } catch {}
-            }
-            resetBinary(msg);
-            currentAction = null;
-            emitEvent("interrupt", { client: "stop" });
-            log("action: stopAll — interrupted", clients.size, "clients and rejected in-flight actions");
+            applyStopAll({ pause: Boolean(pendingInterjection) });
           } else {
             throw new Error("unknown action");
           }
@@ -518,9 +537,13 @@ const httpServer = http.createServer((req, res) => {
           const parsed = JSON.parse(body);
           const text = typeof parsed.text === "string" ? parsed.text.trim().slice(0, 2000) : "";
           if (!text) throw new Error("interjection text is required");
+          // Atomic: queue text, interrupt in-flight work, AND enter paused_by_user so
+          // the island/console show Pause state and further desktop actions require Resume.
+          // Overlay still may call stopAll afterward; applyStopAll is idempotent.
           pendingInterjection = text;
-          log("interjection queued:", text.slice(0, 80));
-          res.writeHead(200, { "Content-Type": "application/json" }); res.end(JSON.stringify({ ok: true }));
+          applyStopAll({ pause: true });
+          log("interjection applied + paused:", text.slice(0, 80));
+          res.writeHead(200, { "Content-Type": "application/json" }); res.end(JSON.stringify({ ok: true, paused: true }));
         } catch (error) {
           res.writeHead(400, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error: error.message }));
         }
