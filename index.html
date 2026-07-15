@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="description" data-en="FastCUA is an open-source, local-first execution runtime for computer-use agents." data-zh="FastCUA 是面向 Computer Use Agent 的开源、本地优先执行运行时。" content="FastCUA is an open-source, local-first execution runtime for computer-use agents.">
+  <meta name="description" data-en="Windows Computer Use runtime for AI agents — UIA-first, Skill + MCP, local-first. One-line: npx fastcua" data-zh="面向 AI Agent 的 Windows Computer Use 运行时 — 无障碍优先、Skill + MCP、本地优先。一句话：npx fastcua" content="Windows Computer Use runtime for AI agents — UIA-first, Skill + MCP, local-first. One-line: npx fastcua">
   <meta name="theme-color" content="#e9e7de">
   <title data-en="FastCUA — Computer Use Runtime" data-zh="FastCUA — 计算机操作运行时">FastCUA — Computer Use Runtime</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -15,7 +15,7 @@
 </head>
 <body>
   <div class="frame" aria-hidden="true"><span class="crop tl"></span><span class="crop tr"></span><span class="crop bl"></span><span class="crop br"></span></div>
-  <div class="ruler" aria-hidden="true"><span class="ruler-mark">◆</span><span class="ruler-label" data-en="FastCUA — Runtime Register" data-zh="FastCUA — 运行时登记册">FastCUA — Runtime Register</span><span class="ruler-coord">R 0.1.1 · 2026</span><span class="ruler-mark">◆</span></div>
+  <div class="ruler" aria-hidden="true"><span class="ruler-mark">◆</span><span class="ruler-label" data-en="FastCUA — Runtime Register" data-zh="FastCUA — 运行时登记册">FastCUA — Runtime Register</span><span class="ruler-coord">R 0.2.1 · 2026</span><span class="ruler-mark">◆</span></div>
 
   <header class="masthead">
     <a class="brand" href="https://guojiz.github.io/" aria-label="Guojiz home"><span class="brand-mark">GZ</span><span class="brand-name">FastCUA</span></a>
@@ -33,7 +33,7 @@
           <p class="eyebrow" data-rise data-en="Open source · Local first · Computer use runtime" data-zh="开源 · 本地优先 · Computer Use 运行时">Open source · Local first · Computer use runtime</p>
           <h1 class="display" data-rise data-en="Less waiting.&lt;br&gt;&lt;em&gt;More doing.&lt;/em&gt;" data-zh="少一点等待，&lt;br&gt;&lt;em&gt;多一点执行。&lt;/em&gt;">Less waiting.<br><em>More doing.</em></h1>
           <p class="lede" data-rise data-en="FastCUA is a fast, reliable, and controllable local execution layer for computer-use agents. It brings interface state, native input, access policy, and human takeover into one resident control plane." data-zh="FastCUA 为 Computer Use Agent 提供快速、可靠、可控的本地执行层，把界面状态、原生输入、访问策略与人工接管组织在同一个常驻控制平面中。">FastCUA is a fast, reliable, and controllable local execution layer for computer-use agents. It brings interface state, native input, access policy, and human takeover into one resident control plane.</p>
-          <div class="hero-actions" data-rise><a class="btn primary" href="https://github.com/Guojiz/FastCUA/releases/tag/v0.1.1" data-en="Get v0.1.1 ↗" data-zh="获取 v0.1.1 ↗">Get v0.1.1 ↗</a><a class="btn" href="https://github.com/Guojiz/FastCUA" data-en="Read source" data-zh="阅读源码">Read source</a></div>
+          <div class="hero-actions" data-rise><a class="btn primary" href="https://github.com/Guojiz/FastCUA/releases/tag/v0.2.1" data-en="Get v0.2.1 ↗" data-zh="获取 v0.2.1 ↗">Get v0.2.1 ↗</a><a class="btn" href="https://github.com/Guojiz/FastCUA" data-en="Read source" data-zh="阅读源码">Read source</a></div>
         </div>
         <div class="mindmap" data-rise role="img" aria-label="FastCUA runtime mind map">
           <span class="map-caption" data-en="Runtime mind map" data-zh="运行时思维导图">Runtime mind map</span>
@@ -49,9 +49,9 @@
         <div><dt data-en="Role" data-zh="角色">Role</dt><dd data-en="Execution runtime" data-zh="执行运行时">Execution runtime</dd></div>
         <div><dt data-en="Interface" data-zh="接口">Interface</dt><dd>MCP / host protocol</dd></div>
         <div><dt data-en="Current host" data-zh="当前 Host">Current host</dt><dd>Windows 11 x64</dd></div>
-        <div><dt data-en="License" data-zh="许可证">License</dt><dd>Apache-2.0</dd></div>
+        <div><dt data-en="License" data-zh="许可证">License</dt><dd>MIT</dd></div>
       </dl>
-      <aside class="release-note"><span class="coord">NOTE-01</span><p data-en="v0.1.1 ships a Windows 11 x64 native host. Platform integration is isolated behind the host layer; it does not define FastCUA’s long-term boundary." data-zh="v0.1.1 提供 Windows 11 x64 原生 Host。平台接入被隔离在 Host 层之后，不定义 FastCUA 的长期边界。">v0.1.1 ships a Windows 11 x64 native host. Platform integration is isolated behind the host layer; it does not define FastCUA’s long-term boundary.</p></aside>
+      <aside class="release-note"><span class="coord">NOTE-01</span><p data-en="v0.2.1 ships a Windows 11 x64 native host (30s budget, prefer_vision, Skill + MCP). Platform integration is isolated behind the host layer; it does not define FastCUA’s long-term boundary." data-zh="v0.2.1 提供 Windows 11 x64 原生 Host（30s 预算、prefer_vision、Skill + MCP）。平台接入被隔离在 Host 层之后，不定义 FastCUA 的长期边界。">v0.2.1 ships a Windows 11 x64 native host (30s budget, prefer_vision, Skill + MCP). Platform integration is isolated behind the host layer; it does not define FastCUA’s long-term boundary.</p></aside>
     </section>
 
     <section class="runtime-line" aria-label="Runtime path"><span>Agent / MCP Client</span><i>→</i><span>FastCUA Runtime</span><i>→</i><span>Native Host Adapter</span><i>→</i><span>Computer</span></section>
@@ -130,17 +130,17 @@
     </section>
 
     <section id="release">
-      <header class="section-head"><span class="code" data-en="§ Release · v0.1.1" data-zh="§ 当前版本 · v0.1.1">§ Release · v0.1.1</span><h2 data-en="Bring your own agent." data-zh="使用你自己的 Agent。">Bring your own agent.</h2><p class="section-note" data-en="The installer prepares Node.js and the verified FastCUA runtime. It does not install, select, or modify an AI client." data-zh="安装器只准备 Node.js 和经过校验的 FastCUA Runtime，不会安装、选择或修改任何 AI 客户端。">The installer prepares Node.js and the verified FastCUA runtime. It does not install, select, or modify an AI client.</p></header>
+      <header class="section-head"><span class="code" data-en="§ Release · v0.2.1" data-zh="§ 当前版本 · v0.2.1">§ Release · v0.2.1</span><h2 data-en="Bring your own agent." data-zh="使用你自己的 Agent。">Bring your own agent.</h2><p class="section-note" data-en="The installer prepares Node.js and the verified FastCUA runtime. It does not install, select, or modify an AI client." data-zh="安装器只准备 Node.js 和经过校验的 FastCUA Runtime，不会安装、选择或修改任何 AI 客户端。">The installer prepares Node.js and the verified FastCUA runtime. It does not install, select, or modify an AI client.</p></header>
       <div class="install">
-        <div class="install-code"><code>irm https://raw.githubusercontent.com/Guojiz/FastCUA/main/install.ps1 | iex</code><button class="copy" type="button" data-en="Copy" data-zh="复制">Copy</button></div>
+        <div class="install-code"><code>npx fastcua</code><button class="copy" type="button" data-en="Copy" data-zh="复制">Copy</button></div>
         <div class="setup-flow" aria-label="Installation flow"><span data-en="01 · Install runtime" data-zh="01 · 安装运行时">01 · Install runtime</span><i>→</i><span data-en="02 · Open FastCUA Agent Setup.txt" data-zh="02 · 打开 FastCUA Agent Setup.txt">02 · Open FastCUA Agent Setup.txt</span><i>→</i><span data-en="03 · Give it to any MCP-compatible agent" data-zh="03 · 交给任意支持 MCP 的 Agent">03 · Give it to any MCP-compatible agent</span></div>
-        <p class="install-note" data-en="The agent reads the bundled skill, configures its own stdio MCP connection, and verifies FastCUA. No specific agent is required." data-zh="Agent 会读取项目内 Skill、写入自己的 stdio MCP 配置并验证 FastCUA。不限定任何特定 Agent。">The agent reads the bundled skill, configures its own stdio MCP connection, and verifies FastCUA. No specific agent is required.</p>
-        <div class="actions"><a class="btn primary" href="https://github.com/Guojiz/FastCUA/releases/tag/v0.1.1" data-en="Release page ↗" data-zh="发布页面 ↗">Release page ↗</a><a class="btn" href="https://github.com/Guojiz/FastCUA/blob/main/docs/SELF_HOSTING.md" data-en="Self-hosting ↗" data-zh="自托管文档 ↗">Self-hosting ↗</a></div>
+        <p class="install-note" data-en="npm: npx fastcua · PowerShell: irm https://raw.githubusercontent.com/Guojiz/FastCUA/main/install.ps1 | iex — then give Desktop Agent Setup.txt to any Skill+MCP agent." data-zh="Agent 会读取项目内 Skill、写入自己的 stdio MCP 配置并验证 FastCUA。不限定任何特定 Agent。">npm: npx fastcua · PowerShell: irm https://raw.githubusercontent.com/Guojiz/FastCUA/main/install.ps1 | iex — then give Desktop Agent Setup.txt to any Skill+MCP agent.</p>
+        <div class="actions"><a class="btn primary" href="https://github.com/Guojiz/FastCUA/releases/tag/v0.2.1" data-en="Release page ↗" data-zh="发布页面 ↗">Release page ↗</a><a class="btn" href="https://github.com/Guojiz/FastCUA/blob/main/docs/SELF_HOSTING.md" data-en="Self-hosting ↗" data-zh="自托管文档 ↗">Self-hosting ↗</a></div>
       </div>
     </section>
   </main>
 
-  <footer><span>© 2026 FastCUA · Apache-2.0</span><a href="https://guojiz.github.io/" data-en="Main site ↗" data-zh="返回主站 ↗">Main site ↗</a><a href="https://github.com/Guojiz/FastCUA">GitHub ↗</a></footer>
+  <footer><span>© 2026 FastCUA · MIT</span><a href="https://guojiz.github.io/" data-en="Main site ↗" data-zh="返回主站 ↗">Main site ↗</a><a href="https://github.com/Guojiz/FastCUA">GitHub ↗</a></footer>
   <script src="app-2622617.js"></script>
 </body>
 </html>
