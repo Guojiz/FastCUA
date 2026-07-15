@@ -25,6 +25,22 @@ If the same lightweight call times out again, do not keep issuing app input. Ret
 
 If the intended app is present but has no suitable open window, call `await sky.launch_app({ app: targetApp.id })`, then poll `list_apps()` until that app exposes a targetable window. If the intended app is not yet discoverable in `list_apps()`, call `await sky.launch_app({ app: "C:\\path\\to\\YourApp.exe" })`, or use a packaged target / `paint` alias (see API), then poll `list_apps()` or `list_windows()` for the new targetable window. Do not open or navigate the Windows Start menu/Search UI to launch apps. Do not continue while a launcher, splash screen, modal, or permission prompt is blocking the app's workspace.
 
+## Timeouts (software action budget)
+
+- Each desktop helper call and each JS cell defaults to a **30 second** budget. Errors look like `timed out` / `30s action budget`.
+- On timeout: **retry the same call at most once**, then change strategy (e.g. UIA → `grid_view`) or stop and report. Do not poll forever.
+- Human approval wait is separate (user must decide). Do not treat approval wait as a software hang to “fix” by spamming tools.
+
+## Broken UIA tree → vision immediately
+
+After `get_window_state({ include_text: true })`, read **`state.uia`**:
+
+- `uia.prefer_vision === true` or `uia.quality` is `broken` / `weak` → **call `sky.grid_view({ window })` immediately**. Do **not** click `element_index`.
+- One `stale` / unavailable element_index error → same: switch to grid, do not retry that index.
+- Tree lines marked `[no-hit]` are not clickable via index.
+
+Why trees go bad (do not dig into host code mid-task): poor app Accessibility (Electron/canvas), nodes without bounds, UIA provider timeout, only shell panes, or a stale snapshot after UI change. Pixels can still be fine — use the square number grid.
+
 ## Runtime Behavior
 
 - Computer Use commands run through FastCUA MCP tools, preferably the **`js`** tool with the persistent `sky` object. Individual MCP tools (`click`, `type_text`, …) are also valid.

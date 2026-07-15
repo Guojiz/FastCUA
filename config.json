@@ -1,17 +1,27 @@
-{
-  "costartMode": "claude",
-  "idleTimeoutMin": 5,
-  "approvalPolicy": "safe",
-  "whitelist": [
-    "mspaint.exe",
-    "shell:AppsFolder\\Microsoft.Paint_8wekyb3d8bbwe!App",
-    "notepad.exe",
-    "explorer.exe"
-  ],
-  "port": 8420,
-  "bannerEnabled": false,
-  "overlayEnabled": true,
-  "overlayTitle": "FastCUA is using your computer",
-  "overlayLanguage": "auto",
-  "cuaBinPath": ""
+﻿{
+    "costartMode":  "claude",
+    "idleTimeoutMin":  5,
+    "approvalPolicy":  "safe",
+    "whitelist":  [
+                      "mspaint.exe",
+                      "shell:AppsFolder\\Microsoft.Paint_8wekyb3d8bbwe!App",
+                      "notepad.exe",
+                      "explorer.exe",
+                      "calc.exe",
+                      "shell:AppsFolder\\Microsoft.WindowsCalculator_8wekyb3d8bbwe!App",
+                      "WindowsTerminal.exe",
+                      "cmd.exe",
+                      "powershell.exe",
+                      "pwsh.exe",
+                      "write.exe",
+                      "Code.exe",
+                      "claude.exe",
+                      "ChatGPT.exe"
+                  ],
+    "port":  8420,
+    "bannerEnabled":  false,
+    "overlayEnabled":  true,
+    "overlayTitle":  "FastCUA is using your computer",
+    "overlayLanguage":  "auto",
+    "cuaBinPath":  ""
 }

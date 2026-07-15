@@ -52,6 +52,7 @@ function resolveCuaBin() {
   if (process.env.CUA_BIN && fs.existsSync(process.env.CUA_BIN)) return process.env.CUA_BIN;
   return discoverCuaBin();
 }
+// Software action budget: every helper request must finish or fail within 30s (not human approval wait).
 const TIMEOUT_MS = 30000;
 // Agent-facing control-plane strings (prompt engineering):
 // - Lead with a stable [control_plane:…] tag so models can branch without fuzzy matching.
@@ -101,7 +102,25 @@ function actionSummary(method, params) {
 
 // ---- config (web UI editable) ----
 const CONFIG_PATH = process.env.FASTCUA_CONFIG_PATH || path.join(HERE, "config.json");
-const DEFAULT_CONFIG = { costartMode: "claude", idleTimeoutMin: 5, approvalPolicy: "safe", whitelist: ["mspaint.exe", "shell:AppsFolder\\Microsoft.Paint_8wekyb3d8bbwe!App", "notepad.exe", "explorer.exe"], port: 8420, bannerEnabled: false, overlayEnabled: true, overlayTitle: "FastCUA is using your computer", overlayLanguage: "auto", cuaBinPath: "" };
+// Default whitelist: exact basenames / AUMIDs only (no substring match). Common local tools; not browsers/password managers.
+const DEFAULT_WHITELIST = [
+  "mspaint.exe",
+  "shell:AppsFolder\\Microsoft.Paint_8wekyb3d8bbwe!App",
+  "notepad.exe",
+  "explorer.exe",
+  "calc.exe",
+  "shell:AppsFolder\\Microsoft.WindowsCalculator_8wekyb3d8bbwe!App",
+  "WindowsTerminal.exe",
+  "cmd.exe",
+  "powershell.exe",
+  "pwsh.exe",
+  "write.exe",
+  "Code.exe",
+  "code.exe",
+  "claude.exe",
+  "ChatGPT.exe",
+];
+const DEFAULT_CONFIG = { costartMode: "claude", idleTimeoutMin: 5, approvalPolicy: "safe", whitelist: [...DEFAULT_WHITELIST], port: 8420, bannerEnabled: false, overlayEnabled: true, overlayTitle: "FastCUA is using your computer", overlayLanguage: "auto", cuaBinPath: "" };
 const APPROVAL_WAIT_MS = 60_000;
 const pendingApprovals = new Map();
 let isUserPaused = false;

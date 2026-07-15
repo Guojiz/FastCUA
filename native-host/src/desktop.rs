@@ -28,7 +28,7 @@ struct UiaElementTarget {
     bounds: RECT,
 }
 
-const STALE_UIA_ELEMENT: &str = "UIA element index is unavailable or stale. Call get_window_state with include_text: true again.";
+const STALE_UIA_ELEMENT: &str = "UIA element index is unavailable or stale. Call get_window_state with include_text: true again. Prefer sky.grid_view({window}) immediately; do not retry this element_index.";
 const APPS_FOLDER_PREFIX: &str = "shell:AppsFolder\\";
 const PAINT_AUMID: &str = "Microsoft.Paint_8wekyb3d8bbwe!App";
 
@@ -308,40 +308,156 @@ fn accessibility_tree(window: &WindowRef) -> (String, String, Vec<HWND>) {
     (tree, document_parts.join("\n"), elements)
 }
 
+/// Classify UIA usefulness so agents switch to grid_view immediately when the tree is unusable.
+fn assess_uia_quality(
+    elements: &[(u64, String, String, bool)],
+    provider_error: Option<&str>,
+) -> Value {
+    let total = elements.len();
+    let no_hit = elements.iter().filter(|(_, _, _, has_bounds)| !has_bounds).count();
+    let shell_roles = ["Window", "Pane", "TitleBar", "Group", "Custom", "Image", "Thumb"];
+    let actionable = elements
+        .iter()
+        .filter(|(_, role, _, has_bounds)| {
+            *has_bounds
+                && matches!(
+                    role.as_str(),
+                    "Button"
+                        | "Edit"
+                        | "MenuItem"
+                        | "CheckBox"
+                        | "RadioButton"
+                        | "ComboBox"
+                        | "ListItem"
+                        | "TreeItem"
+                        | "TabItem"
+                        | "Hyperlink"
+                        | "Document"
+                        | "SplitButton"
+                )
+        })
+        .count();
+    let only_shell = total > 0
+        && elements.iter().all(|(_, role, _, _)| shell_roles.iter().any(|s| *s == role.as_str()));
+
+    let (quality, prefer_vision, reason) = if let Some(err) = provider_error {
+        if err.contains("timed out") || err.contains("disabled") {
+            ("broken", true, "timeout_or_provider_disabled")
+        } else if total == 0 {
+            ("broken", true, "empty_tree")
+        } else {
+            ("weak", true, "provider_error_fallback")
+        }
+    } else if total == 0 {
+        ("broken", true, "empty_tree")
+    } else if only_shell || actionable < 3 {
+        ("broken", true, "only_shell")
+    } else if total > 0 && (no_hit as f64 / total as f64) >= 0.5 {
+        ("weak", true, "high_no_hit")
+    } else if actionable < 5 {
+        ("weak", true, "few_actionable")
+    } else {
+        ("good", false, "ok")
+    };
+
+    json!({
+        "quality": quality,
+        "prefer_vision": prefer_vision,
+        "reason": reason,
+        "actionable_count": actionable,
+        "no_hit_count": no_hit,
+        "element_count": total,
+        "howto": if prefer_vision {
+            "UIA tree unusable: call sky.grid_view({window}) immediately. Do not click element_index."
+        } else {
+            "UIA usable: prefer element_index; refresh tree after layout changes."
+        }
+    })
+}
+
 pub fn get_window_state(
     window: WindowRef,
     include_screenshot: bool,
     include_text: bool,
 ) -> Result<Value, String> {
     activate_window(window.id)?;
-    let accessibility = if include_text {
-        let (tree, focused_element, document_text) = match uia_snapshot(&window) {
+    let (accessibility, uia_meta) = if include_text {
+        let mut provider_err: Option<String> = None;
+        let (tree, focused_element, document_text, quality_elems) = match uia_snapshot(&window) {
             Ok(snapshot) => {
                 cache_uia_elements(&window, &snapshot)?;
+                let elems: Vec<(u64, String, String, bool)> = snapshot
+                    .elements
+                    .iter()
+                    .map(|e| {
+                        (
+                            e.index,
+                            e.role.clone(),
+                            e.name.clone(),
+                            e.bounds.is_some(),
+                        )
+                    })
+                    .collect();
                 (
                     snapshot.tree,
                     snapshot.focused_element,
                     snapshot.document_text,
+                    elems,
                 )
             }
-            Err(_) => {
+            Err(err) => {
+                provider_err = Some(err);
                 let (tree, document_text, elements) = accessibility_tree(&window);
                 cache_hwnd_elements(&window, &elements)?;
-                (tree, String::new(), document_text)
+                let elems: Vec<(u64, String, String, bool)> = elements
+                    .iter()
+                    .enumerate()
+                    .map(|(i, hwnd)| {
+                        let mut bounds = RECT::default();
+                        let has = unsafe { IsWindow(*hwnd) } != 0
+                            && unsafe { GetWindowRect(*hwnd, &mut bounds) } != 0
+                            && bounds.right > bounds.left
+                            && bounds.bottom > bounds.top;
+                        (
+                            i as u64,
+                            role_for_class(&class_name(*hwnd)).to_string(),
+                            if i == 0 {
+                                window.title.clone()
+                            } else {
+                                window_text(*hwnd)
+                            },
+                            has,
+                        )
+                    })
+                    .collect();
+                (tree, String::new(), document_text, elems)
             }
         };
-        // Read focused control value and return it to the model. The model decides
-        // whether to edit; type_text must not silently no-op based on this value.
         let focused_value = uia::focused_value().unwrap_or_default();
-        json!({
-            "tree": tree,
-            "focused_element": focused_element,
-            "focused_value": focused_value,
-            "selected_text": "",
-            "document_text": document_text,
-        })
+        let uia = assess_uia_quality(
+            &quality_elems,
+            provider_err.as_deref(),
+        );
+        (
+            json!({
+                "tree": tree,
+                "focused_element": focused_element,
+                "focused_value": focused_value,
+                "selected_text": "",
+                "document_text": document_text,
+            }),
+            uia,
+        )
     } else {
-        json!({})
+        (
+            json!({}),
+            json!({
+                "quality": "unknown",
+                "prefer_vision": false,
+                "reason": "include_text_false",
+                "howto": "Call get_window_state with include_text:true to assess UIA, or use grid_view for targeting."
+            }),
+        )
     };
     let bounds = window_bounds(window.id)?;
     let screenshots = if include_screenshot {
@@ -358,9 +474,14 @@ pub fn get_window_state(
     } else {
         (bounds.width, bounds.height)
     };
+    let prefer_vision = uia_meta
+        .get("prefer_vision")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     Ok(json!({
         "window": window,
         "accessibility": accessibility,
+        "uia": uia_meta,
         "screenshots": screenshots,
         // Explicit coordinate space for agents: click/drag/scroll x,y are in this space.
         "viewport": {
@@ -376,7 +497,11 @@ pub fn get_window_state(
             "origin": "top_left",
             "click_xy": "x,y are relative to window top-left; same units as screenshots[0].width/height",
             "normalized": "optional: pass x,y in 0..1 to mean fractions of width/height",
-            "grid_hint": "When UIA is unusable: sky.grid(viewport) packs SQUARE number cells (3 rows, else 2). SELECT a number (no click). sky.grid_refine(grid,id) → 3x3 squares INSIDE that cell only. sky.click_cell only when ready."
+            "grid_hint": if prefer_vision {
+                "UIA prefer_vision=true: call sky.grid_view({window}) NOW. Do not use element_index."
+            } else {
+                "When UIA is unusable: sky.grid_view packs SQUARE number cells. SELECT then refine then click_cell."
+            }
         },
         "cacheDiagnostics": {
             "accessibilityRevision": 1,

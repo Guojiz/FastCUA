@@ -11,7 +11,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $repo = 'https://github.com/Guojiz/FastCUA'
-$Version = 'v0.2.0'
+$Version = 'v0.2.1'
 $appDir = Join-Path $InstallRoot 'app'
 $tempDir = Join-Path ([System.IO.Path]::GetTempPath()) ('fastcua-install-' + [guid]::NewGuid().ToString('N'))
 

@@ -2,7 +2,7 @@
 
 **Turn Windows GUIs into a fast, executable interface for AI agents.**
 
-[Website](https://guojiz.github.io/FastCUA/) · [中文](README_zh.md) · [Self-hosting](docs/SELF_HOSTING.md)
+[Website](https://guojiz.github.io/FastCUA/) · [中文](README_zh.md) · [Self-hosting](docs/SELF_HOSTING.md) · [Stuck / timeouts](docs/STUCK.md)
 
 > **Bring your own agent, and install FastCUA into that agent itself by default.** The Windows installer prepares Node.js and the verified FastCUA runtime. The agent that receives the setup prompt must then install both the complete `computer-use` Skill and the `sky-computer-use` MCP server into its own active configuration. Missing either part means installation failed.
 
@@ -30,7 +30,9 @@ Through MCP, the agent gets a persistent JS environment (`sky.*`). Related keybo
 
 ### 5. Visual targeting = Apple-style square number grid
 
-When UIA is weak (many Electron apps):
+**Software action budget is 30s** per desktop request / JS cell. On timeout, retry once then change strategy.
+
+When UIA is weak or `state.uia.prefer_vision` is true (broken/empty/shell-only tree — see [STUCK.md](docs/STUCK.md)):
 
 1. `sky.grid_view({ window })` → **one** annotated image: semi-transparent **square** cell outlines + small outlined numbers.
 2. **Select** a number only (does **not** click).

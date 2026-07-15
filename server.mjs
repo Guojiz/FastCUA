@@ -84,7 +84,8 @@ class DaemonClient {
     return new Promise((resolve, reject) => {
       if (!this.sock || !this.sock.writable || this.sock.destroyed) { reject(new Error("daemon unavailable")); return; }
       const id = this.nextId++;
-      const timer = setTimeout(() => { this.pending.delete(id); reject(new Error("request timed out: " + method)); }, 120000);
+      // Action budget: 30s max per desktop request (matches daemon TIMEOUT_MS).
+      const timer = setTimeout(() => { this.pending.delete(id); reject(new Error("request timed out: " + method + " (30s action budget)")); }, 30000);
       this.pending.set(id, { resolve, reject, timer });
       this.sock.write(JSON.stringify({ id, method, params }) + "\n", (e) => { if (e) { clearTimeout(timer); this.pending.delete(id); reject(e); } });
     });
@@ -297,7 +298,8 @@ const sky = {
 // ---- persistent JS REPL (independent `js` tool) ----
 let replSession = { out: [], images: [] };
 const cellStorage = new AsyncLocalStorage();
-const JS_TIMEOUT_MS = Number(process.env.FASTCUA_JS_TIMEOUT_MS) > 0 ? Number(process.env.FASTCUA_JS_TIMEOUT_MS) : 120000;
+// Default 30s JS cell budget (override with FASTCUA_JS_TIMEOUT_MS). Long strokes = multiple cells.
+const JS_TIMEOUT_MS = Number(process.env.FASTCUA_JS_TIMEOUT_MS) > 0 ? Number(process.env.FASTCUA_JS_TIMEOUT_MS) : 30000;
 let nextCellId = 1;
 function currentCell() { return cellStorage.getStore(); }
 function assertActiveCell() {
@@ -422,7 +424,7 @@ const TOOLS = [
   { name: "list_windows", desc: "List open windows that can be targeted by the window2 API.", inputSchema: { type: "object", properties: {} } },
   { name: "get_window", desc: "Rehydrate a currently open window by id (after losing a window binding).", inputSchema: { type: "object", properties: { app: { type: "string" }, id: { type: "number" } }, required: ["id"] } },
   { name: "launch_app", desc: "Launch an app by id from list_apps, an explicit .exe path, the `paint` alias, or a shell:AppsFolder\\<AUMID> packaged-app target. Its window appears in list_apps() afterwards.", inputSchema: { type: "object", properties: { app: { type: "string", description: "app id, .exe process path, `paint`, or shell:AppsFolder\\<AUMID>" } }, required: ["app"] } },
-  { name: "get_window_state", desc: "Capture accessibility tree and/or screenshot. Returns viewport {width,height,coordinate_space} — click x,y use that pixel space (origin top-left). Also focused_value when include_text. Prefer element_index; if UIA is empty use sky.grid letter-grid refine then click cell center.", inputSchema: { type: "object", properties: { window: W, include_screenshot: { type: "boolean", default: true }, include_text: { type: "boolean", default: true } }, required: ["window"] } },
+  { name: "get_window_state", desc: "Capture accessibility tree and/or screenshot. Returns viewport, focused_value, and uia {quality,prefer_vision,reason}. If uia.prefer_vision, call sky.grid_view immediately — do not use element_index. 30s action budget.", inputSchema: { type: "object", properties: { window: W, include_screenshot: { type: "boolean", default: true }, include_text: { type: "boolean", default: true } }, required: ["window"] } },
   { name: "click", desc: "Click element_index from latest tree OR screenshot pixel x,y (same units as viewport/screenshot width×height; or both in 0..1 as fractions). Out-of-bounds returns an error with viewport size.", inputSchema: { type: "object", properties: { window: W, element_index: { type: "number" }, x: { type: "number" }, y: { type: "number" }, mouse_button: { type: "string", enum: ["left", "right", "middle", "l", "r", "m"] }, click_count: { type: "number" }, screenshotId: { type: "string" } }, required: ["window"] } },
   { name: "press_key", desc: "Press a key or +-separated chord (e.g. 'Return', 'Control_L+a', 'Ctrl+s', 'space').", inputSchema: { type: "object", properties: { window: W, key: { type: "string" } }, required: ["window", "key"] } },
   { name: "type_text", desc: "Write into the focused control AFTER the model has read focused_value via get_window_state and decided to edit. replace:true (default) clears the field then types; replace:false appends. Host does not decide whether to edit.", inputSchema: { type: "object", properties: { window: W, text: { type: "string" }, replace: { type: "boolean", default: true, description: "When true (default), clear focused field then type. When false, append." } }, required: ["window", "text"] } },
@@ -543,7 +545,7 @@ async function handle(line) {
     let result;
     let closeAfterResponse = false;
     if (method === "initialize") {
-      result = { protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "sky-computer-use", version: "0.2.0" } };
+      result = { protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "sky-computer-use", version: "0.2.1" } };
     } else if (method === "initialized" || method === "notifications/initialized") {
       return;
     } else if (method === "tools/list") {
