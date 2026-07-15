@@ -314,8 +314,13 @@ fn assess_uia_quality(
     provider_error: Option<&str>,
 ) -> Value {
     let total = elements.len();
-    let no_hit = elements.iter().filter(|(_, _, _, has_bounds)| !has_bounds).count();
-    let shell_roles = ["Window", "Pane", "TitleBar", "Group", "Custom", "Image", "Thumb"];
+    let no_hit = elements
+        .iter()
+        .filter(|(_, _, _, has_bounds)| !has_bounds)
+        .count();
+    let shell_roles = [
+        "Window", "Pane", "TitleBar", "Group", "Custom", "Image", "Thumb",
+    ];
     let actionable = elements
         .iter()
         .filter(|(_, role, _, has_bounds)| {
@@ -338,7 +343,9 @@ fn assess_uia_quality(
         })
         .count();
     let only_shell = total > 0
-        && elements.iter().all(|(_, role, _, _)| shell_roles.iter().any(|s| *s == role.as_str()));
+        && elements
+            .iter()
+            .all(|(_, role, _, _)| shell_roles.iter().any(|s| *s == role.as_str()));
 
     let (quality, prefer_vision, reason) = if let Some(err) = provider_error {
         if err.contains("timed out") || err.contains("disabled") {
@@ -389,14 +396,7 @@ pub fn get_window_state(
                 let elems: Vec<(u64, String, String, bool)> = snapshot
                     .elements
                     .iter()
-                    .map(|e| {
-                        (
-                            e.index,
-                            e.role.clone(),
-                            e.name.clone(),
-                            e.bounds.is_some(),
-                        )
-                    })
+                    .map(|e| (e.index, e.role.clone(), e.name.clone(), e.bounds.is_some()))
                     .collect();
                 (
                     snapshot.tree,
@@ -434,10 +434,7 @@ pub fn get_window_state(
             }
         };
         let focused_value = uia::focused_value().unwrap_or_default();
-        let uia = assess_uia_quality(
-            &quality_elems,
-            provider_err.as_deref(),
-        );
+        let uia = assess_uia_quality(&quality_elems, provider_err.as_deref());
         (
             json!({
                 "tree": tree,
@@ -468,8 +465,12 @@ pub fn get_window_state(
     // Prefer screenshot pixel size as the coordinate space (matches capture bitmap).
     let (coord_w, coord_h) = if let Some(shot) = screenshots.first() {
         (
-            shot.get("width").and_then(Value::as_i64).unwrap_or(bounds.width as i64) as i32,
-            shot.get("height").and_then(Value::as_i64).unwrap_or(bounds.height as i64) as i32,
+            shot.get("width")
+                .and_then(Value::as_i64)
+                .unwrap_or(bounds.width as i64) as i32,
+            shot.get("height")
+                .and_then(Value::as_i64)
+                .unwrap_or(bounds.height as i64) as i32,
         )
     } else {
         (bounds.width, bounds.height)
@@ -781,7 +782,13 @@ struct GridCell {
 }
 
 /// Apple-like square packing. `refine`: force 3×3 squares inside the region.
-fn pack_square_cells(left: i32, top: i32, right: i32, bottom: i32, refine: bool) -> (i32, i32, i32, Vec<GridCell>) {
+fn pack_square_cells(
+    left: i32,
+    top: i32,
+    right: i32,
+    bottom: i32,
+    refine: bool,
+) -> (i32, i32, i32, Vec<GridCell>) {
     let rw = (right - left).max(1);
     let rh = (bottom - top).max(1);
     let (rows, cols, side, origin_left, origin_top) = if refine {
@@ -883,7 +890,19 @@ fn blend_px(rgb: &mut [u8], w: i32, h: i32, x: i32, y: i32, r: u8, g: u8, b: u8,
     rgb[i + 2] = (rgb[i + 2] as f32 * ia + b as f32 * a).round() as u8;
 }
 
-fn draw_hline(rgb: &mut [u8], w: i32, h: i32, y: i32, x0: i32, x1: i32, thick: i32, r: u8, g: u8, b: u8, a: f32) {
+fn draw_hline(
+    rgb: &mut [u8],
+    w: i32,
+    h: i32,
+    y: i32,
+    x0: i32,
+    x1: i32,
+    thick: i32,
+    r: u8,
+    g: u8,
+    b: u8,
+    a: f32,
+) {
     let half = thick / 2;
     for dy in -half..=(thick - 1 - half) {
         for x in x0..=x1 {
@@ -892,7 +911,19 @@ fn draw_hline(rgb: &mut [u8], w: i32, h: i32, y: i32, x0: i32, x1: i32, thick: i
     }
 }
 
-fn draw_vline(rgb: &mut [u8], w: i32, h: i32, x: i32, y0: i32, y1: i32, thick: i32, r: u8, g: u8, b: u8, a: f32) {
+fn draw_vline(
+    rgb: &mut [u8],
+    w: i32,
+    h: i32,
+    x: i32,
+    y0: i32,
+    y1: i32,
+    thick: i32,
+    r: u8,
+    g: u8,
+    b: u8,
+    a: f32,
+) {
     let half = thick / 2;
     for dx in -half..=(thick - 1 - half) {
         for y in y0..=y1 {
@@ -903,16 +934,36 @@ fn draw_vline(rgb: &mut [u8], w: i32, h: i32, x: i32, y0: i32, y1: i32, thick: i
 
 // 5×7 bitmap digits 0-9 (row-major, bit 0 = left).
 const DIGIT_FONT: [[u8; 7]; 10] = [
-    [0b01110, 0b10001, 0b10011, 0b10101, 0b11001, 0b10001, 0b01110], // 0
-    [0b00100, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110], // 1
-    [0b01110, 0b10001, 0b00001, 0b00010, 0b00100, 0b01000, 0b11111], // 2
-    [0b01110, 0b10001, 0b00001, 0b00110, 0b00001, 0b10001, 0b01110], // 3
-    [0b00010, 0b00110, 0b01010, 0b10010, 0b11111, 0b00010, 0b00010], // 4
-    [0b11111, 0b10000, 0b11110, 0b00001, 0b00001, 0b10001, 0b01110], // 5
-    [0b00110, 0b01000, 0b10000, 0b11110, 0b10001, 0b10001, 0b01110], // 6
-    [0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b01000, 0b01000], // 7
-    [0b01110, 0b10001, 0b10001, 0b01110, 0b10001, 0b10001, 0b01110], // 8
-    [0b01110, 0b10001, 0b10001, 0b01111, 0b00001, 0b00010, 0b01100], // 9
+    [
+        0b01110, 0b10001, 0b10011, 0b10101, 0b11001, 0b10001, 0b01110,
+    ], // 0
+    [
+        0b00100, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110,
+    ], // 1
+    [
+        0b01110, 0b10001, 0b00001, 0b00010, 0b00100, 0b01000, 0b11111,
+    ], // 2
+    [
+        0b01110, 0b10001, 0b00001, 0b00110, 0b00001, 0b10001, 0b01110,
+    ], // 3
+    [
+        0b00010, 0b00110, 0b01010, 0b10010, 0b11111, 0b00010, 0b00010,
+    ], // 4
+    [
+        0b11111, 0b10000, 0b11110, 0b00001, 0b00001, 0b10001, 0b01110,
+    ], // 5
+    [
+        0b00110, 0b01000, 0b10000, 0b11110, 0b10001, 0b10001, 0b01110,
+    ], // 6
+    [
+        0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b01000, 0b01000,
+    ], // 7
+    [
+        0b01110, 0b10001, 0b10001, 0b01110, 0b10001, 0b10001, 0b01110,
+    ], // 8
+    [
+        0b01110, 0b10001, 0b10001, 0b01111, 0b00001, 0b00010, 0b01100,
+    ], // 9
 ];
 
 fn draw_digit(
@@ -980,10 +1031,48 @@ fn draw_square_grid_overlay(rgb: &mut [u8], w: i32, h: i32, cells: &[GridCell]) 
     let (lr, lg, lb, la) = (80u8, 220u8, 255u8, 0.38f32);
     for cell in cells {
         // Rectangle outline only (no fill).
-        draw_hline(rgb, w, h, cell.top, cell.left, cell.right, thick, lr, lg, lb, la);
-        draw_hline(rgb, w, h, cell.bottom - 1, cell.left, cell.right, thick, lr, lg, lb, la);
-        draw_vline(rgb, w, h, cell.left, cell.top, cell.bottom, thick, lr, lg, lb, la);
-        draw_vline(rgb, w, h, cell.right - 1, cell.top, cell.bottom, thick, lr, lg, lb, la);
+        draw_hline(
+            rgb, w, h, cell.top, cell.left, cell.right, thick, lr, lg, lb, la,
+        );
+        draw_hline(
+            rgb,
+            w,
+            h,
+            cell.bottom - 1,
+            cell.left,
+            cell.right,
+            thick,
+            lr,
+            lg,
+            lb,
+            la,
+        );
+        draw_vline(
+            rgb,
+            w,
+            h,
+            cell.left,
+            cell.top,
+            cell.bottom,
+            thick,
+            lr,
+            lg,
+            lb,
+            la,
+        );
+        draw_vline(
+            rgb,
+            w,
+            h,
+            cell.right - 1,
+            cell.top,
+            cell.bottom,
+            thick,
+            lr,
+            lg,
+            lb,
+            la,
+        );
     }
     for cell in cells {
         // Small digits dead-center on the cell (same as click target cx,cy).
@@ -1069,13 +1158,7 @@ pub fn grid_view(params: &Value) -> Result<Value, String> {
         pack_square_cells(region_l, region_t, region_r, region_b, display_refine);
 
     let (cw, ch, mut crop) = crop_rgb(
-        &cap.rgb,
-        cap.width,
-        cap.height,
-        region_l,
-        region_t,
-        region_r,
-        region_b,
+        &cap.rgb, cap.width, cap.height, region_l, region_t, region_r, region_b,
     )?;
 
     let cells_local: Vec<GridCell> = cells_abs
@@ -1167,7 +1250,6 @@ pub fn grid_view(params: &Value) -> Result<Value, String> {
         }]
     }))
 }
-
 
 pub fn click(params: &Value) -> Result<(), String> {
     let window = params_window(params)?;
@@ -1490,7 +1572,10 @@ fn screen_point_from_params(window: &WindowRef, params: &Value) -> Result<(i32, 
             map_axis_normalized(params, "y", bounds.height)?,
         )
     } else {
-        (map_axis(params, "x", bounds.width)?, map_axis(params, "y", bounds.height)?)
+        (
+            map_axis(params, "x", bounds.width)?,
+            map_axis(params, "y", bounds.height)?,
+        )
     };
     screen_point(window, x, y)
 }

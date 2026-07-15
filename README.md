@@ -8,9 +8,21 @@
 
 FastCUA is an open-source, local-first Computer Use runtime for Windows. It combines accessibility-first navigation, optional screenshots, native keyboard and mouse input, multi-action execution, access policy, and visible human control in one resident service.
 
+### Documentation map (do not mix roles)
+
+| Doc | Audience | Owns |
+|-----|----------|------|
+| **This README** | Everyone | Product identity, design principles, one-line install, FAQ |
+| [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md) | Operators | Build runtime, wire **Skill + MCP** into the agent |
+| [docs/STUCK.md](docs/STUCK.md) | Operators + agents | 30s budget, bad UIA → vision, hang types, whitelist meaning |
+| `skills/computer-use/` | Agents only | Bootstrap, control-plane tags, grid procedure, safety bans |
+| MCP `server.mjs` | Runtime | Tools + persistent `sky` — not a second Skill |
+
+Client-specific notes (e.g. OpenCode) stay under `docs/`, never as the product front door.
+
 ## Design principles
 
-These are the product rules FastCUA is built around — not marketing points.
+These are the product rules FastCUA is built around — not marketing points. Agent procedure lives in the Skill; install detail lives in Self-hosting.
 
 ### 1. Accessibility first, vision optional
 
@@ -28,11 +40,13 @@ Through MCP, the agent gets a persistent JS environment (`sky.*`). Related keybo
 
 `click` / `drag` / `scroll` **x,y** are in **window screenshot pixels**, origin top-left of the target window — same space as `get_window_state().viewport` and `screenshots[0].width/height`. Never invent desktop-absolute coordinates.
 
-### 5. Visual targeting = Apple-style square number grid
+### 5. Fail fast on software work (30s)
 
-**Software action budget is 30s** per desktop request / JS cell. On timeout, retry once then change strategy.
+Each desktop helper request, MCP round-trip, and JS cell defaults to a **30 second** budget. On timeout: retry **once**, then change strategy or report. Human pause and approval waits are **not** software hangs — agents must not spam tools to “fix” them. Details: [STUCK.md](docs/STUCK.md).
 
-When UIA is weak or `state.uia.prefer_vision` is true (broken/empty/shell-only tree — see [STUCK.md](docs/STUCK.md)):
+### 6. Visual targeting = Apple-style square number grid
+
+When UIA is weak or `state.uia.prefer_vision` is true (broken/empty/shell-only tree — see [STUCK.md](docs/STUCK.md)), switch to vision **immediately** (same rule in the Skill):
 
 1. `sky.grid_view({ window })` → **one** annotated image: semi-transparent **square** cell outlines + small outlined numbers.
 2. **Select** a number only (does **not** click).
@@ -41,7 +55,7 @@ When UIA is weak or `state.uia.prefer_vision` is true (broken/empty/shell-only t
 
 Select ≠ click. Prefer `grid_view` over raw full screenshots for targeting.
 
-### 6. Human control plane is first-class
+### 7. Human control plane is first-class
 
 People stay in charge with visible state and global keys:
 
@@ -62,13 +76,13 @@ Agent-facing messages use stable tags. **Only** interjection is an instruction; 
 | `[control_plane:shutdown]` | FINAL | Do not restart FastCUA or continue desktop automation |
 | `[control_plane:awaiting_approval]` | BLOCK | Do not retry in a loop |
 
-### 7. Safe by default, local by design
+### 8. Safe by default, local by design
 
-Safe mode requires human approval for unknown apps. Trust matches exact executable paths/names — never fuzzy substring. MCP uses a named pipe; the console binds to `127.0.0.1` only. Policy stays on the machine.
+Safe mode requires human approval for unknown apps. Trust matches exact executable paths/names — never fuzzy substring. Common local tools ship on a default **whitelist** so they skip the approval prompt only — whitelist is **not** a license to automate Skill-banned surfaces (terminals, password managers, security UI). MCP uses a named pipe; the console binds to `127.0.0.1` only. Policy stays on the machine.
 
-### 8. Agent-neutral, Skill + MCP together
+### 9. Agent-neutral, Skill + MCP together
 
-FastCUA is not tied to one vendor client. Complete install = **Skill folder** + **stdio MCP** in the **same** agent that will use it. MCP alone or Skill alone is incomplete.
+FastCUA is not tied to one vendor client. Complete install = **Skill folder** + **stdio MCP** in the **same** agent that will use it. MCP alone or Skill alone is incomplete. Runtime installers prepare the machine; the agent still must wire both parts into **itself**.
 
 ## Architecture
 

@@ -152,7 +152,10 @@ pub fn focused_value() -> Option<String> {
     {
         return None;
     }
-    receiver.recv_timeout(Duration::from_millis(800)).ok().flatten()
+    receiver
+        .recv_timeout(Duration::from_millis(800))
+        .ok()
+        .flatten()
 }
 
 unsafe fn focused_value_inner() -> Option<String> {
@@ -192,8 +195,7 @@ unsafe fn focused_value_inner() -> Option<String> {
     let get_pattern: unsafe extern "system" fn(ComPtr, i32, *mut ComPtr) -> HRESULT =
         unsafe { method(focused, 16) };
     let mut pattern_unknown = ptr::null_mut();
-    let pattern_hr =
-        unsafe { get_pattern(focused, UIA_VALUE_PATTERN_ID, &mut pattern_unknown) };
+    let pattern_hr = unsafe { get_pattern(focused, UIA_VALUE_PATTERN_ID, &mut pattern_unknown) };
     let value = if pattern_hr >= 0 && !pattern_unknown.is_null() {
         // QI to IUIAutomationValuePattern
         let qi: unsafe extern "system" fn(ComPtr, *const Guid, *mut ComPtr) -> HRESULT =

@@ -1,10 +1,23 @@
 # Self-host FastCUA
 
+**Audience:** operators building or deploying the runtime.  
+**Not here:** product principles ([README](../README.md)), hang / bad-UIA policy ([STUCK.md](STUCK.md)), agent click/type procedures (`skills/computer-use/`).
+
 This guide deploys the complete local stack: the native Windows host, resident daemon, Dynamic Island, local control center, Computer Use Skill, and MCP bridge.
 
 > **A complete installation requires both the Skill and the MCP server.** Starting the daemon, merely reading `SKILL.md`, adding only MCP, or copying only the Skill is incomplete.
 
 The default installation target is **the agent currently executing the setup instructions**. Do not configure, switch to, or modify another AI client unless the user explicitly names that client.
+
+### What goes where
+
+| Piece | Location | Role |
+|-------|----------|------|
+| Runtime (daemon, host, overlay) | This repo / install dir | Shared control plane |
+| Skill folder | Agent’s own Skill system | How the agent must behave |
+| MCP `sky-computer-use` | **Same** agent’s MCP config | Tools + `sky` JS REPL |
+
+Do not put agent runtime rules in the README, and do not treat reading `SKILL.md` from the repo as “installed”.
 
 ## 1. Prerequisites
 
@@ -144,6 +157,17 @@ Verify the controls:
 `full` is a separate, explicit mode that does not ask for app approval and remains visibly purple or pink while active.
 
 There is no unrestricted approval option in the public console.
+
+### Defaults that must stay consistent with the product
+
+| Setting | Default | Notes |
+|---------|---------|--------|
+| Software action budget | **30s** per helper / MCP / JS cell | See [STUCK.md](STUCK.md). Not human approval wait. |
+| `approvalPolicy` | `safe` | Unknown apps need human approval. |
+| `whitelist` | Expanded set of exact basenames / AUMIDs (Paint, Notepad, Explorer, Calculator, Terminal, shells, WordPad, VS Code, a few agent hosts) | **Approval shortcut only** — does not override Skill bans (terminals, password managers, security UI). |
+| Existing `config.json` | Preserved on reinstall | Not auto-merged when code defaults grow; edit whitelist or use the island. |
+
+Broken UIA trees surface as `state.uia.prefer_vision` — agent response is defined in the Skill and [STUCK.md](STUCK.md), not by reconfiguring the daemon.
 
 ## 7. Direct named-pipe integration
 
