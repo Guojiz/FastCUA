@@ -120,13 +120,19 @@ FastCUA does not replace in-page browser automation. It covers the desktop layer
 
 ## Start in 30 seconds
 
-On Windows 11, open PowerShell as a regular user:
+Windows 11, Node 18+ already available — **one line via npm**:
+
+```bash
+npx fastcua
+```
+
+Or PowerShell (installs Node via WinGet if needed):
 
 ```powershell
 irm https://raw.githubusercontent.com/Guojiz/FastCUA/main/install.ps1 | iex
 ```
 
-The installer prepares Node.js, the FastCUA runtime, and the SHA-256-verified native host. It creates `FastCUA Agent Setup.txt` on the desktop.
+Both run the same verified installer: Node runtime, SHA-256 native host, and `FastCUA Agent Setup.txt` on the desktop.
 
 Give that prompt to **the agent that will actually use FastCUA**. It must:
 

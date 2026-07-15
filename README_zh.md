@@ -120,13 +120,19 @@ FastCUA 不取代页内浏览器自动化，负责其周围的桌面层：窗口
 
 ## 30 秒开始
 
-Windows 11 普通用户 PowerShell：
+Windows 11，已有 Node 18+ 时用 **npm 一句话**：
+
+```bash
+npx fastcua
+```
+
+或 PowerShell（缺 Node 时会用 WinGet 安装）：
 
 ```powershell
 irm https://raw.githubusercontent.com/Guojiz/FastCUA/main/install.ps1 | iex
 ```
 
-安装器准备 Node.js、运行时与 SHA-256 校验的原生 Host，并在桌面生成 `FastCUA Agent Setup.txt`。
+两者走同一套校验安装：运行时、SHA-256 原生 Host、桌面 `FastCUA Agent Setup.txt`。
 
 把该提示交给 **真正要使用 FastCUA 的 Agent**。它必须：
 
