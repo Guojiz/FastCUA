@@ -2,27 +2,17 @@
 
 **Turn Windows GUIs into a fast, executable interface for AI agents.**
 
-[Website](https://guojiz.github.io/FastCUA/) · [中文](README_zh.md) · [Self-hosting](docs/SELF_HOSTING.md) · [Stuck / timeouts](docs/STUCK.md)
+[Website](https://guojiz.github.io/FastCUA/) · [中文](README_zh.md) · [Self-hosting](docs/SELF_HOSTING.md)
 
 > **Bring your own agent, and install FastCUA into that agent itself by default.** The Windows installer prepares Node.js and the verified FastCUA runtime. The agent that receives the setup prompt must then install both the complete `computer-use` Skill and the `sky-computer-use` MCP server into its own active configuration. Missing either part means installation failed.
 
 FastCUA is an open-source, local-first Computer Use runtime for Windows. It combines accessibility-first navigation, optional screenshots, native keyboard and mouse input, multi-action execution, access policy, and visible human control in one resident service.
 
-### Documentation map (do not mix roles)
-
-| Doc | Audience | Owns |
-|-----|----------|------|
-| **This README** | Everyone | Product identity, design principles, one-line install, FAQ |
-| [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md) | Operators | Build runtime, wire **Skill + MCP** into the agent |
-| [docs/STUCK.md](docs/STUCK.md) | Operators + agents | 30s budget, bad UIA → vision, hang types, whitelist meaning |
-| `skills/computer-use/` | Agents only | Bootstrap, control-plane tags, grid procedure, safety bans |
-| MCP `server.mjs` | Runtime | Tools + persistent `sky` — not a second Skill |
-
-Client-specific notes (e.g. OpenCode) stay under `docs/`, never as the product front door.
+**Where things live (one line):** humans read this README + [self-host](docs/SELF_HOSTING.md); agents only load `skills/computer-use/` (Skill) and call MCP — not project docs.
 
 ## Design principles
 
-These are the product rules FastCUA is built around — not marketing points. Agent procedure lives in the Skill; install detail lives in Self-hosting.
+Product rules the runtime is built around. How an agent must act step-by-step is **not** here — that is the Skill.
 
 ### 1. Accessibility first, vision optional
 
@@ -42,11 +32,11 @@ Through MCP, the agent gets a persistent JS environment (`sky.*`). Related keybo
 
 ### 5. Fail fast on software work (30s)
 
-Each desktop helper request, MCP round-trip, and JS cell defaults to a **30 second** budget. On timeout: retry **once**, then change strategy or report. Human pause and approval waits are **not** software hangs — agents must not spam tools to “fix” them. Details: [STUCK.md](docs/STUCK.md).
+Each desktop helper request, MCP round-trip, and JS cell defaults to a **30 second** budget. On timeout the runtime fails the call; agents retry once then change strategy (defined in the Skill). Human pause and approval waits are separate — not software hangs.
 
 ### 6. Visual targeting = Apple-style square number grid
 
-When UIA is weak or `state.uia.prefer_vision` is true (broken/empty/shell-only tree — see [STUCK.md](docs/STUCK.md)), switch to vision **immediately** (same rule in the Skill):
+When UIA is weak or `state.uia.prefer_vision` is true, the runtime exposes that signal; agents must switch to vision immediately (Skill). Product shape:
 
 1. `sky.grid_view({ window })` → **one** annotated image: semi-transparent **square** cell outlines + small outlined numbers.
 2. **Select** a number only (does **not** click).
@@ -66,19 +56,11 @@ People stay in charge with visible state and global keys:
 | `F9` | Pause, then interject text |
 | `F10` | Exit FastCUA (agents must not self-restart) |
 
-Agent-facing messages use stable tags. **Only** interjection is an instruction; everything else is a block or stop:
-
-| Tag | Kind | Agent should |
-|-----|------|----------------|
-| `[control_plane:paused]` | BLOCK | Stop tools; wait for resume or a new chat message |
-| `[control_plane:interjection]` | INSTRUCTION (one-shot) | Abort old plan; follow the text; tools may continue (auto-resume) |
-| `[control_plane:stopped]` | STOP | End Computer Use for this turn |
-| `[control_plane:shutdown]` | FINAL | Do not restart FastCUA or continue desktop automation |
-| `[control_plane:awaiting_approval]` | BLOCK | Do not retry in a loop |
+Agents receive stable `[control_plane:…]` tags on tool errors. **Branching rules are only in the Skill** — not re-specified here.
 
 ### 8. Safe by default, local by design
 
-Safe mode requires human approval for unknown apps. Trust matches exact executable paths/names — never fuzzy substring. Common local tools ship on a default **whitelist** so they skip the approval prompt only — whitelist is **not** a license to automate Skill-banned surfaces (terminals, password managers, security UI). MCP uses a named pipe; the console binds to `127.0.0.1` only. Policy stays on the machine.
+Safe mode requires human approval for unknown apps. Trust matches exact executable paths/names — never fuzzy substring. Common local tools ship on a default **whitelist** that only skips the approval prompt; Skill safety bans (terminals, password managers, security UI) still apply. MCP uses a named pipe; the console binds to `127.0.0.1` only. Policy stays on the machine.
 
 ### 9. Agent-neutral, Skill + MCP together
 
@@ -98,13 +80,13 @@ flowchart LR
   C --> I["Dynamic Island + http://127.0.0.1:8420"]
 ```
 
-| Layer | Role |
-|-------|------|
-| **Skill** | Agent procedure: bootstrap, coordinate rules, control-plane tags |
-| **MCP `server.mjs`** | Tools + persistent `js` REPL with `sky` |
-| **Daemon** | Shared helper lifecycle, approval cache, pause / interject / shutdown |
-| **Native host** | UIA tree, PrintWindow screenshots, grid overlay, input |
-| **Overlay / console** | Human UI on loopback |
+| Layer | Role | Who reads it |
+|-------|------|----------------|
+| **Skill** `skills/computer-use/` | How to run a desktop task (bootstrap, tags, grid, safety) | **Agent only** |
+| **MCP** `server.mjs` | Tools + persistent `js` / `sky` | Agent tools (not prose docs) |
+| **Daemon + host** | Shared lifecycle, UIA, screenshots, input, policy | Runtime |
+| **README / self-host** | Product + install for people | **Humans** |
+| **Overlay / console** | Pause, approval, interject UI | Humans |
 
 ## Why FastCUA
 

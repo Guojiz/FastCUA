@@ -8,7 +8,7 @@ allowed-tools: mcp__sky-computer-use
 
 Use this skill to automate the UI of Microsoft Windows apps via FastCUA. Automation uses SendInput and UI Automation; window screenshots use PrintWindow (with BitBlt fallback).
 
-**This folder is the agent procedure.** Product overview and install belong in the FastCUA README / self-hosting docs — do not invent a second install story here. Operator hang taxonomy is `docs/STUCK.md` (same 30s budget and prefer_vision rules as below).
+**This folder is the only agent procedure.** Do not open the FastCUA README, self-hosting guide, or other repo docs as a substitute runbook. Those are for humans (install / product). Your job is Skill + MCP tools.
 
 If FastCUA / `sky-computer-use` is available in the session, treat this skill as mandatory reading before Windows automation. Open and follow it before saying Computer Use is unavailable and before falling back to other Windows automation methods.
 

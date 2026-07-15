@@ -1,23 +1,12 @@
 # FastCUA 中文自部署指南
 
-**读者：** 编译或部署运行时的使用方。  
-**不在这里写：** 产品原理（[README_zh](../README_zh.md)）、卡住 / 烂树策略（[STUCK_zh.md](STUCK_zh.md)）、Agent 点按与输入规程（`skills/computer-use/`）。
+给**人**看：克隆、编译、接线。不是 Agent 操作手册——装完后 Agent 只加载 `skills/computer-use/`。
 
-本指南部署完整本地栈：Windows 原生 Host、常驻 daemon、灵动岛、本地控制台、Computer Use Skill 与 MCP 桥接层。
+本指南部署本地栈：原生 Host、daemon、灵动岛、控制台，再把 **Skill + MCP 装进同一个 Agent**。
 
-> **完整安装必须同时包含 Skill 和 MCP。** 只启动 daemon、只读取 `SKILL.md`、只添加 MCP，或只复制 Skill，都不算安装完成。
+> **完整安装 = Skill 与 MCP 成对。** 只启动 daemon、只读 `SKILL.md`、只装 MCP 或只装 Skill，都不算完成。
 
-默认安装目标是**当前执行部署指令的 Agent 自己**。除非用户明确指定另一个客户端，否则不要修改、切换或代替其他 AI 客户端进行安装。
-
-### 各放各的位置
-
-| 部件 | 位置 | 职责 |
-|------|------|------|
-| 运行时（daemon、host、overlay） | 本仓库 / 安装目录 | 共享控制平面 |
-| Skill 目录 | Agent **自己的** Skill 系统 | Agent 必须如何行为 |
-| MCP `sky-computer-use` | **同一** Agent 的 MCP 配置 | 工具 + `sky` JS REPL |
-
-不要把 Agent 运行规程写进 README；也不要把「在仓库里读过 `SKILL.md`」当成已安装。
+默认目标是**当前执行部署指令的 Agent 自己**。除非用户点名，否则不要改别的客户端。
 
 ## 1. 前置条件
 
@@ -158,16 +147,16 @@ Invoke-RestMethod http://127.0.0.1:8420/api/state
 
 公开控制台不提供无条件自动授权选项。
 
-### 须与产品保持一致的默认值
+### 产品默认（配置 / 运行时 — 不是 Agent 说明书）
 
 | 项 | 默认 | 说明 |
 |----|------|------|
-| 软件动作预算 | 每次 helper / MCP / JS 单元 **30s** | 见 [STUCK_zh.md](STUCK_zh.md)。不含人类审批等待。 |
+| 软件动作预算 | 每次 helper / MCP / JS 单元 **30s** | 运行时超时。不含人类审批等待。 |
 | `approvalPolicy` | `safe` | 未知应用需人工审批。 |
-| `whitelist` | 扩展后的精确 basename / AUMID（画图、记事本、资源管理器、计算器、终端、shell、写字板、VS Code、部分 Agent 宿主） | **仅审批捷径**——不覆盖 Skill 禁令（终端、密码管理器、安全界面）。 |
-| 已有 `config.json` | 重装时保留 | 代码默认扩展时**不会**自动合并；请编辑 whitelist 或用灵动岛。 |
+| `whitelist` | 常见本地工具的精确 basename / AUMID | 只跳过审批；不解除 Skill 安全禁令。 |
+| 已有 `config.json` | 重装时保留 | 代码默认扩展时不会自动合并。 |
 
-烂树表现为 `state.uia.prefer_vision`——Agent 该怎么做由 Skill 与 [STUCK_zh.md](STUCK_zh.md) 定义，不是靠改 daemon 配置「修好」。
+`state.uia.prefer_vision` 是运行时信号。**Agent 下一步怎么做只在 Skill 里**，不是靠改 daemon 配置。
 
 ## 7. 直接接入命名管道
 
