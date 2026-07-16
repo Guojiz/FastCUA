@@ -4,6 +4,9 @@
 
 [Website](https://guojiz.github.io/FastCUA/) · [中文](README_zh.md) · [Self-hosting](docs/SELF_HOSTING.md)
 
+> [!WARNING]
+> **FastCUA is still under development and is not yet complete.** Current versions may contain bugs, missing functionality, or compatibility issues. Use it for testing only and do not rely on it for important tasks.
+
 > **Bring your own agent, and install FastCUA into that agent itself by default.** The Windows installer prepares Node.js and the verified FastCUA runtime. The agent that receives the setup prompt must then install both the complete `computer-use` Skill and the `sky-computer-use` MCP server into its own active configuration. Missing either part means installation failed.
 
 FastCUA is an open-source, local-first Computer Use runtime for Windows. It combines accessibility-first navigation, optional screenshots, native keyboard and mouse input, multi-action execution, access policy, and visible human control in one resident service.
