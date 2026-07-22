@@ -8,6 +8,8 @@ const selfHosting = fs.readFileSync(new URL("../docs/SELF_HOSTING.md", import.me
 const selfHostingZh = fs.readFileSync(new URL("../docs/SELF_HOSTING_zh.md", import.meta.url), "utf8");
 const readme = fs.readFileSync(new URL("../README.md", import.meta.url), "utf8");
 const readmeZh = fs.readFileSync(new URL("../README_zh.md", import.meta.url), "utf8");
+const configText = fs.readFileSync(new URL("../config.json", import.meta.url), "utf8");
+const config = JSON.parse(configText);
 
 assert.match(installer, /\$Version\s*=\s*'v0\.2\.1'/);
 assert.match(installer, /archive\/refs\/tags\/\$Version\.zip/);
@@ -41,15 +43,21 @@ assert.doesNotMatch(uninstaller, /claude(?:\.exe)?|Anthropic|\.claude/i);
 
 assert.match(web, /\\native-host\\build\.ps1/);
 assert.match(web, /"sky-computer-use"/);
-assert.match(selfHosting, /default installation target is \*\*the agent currently executing the setup instructions\*\*/i);
-assert.match(selfHosting, /complete installation requires both the Skill and the MCP server/i);
+assert.match(selfHosting, /default target:\s*\*\*the agent currently executing the setup instructions\*\*/i);
+assert.match(selfHosting, /complete install = Skill and MCP together/i);
 assert.match(selfHosting, /copy, link, or register the entire `computer-use` folder/i);
 assert.match(selfHosting, /forwarding, wrapper, summary, or shortened `SKILL\.md`/i);
 assert.match(selfHosting, /installed relative file list and SHA-256 hashes/i);
 assert.match(selfHosting, /`list_windows` called through `sky-computer-use`/i);
-assert.match(selfHostingZh, /默认安装目标是\*\*当前执行部署指令的 Agent 自己\*\*/);
-assert.match(selfHostingZh, /完整安装必须同时包含 Skill 和 MCP/);
+assert.match(selfHostingZh, /默认目标是\*\*当前执行部署指令的 Agent 自己\*\*/);
+assert.match(selfHostingZh, /完整安装 = Skill 与 MCP 成对/);
 assert.match(readme, /install both the complete `computer-use` Skill and the `sky-computer-use` MCP server/i);
 assert.match(readmeZh, /必须把完整 `computer-use` Skill 和 `sky-computer-use` MCP Server 都安装到自己的活动配置中/);
+assert.doesNotMatch(configText, /^\uFEFF/, "config.json must be directly JSON.parse-compatible");
+assert.equal(config.approvalPolicy, "safe", "tracked config.json must keep the safe default");
+assert.ok(
+  !config.whitelist.some(entry => /^(?:windowsterminal|cmd|powershell|pwsh|claude|chatgpt)\.exe$/i.test(entry)),
+  "safe defaults must not pre-approve terminals or AI assistants",
+);
 
-console.log("PASS installer contract: v0.2.1 pin, verified host, mandatory self Skill + MCP setup prompt, scoped uninstall");
+console.log("PASS installer contract: v0.2.1 pin, verified host, safe config, mandatory self Skill + MCP setup prompt, scoped uninstall");

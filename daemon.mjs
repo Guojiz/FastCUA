@@ -22,29 +22,32 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const log = (...a) => { const s = "[fastcua] " + a.join(" "); process.stderr.write(s + "\n"); recentLogs.push(s); if (recentLogs.length > 100) recentLogs.shift(); };
 
 // Data directory for the helper subprocess (passed via env to the native binary).
-const CUA_CACHE_DIR = process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
+// Prefer FastCUA home; accept CODEX_HOME only as legacy compat.
+const CUA_CACHE_DIR =
+  process.env.FASTCUA_HOME ||
+  process.env.FASTCUA_CACHE_DIR ||
+  process.env.CODEX_HOME ||
+  path.join(os.homedir(), ".fastcua");
 const PIPE = process.env.FASTCUA_PIPE || "\\\\.\\pipe\\fastcua";
 // Meta keys spoken to the helper over its own stdio protocol.
-const APPROVED_KEY = "x-oai-cua-approved-app";
-const BUDGET_KEY = "x-oai-cua-request-budget-ms";
+// Prefer FastCUA names; host still accepts legacy x-oai-* aliases.
+const APPROVED_KEY = "x-fastcua-approved-app";
+const BUDGET_KEY = "x-fastcua-request-budget-ms";
+const APPROVED_KEY_LEGACY = "x-oai-cua-approved-app";
+const BUDGET_KEY_LEGACY = "x-oai-cua-request-budget-ms";
 
 // Resolve the helper binary (NOT bundled). Precedence: config.cuaBinPath > env
-// CUA_BIN > auto-discover under common install locations. Returns null if not
-// found so callers surface a clear error instead of crashing.
+// CUA_BIN > FastCUA install / repo paths. No third-party product binary fallback.
 function discoverCuaBin() {
+  const localAppData = process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
   const localCandidates = [
     path.join(HERE, "native-host", "target", "release", "cua-native-host.exe"),
     path.join(HERE, "helper", "cua-native-host.exe"),
+    path.join(localAppData, "FastCUA", "app", "native-host", "target", "release", "cua-native-host.exe"),
+    path.join(localAppData, "FastCUA", "app", "helper", "cua-native-host.exe"),
+    path.join(localAppData, "FastCUA", "app", "cua-native-host.exe"),
   ];
   for (const candidate of localCandidates) if (fs.existsSync(candidate)) return candidate;
-  const localAppData = process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
-  const runtimesDir = path.join(localAppData, "OpenAI", "Codex", "runtimes", "cua_node");
-  let entries;
-  try { entries = fs.readdirSync(runtimesDir); } catch { return null; }
-  for (const entry of entries) {
-    const cand = path.join(runtimesDir, entry, "bin", "node_modules", "@oai", "sky", "bin", "windows", "codex-computer-use.exe");
-    if (fs.existsSync(cand)) return cand;
-  }
   return null;
 }
 function resolveCuaBin() {
@@ -110,15 +113,8 @@ const DEFAULT_WHITELIST = [
   "explorer.exe",
   "calc.exe",
   "shell:AppsFolder\\Microsoft.WindowsCalculator_8wekyb3d8bbwe!App",
-  "WindowsTerminal.exe",
-  "cmd.exe",
-  "powershell.exe",
-  "pwsh.exe",
   "write.exe",
   "Code.exe",
-  "code.exe",
-  "claude.exe",
-  "ChatGPT.exe",
 ];
 const DEFAULT_CONFIG = { costartMode: "claude", idleTimeoutMin: 5, approvalPolicy: "safe", whitelist: [...DEFAULT_WHITELIST], port: 8420, bannerEnabled: false, overlayEnabled: true, overlayTitle: "FastCUA is using your computer", overlayLanguage: "auto", cuaBinPath: "" };
 const APPROVAL_WAIT_MS = 60_000;
@@ -169,7 +165,9 @@ function resolvePendingApproval(token, decision) {
         .then(other.entry.resolve, other.entry.reject);
     }
   }
-  if (approval.app) approvedApps.add(approval.app);
+  // allow_once authorizes only this retry. Caching it here silently turns a
+  // one-shot decision into daemon-lifetime trust.
+  if (approval.app && decision !== "allow_once") approvedApps.add(approval.app);
   emitEvent("approval_allowed", { action: approval.method, summary: approval.summary, app: approval.app, decision });
   sendToBinary(approval.entry.method, approval.entry.params, approval.entry.meta, { [APPROVED_KEY]: approval.app })
     .then(approval.entry.resolve, approval.entry.reject);
@@ -211,7 +209,6 @@ let nextBinId = 1;
 const pendingBin = new Map(); // binId -> {resolve, reject, timer, method, params, meta, clientId}
 const approvedApps = new Set(); // cached across all clients
 function isApproved(app) { const target = canonicalApp(app); return [...approvedApps].some(value => canonicalApp(value) === target); }
-let binBuf = "";
 
 function startBinary() {
   if (proc && proc.exitCode == null && proc.signalCode == null) return;
@@ -220,47 +217,73 @@ function startBinary() {
     log("helper not found — set cuaBinPath in config or CUA_BIN env to the helper binary path");
     return;
   }
-  proc = spawn(bin, ["--parent-pid", String(process.pid)], {
-    stdio: ["pipe", "pipe", "pipe"], windowsHide: true, env: { ...process.env, CODEX_HOME: CUA_CACHE_DIR },
+  const child = spawn(bin, ["--parent-pid", String(process.pid)], {
+    stdio: ["pipe", "pipe", "pipe"], windowsHide: true,
+    env: {
+      ...process.env,
+      FASTCUA_HOME: CUA_CACHE_DIR,
+      // Legacy alias still read by older host builds / interrupt paths.
+      CODEX_HOME: CUA_CACHE_DIR,
+    },
   });
-  binBuf = "";
-  proc.stdout.setEncoding("utf8");
-  proc.stderr.setEncoding("utf8");
-  proc.stdout.on("data", onBinaryData);
-  proc.stderr.on("data", (d) => process.stderr.write("[bin] " + d));
-  proc.on("exit", (code, sig) => {
+  proc = child;
+  let childBuffer = "";
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", chunk => {
+    if (proc !== child) return;
+    childBuffer += chunk;
+    let i;
+    while ((i = childBuffer.indexOf("\n")) >= 0) {
+      const line = childBuffer.slice(0, i).trim();
+      childBuffer = childBuffer.slice(i + 1);
+      if (line) { try { handleBinaryMessage(JSON.parse(line)); } catch { log("bad binary json:", line.slice(0, 200)); } }
+    }
+  });
+  child.stderr.on("data", (d) => process.stderr.write("[bin] " + d));
+  child.on("exit", (code, sig) => {
     log("helper exited code=", code, "sig=", sig);
+    // A reset can spawn a replacement before the retired child's exit event.
+    // Never let that stale callback clear or reject the replacement generation.
+    if (proc !== child) return;
     proc = null;
-    for (const e of pendingBin.values()) { clearTimeout(e.timer); e.reject(new Error("helper exited")); }
-    pendingBin.clear();
+    for (const [id, entry] of pendingBin) {
+      if (entry.child !== child) continue;
+      clearTimeout(entry.timer);
+      entry.reject(new Error("helper exited"));
+      pendingBin.delete(id);
+    }
   });
   log("helper spawned (one shared binary) at", bin);
-}
-
-function onBinaryData(chunk) {
-  binBuf += chunk;
-  let i;
-  while ((i = binBuf.indexOf("\n")) >= 0) {
-    const line = binBuf.slice(0, i).trim();
-    binBuf = binBuf.slice(i + 1);
-    if (line) { try { handleBinaryMessage(JSON.parse(line)); } catch (e) { log("bad binary json:", line.slice(0, 200)); } }
-  }
 }
 function sendToBinary(method, params, meta, extraMeta) {
   return new Promise((resolve, reject) => {
     startBinary();
-    if (!proc) { reject(new Error("helper binary not available (set cuaBinPath in config or CUA_BIN env)")); return; }
+    const child = proc;
+    if (!child) { reject(new Error("helper binary not available (set cuaBinPath in config or CUA_BIN env)")); return; }
     const id = nextBinId++;
-    const fullMeta = { ...meta, ...extraMeta, [BUDGET_KEY]: TIMEOUT_MS };
+    const fullMeta = {
+      ...meta,
+      ...extraMeta,
+      [BUDGET_KEY]: TIMEOUT_MS,
+      [BUDGET_KEY_LEGACY]: TIMEOUT_MS,
+    };
+    // Dual-write approval markers so either new or legacy host keys match.
+    if (fullMeta[APPROVED_KEY] && !fullMeta[APPROVED_KEY_LEGACY]) {
+      fullMeta[APPROVED_KEY_LEGACY] = fullMeta[APPROVED_KEY];
+    }
+    if (fullMeta[APPROVED_KEY_LEGACY] && !fullMeta[APPROVED_KEY]) {
+      fullMeta[APPROVED_KEY] = fullMeta[APPROVED_KEY_LEGACY];
+    }
     const payload = JSON.stringify({ id, method, params, meta: fullMeta });
-    const entry = { resolve, reject, method, params, meta, timer: null };
+    const entry = { resolve, reject, method, params, meta, child, timer: null };
     entry.timer = setTimeout(() => {
       pendingBin.delete(id);
       reject(new Error("computer-use request timed out: " + method));
       resetBinary(); // wedged helper blocks all clients; reset so everyone recovers
     }, TIMEOUT_MS);
     pendingBin.set(id, entry);
-    proc.stdin.write(payload + "\n", (e) => { if (e) { clearTimeout(entry.timer); pendingBin.delete(id); reject(e); } });
+    child.stdin.write(payload + "\n", (e) => { if (e) { clearTimeout(entry.timer); pendingBin.delete(id); reject(e); } });
   });
 }
 
@@ -297,12 +320,15 @@ async function handleBinaryMessage(msg) {
 function killProcessTree(pid) {
   try { execFileSync("taskkill", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore", timeout: 5000 }); } catch {}
 }
-function resetBinary(reason = "helper reset") {
+function abortBinaryRequests(reason = "helper reset") {
   const p = proc; proc = null;
   for (const e of pendingBin.values()) { clearTimeout(e.timer); e.reject(new Error(reason)); }
   pendingBin.clear();
-  for (const token of [...pendingApprovals.keys()]) rejectPendingApproval(token, reason);
   try { if (p) killProcessTree(p.pid); } catch {}
+}
+function resetBinary(reason = "helper reset") {
+  abortBinaryRequests(reason);
+  for (const token of [...pendingApprovals.keys()]) rejectPendingApproval(token, reason);
 }
 
 // ---- per-client state + named-pipe server ----
@@ -408,6 +434,8 @@ function makeClient(socket) {
     interrupted: false,
     interruptMessage: null,
     interruptOneShot: false,
+    clientGroup: null,
+    closed: false,
   };
   clients.set(socket, c);
   if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
@@ -419,7 +447,22 @@ function makeClient(socket) {
 }
 function onClientGone(socket) {
   const c = clients.get(socket);
-  if (c) clearClientInterrupt(c);
+  if (c) {
+    const sessionId = c.sessionId;
+    const hasBinaryWork = [...pendingBin.values()].some(entry => entry.meta?.session_id === sessionId);
+    for (const [token, approval] of [...pendingApprovals.entries()]) {
+      if (approval.entry.meta?.session_id === sessionId) {
+        rejectPendingApproval(token, "computer-use client disconnected before approval");
+      }
+    }
+    if (hasBinaryWork) {
+      // The shared native host is synchronous, so killing it is the only safe
+      // cancellation boundary. Other queued callers fail fast and can retry.
+      abortBinaryRequests("computer-use client disconnected during an action");
+      currentAction = null;
+    }
+    clearClientInterrupt(c);
+  }
   clients.delete(socket);
   log("client gone (", clients.size, "left)");
   if (clients.size === 0) {
@@ -447,7 +490,15 @@ function onClientData(c, chunk) {
 
 async function handleClientReq(c, req) {
   const { id, method, params } = req;
+  if (typeof req.clientGroup === "string" && req.clientGroup.length <= 100) {
+    c.clientGroup = req.clientGroup;
+  }
+  if (c.closed) {
+    reply(c, id, { error: "computer-use client is closed" });
+    return;
+  }
   if (method === "close") {
+    c.closed = true;
     clearClientInterrupt(c);
     c.turnId++;
     closeClientAfterReply(c, id, { result: { ok: true } });
@@ -464,7 +515,15 @@ async function handleClientReq(c, req) {
     reply(c, id, { error: msg });
     // Interjection is one-shot: clear latch so subsequent tools can run under auto-resume.
     // Stop/ESC stays latched so further Computer Use tools keep failing this turn.
-    if (oneShot) clearClientInterrupt(c);
+    if (oneShot) {
+      if (c.clientGroup) {
+        for (const peer of clients.values()) {
+          if (peer.clientGroup === c.clientGroup) clearClientInterrupt(peer);
+        }
+      } else {
+        clearClientInterrupt(c);
+      }
+    }
     return;
   }
   if (isUserPaused) { reply(c, id, { error: PAUSE_BLOCK_MSG }); return; }
@@ -474,16 +533,17 @@ async function handleClientReq(c, req) {
   if (app && isApproved(app)) meta[APPROVED_KEY] = app;
   const t0 = Date.now();
   const summary = actionSummary(method, params);
-  currentAction = { action: method, summary, startedAt: t0, client: c.sessionId.slice(0,8) };
+  const action = { action: method, summary, startedAt: t0, client: c.sessionId.slice(0,8) };
+  currentAction = action;
   emitEvent("action_start", { client: c.sessionId.slice(0,8), action: method, summary });
   try {
     const result = await sendToBinary(method, params, meta, {});
     const dur = Date.now() - t0;
-    currentAction = null;
+    if (currentAction === action) currentAction = null;
     emitEvent("action_end", { client: c.sessionId.slice(0,8), action: method, duration_ms: dur, summary, ok: true });
     reply(c, id, { result });
   } catch (e) {
-    currentAction = null;
+    if (currentAction === action) currentAction = null;
     const dur = Date.now() - t0;
     emitEvent("action_end", { client: c.sessionId.slice(0,8), action: method, duration_ms: dur, summary, ok: false, error: e.message });
     reply(c, id, { error: e.message });

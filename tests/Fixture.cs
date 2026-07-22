@@ -11,6 +11,7 @@ internal static class FixtureProgram
     private const uint WS_BORDER = 0x00800000;
     private const uint WS_TABSTOP = 0x00010000;
     private const uint ES_AUTOHSCROLL = 0x0080;
+    private const uint ES_READONLY = 0x0800;
     private const uint BS_PUSHBUTTON = 0x00000000;
     private const uint LBS_NOTIFY = 0x0001;
     private const uint TBS_AUTOTICKS = 0x0001;
@@ -75,9 +76,20 @@ internal static class FixtureProgram
         CreateWindowEx(0, "msctls_trackbar32", "",
             WS_CHILD | WS_VISIBLE | WS_TABSTOP | TBS_AUTOTICKS,
             350, 160, 285, 55, window, new IntPtr(1004), instance, IntPtr.Zero);
+        CreateWindowEx(WS_EX_CLIENTEDGE, "EDIT", "read-only-value",
+            WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL | ES_READONLY,
+            350, 240, 285, 30, window, new IntPtr(1005), instance, IntPtr.Zero);
 
         ShowWindow(window, SW_SHOW);
         UpdateWindow(window);
+        var hangMs = 0;
+        var hangEnv = Environment.GetEnvironmentVariable("FASTCUA_FIXTURE_HANG_MS");
+        if (!string.IsNullOrEmpty(hangEnv) && int.TryParse(hangEnv, out hangMs) && hangMs > 0)
+        {
+            // Simulate a wedged app: the window exists but its UI thread stops
+            // pumping messages, so its UIA provider hangs until this elapses.
+            System.Threading.Thread.Sleep(hangMs);
+        }
         MSG message;
         while (GetMessage(out message, IntPtr.Zero, 0, 0) > 0)
         {

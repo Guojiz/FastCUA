@@ -51,9 +51,12 @@ pub const SWP_SHOWWINDOW: UINT = 0x0040;
 pub const WM_DESTROY: UINT = 0x0002;
 pub const WM_PAINT: UINT = 0x000f;
 pub const WM_TIMER: UINT = 0x0113;
-pub const WM_CHAR: UINT = 0x0102;
 pub const WM_NCHITTEST: UINT = 0x0084;
 pub const WM_SETTEXT: UINT = 0x000c;
+pub const WM_GETTEXT: UINT = 0x000d;
+pub const WM_GETTEXTLENGTH: UINT = 0x000e;
+pub const SMTO_BLOCK: UINT = 0x0001;
+pub const SMTO_ABORTIFHUNG: UINT = 0x0002;
 pub const WM_LBUTTONDOWN: UINT = 0x0201;
 pub const WM_LBUTTONUP: UINT = 0x0202;
 pub const WM_RBUTTONDOWN: UINT = 0x0204;
@@ -172,19 +175,6 @@ pub struct PAINTSTRUCT {
 }
 
 #[repr(C)]
-pub struct GUITHREADINFO {
-    pub cbSize: DWORD,
-    pub flags: DWORD,
-    pub hwndActive: HWND,
-    pub hwndFocus: HWND,
-    pub hwndCapture: HWND,
-    pub hwndMenuOwner: HWND,
-    pub hwndMoveSize: HWND,
-    pub hwndCaret: HWND,
-    pub rcCaret: RECT,
-}
-
-#[repr(C)]
 #[derive(Clone, Copy)]
 pub struct MOUSEINPUT {
     pub dx: LONG,
@@ -277,8 +267,19 @@ unsafe extern "system" {
     pub fn EnumChildWindows(parent: HWND, callback: WNDENUMPROC, lparam: LPARAM) -> BOOL;
     pub fn IsWindow(hwnd: HWND) -> BOOL;
     pub fn IsWindowVisible(hwnd: HWND) -> BOOL;
+    pub fn IsHungAppWindow(hwnd: HWND) -> BOOL;
+    pub fn InternalGetWindowText(hwnd: HWND, text: *mut u16, max_count: i32) -> i32;
     pub fn GetWindowTextLengthW(hwnd: HWND) -> i32;
     pub fn GetWindowTextW(hwnd: HWND, text: *mut u16, max_count: i32) -> i32;
+    pub fn SendMessageTimeoutW(
+        hwnd: HWND,
+        message: UINT,
+        wparam: WPARAM,
+        lparam: LPARAM,
+        flags: UINT,
+        timeout_ms: UINT,
+        result: *mut usize,
+    ) -> LRESULT;
     pub fn GetClassNameW(hwnd: HWND, class_name: *mut u16, max_count: i32) -> i32;
     pub fn GetWindowThreadProcessId(hwnd: HWND, process_id: *mut DWORD) -> DWORD;
     pub fn GetWindowRect(hwnd: HWND, rect: *mut RECT) -> BOOL;
@@ -293,9 +294,7 @@ unsafe extern "system" {
     pub fn SetCursorPos(x: i32, y: i32) -> BOOL;
     pub fn GetCursorPos(point: *mut POINT) -> BOOL;
     pub fn SendInput(count: UINT, inputs: *const INPUT, size: i32) -> UINT;
-    pub fn mouse_event(flags: DWORD, dx: DWORD, dy: DWORD, data: DWORD, extra_info: ULONG_PTR);
     pub fn keybd_event(vk: u8, scan: u8, flags: DWORD, extra_info: ULONG_PTR);
-    pub fn GetGUIThreadInfo(thread_id: DWORD, info: *mut GUITHREADINFO) -> BOOL;
     pub fn ScreenToClient(hwnd: HWND, point: *mut POINT) -> BOOL;
     pub fn ChildWindowFromPointEx(parent: HWND, point: POINT, flags: UINT) -> HWND;
     pub fn VkKeyScanW(character: u16) -> i16;

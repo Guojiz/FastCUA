@@ -7,11 +7,18 @@ import path from "node:path";
 const binary = path.resolve(process.argv[2] || "native-host/target/release/cua-native-host.exe");
 const fixture = path.resolve(process.argv[3] || "tests/FastCuaFixture.exe");
 const python = process.argv[4] || process.env.CODEX_PYTHON;
-const codexHome = fs.mkdtempSync(path.join(os.tmpdir(), "fastcua-regression-"));
+const fastcuaHome = fs.mkdtempSync(path.join(os.tmpdir(), "fastcua-regression-"));
+const fastcuaCache = fs.mkdtempSync(path.join(os.tmpdir(), "fastcua-cache-"));
+const legacyHome = fs.mkdtempSync(path.join(os.tmpdir(), "fastcua-legacy-home-"));
 const child = spawn(binary, ["--parent-pid", String(process.pid)], {
   stdio: ["pipe", "pipe", "pipe"],
   windowsHide: true,
-  env: { ...process.env, CODEX_HOME: codexHome },
+  env: {
+    ...process.env,
+    FASTCUA_HOME: fastcuaHome,
+    FASTCUA_CACHE_DIR: fastcuaCache,
+    CODEX_HOME: legacyHome,
+  },
 });
 
 let buffer = "";
@@ -55,13 +62,13 @@ async function request(method, params = {}) {
   const meta = {
     session_id: "protocol-regression",
     turn_id: "1",
-    "x-oai-cua-request-budget-ms": 15_000,
+    "x-fastcua-request-budget-ms": 15_000,
   };
   const app = params.window?.app || params.app;
-  if (app) meta["x-oai-cua-approved-app"] = app;
+  if (app) meta["x-fastcua-approved-app"] = app;
   const message = await rawRequest(method, params, meta);
   if (message.approvalRequest) {
-    meta["x-oai-cua-approved-app"] = message.approvalRequest.app;
+    meta["x-fastcua-approved-app"] = message.approvalRequest.app;
     return checked(await rawRequest(method, params, meta), method);
   }
   return checked(message, method);
@@ -78,6 +85,20 @@ function elementIndex(tree, name) {
   const match = /^\s*(\d+)\s/.exec(line);
   assert.ok(match, `element index missing: ${line}`);
   return Number(match[1]);
+}
+
+function elementIndexesByRole(tree, role) {
+  return tree
+    .split("\n")
+    .map((line) => new RegExp(`^\\s*(\\d+)\\s+${role}(?:\\s|$)`, "i").exec(line))
+    .filter(Boolean)
+    .map(match => Number(match[1]));
+}
+
+function elementIndexByRole(tree, role) {
+  const indexes = elementIndexesByRole(tree, role);
+  assert.ok(indexes.length, `accessibility role not found: ${role}`);
+  return indexes[0];
 }
 
 async function pollWindow() {
@@ -112,6 +133,10 @@ try {
   assert.equal(rehydrated.id, window.id);
   passed("get_window");
 
+  const rebound = await request("get_window", { app: window.app, id: Number.MAX_SAFE_INTEGER });
+  assert.equal(rebound.id, window.id);
+  passed("get_window unique-app rebind", `stale=${Number.MAX_SAFE_INTEGER} current=${window.id}`);
+
   await request("activate_window", { window });
   passed("activate_window");
 
@@ -135,6 +160,7 @@ try {
     include_text: true,
   });
   assert.ok(state.accessibility?.tree.includes("Fixture Text"), state.accessibility?.tree);
+  assert.ok(state.accessibility?.tree.includes("Text: initial-value"), state.accessibility?.tree);
   assert.match(state.screenshots?.[0]?.url || "", /^data:image\/jpeg;base64,/);
   passed("get_window_state", `${state.screenshots[0].width}x${state.screenshots[0].height}`);
 
@@ -144,8 +170,22 @@ try {
     include_text: true,
   });
   const tree = state.accessibility.tree;
-  const textIndex = elementIndex(tree, "Edit initial-value");
+  const editIndexes = elementIndexesByRole(tree, "Edit");
+  assert.ok(editIndexes.length >= 2, `expected writable and read-only Edit controls\n${tree}`);
+  const textIndex = editIndexes[0];
   const buttonIndex = elementIndex(tree, "Increment Button");
+  const readOnlyIndex = editIndexes.at(-1);
+  await request("click", { window, element_index: textIndex, mouse_button: "left", click_count: 1 });
+  state = await request("get_window_state", { window, include_screenshot: false, include_text: true });
+  assert.equal(
+    state.accessibility.focused_value,
+    "initial-value",
+    `focused=${state.accessibility.focused_element}`,
+  );
+  state = await request("get_window_state", { window, include_screenshot: false, include_text: true });
+  assert.equal(state.accessibility.focused_value, "initial-value");
+  assert.match(state.accessibility.tree, /Text: initial-value/);
+  passed("focused_value is observational", state.accessibility.focused_value);
 
   let setValueWorked = true;
   try {
@@ -170,9 +210,53 @@ try {
   const currentTree = state.accessibility.tree;
   if (setValueWorked) assert.ok(currentTree.includes("Text: set-value-ok"), "set_value effect missing from fixture status");
   await request("click", { window, element_index: textIndex, mouse_button: "left", click_count: 1 });
-  await request("press_key", { window, key: "Control_L+a" });
-  await request("type_text", { window, text: "typed-ok" });
-  passed("press_key/type_text");
+  state = await request("get_window_state", { window, include_screenshot: false, include_text: true });
+  assert.equal(state.accessibility.focused_value, setValueWorked ? "set-value-ok" : "initial-value");
+  await request("type_text", { window, text: "typed-ok", replace: true });
+  state = await request("get_window_state", { window, include_screenshot: false, include_text: true });
+  assert.equal(state.accessibility.focused_value, "typed-ok");
+  passed("scoped replace/type_text", state.accessibility.focused_value);
+
+  const longText = `unicode-${"x".repeat(120)}-\u4f60\u597d`;
+  await request("type_text", { window, text: "", replace: true });
+  await request("type_text", { window, text: longText });
+  state = await request("get_window_state", { window, include_screenshot: false, include_text: true });
+  assert.equal(state.accessibility.focused_value, longText);
+  passed("long Unicode SendInput", `${longText.length} chars`);
+
+  await request("press_key", { window, key: "End" });
+  await request("press_key", { window, key: "Backspace" });
+  state = await request("get_window_state", { window, include_screenshot: false, include_text: true });
+  assert.equal(state.accessibility.focused_value, longText.slice(0, -1));
+  passed("press_key virtual key input");
+
+  await request("press_key", { window, key: "Shift_L+Home" });
+  await request("type_text", { window, text: "shortcut-ok" });
+  state = await request("get_window_state", { window, include_screenshot: false, include_text: true });
+  assert.equal(state.accessibility.focused_value, "shortcut-ok", stderr.join(""));
+  passed("press_key selection + default caret typing");
+
+  await request("click", { window, element_index: buttonIndex, mouse_button: "left", click_count: 1 });
+  state = await request("get_window_state", { window, include_screenshot: false, include_text: true });
+  assert.match(state.accessibility.focused_element, /Button Increment Button/i);
+  assert.equal(state.accessibility.focused_value, null);
+  await assert.rejects(
+    request("type_text", { window, text: "must-not-type", replace: true }),
+    /replace:true requires a focused writable text value/i,
+  );
+  await request("click", { window, element_index: textIndex, mouse_button: "left", click_count: 1 });
+  passed("unsafe broad replacement fails closed");
+
+  await request("click", { window, element_index: readOnlyIndex, mouse_button: "left", click_count: 1 });
+  state = await request("get_window_state", { window, include_screenshot: false, include_text: true });
+  assert.equal(state.accessibility.focused_value, "read-only-value");
+  await assert.rejects(
+    request("type_text", { window, text: "must-not-replace", replace: true }),
+    /read-only/i,
+  );
+  state = await request("get_window_state", { window, include_screenshot: false, include_text: true });
+  assert.equal(state.accessibility.focused_value, "read-only-value");
+  passed("read-only replacement fails closed");
 
   const screenshot = (await request("get_window_state", {
     window,
@@ -208,8 +292,8 @@ try {
   }
 
   state = await request("get_window_state", { window, include_screenshot: false, include_text: true });
-  assert.ok(state.accessibility.tree.includes("typed-ok"), `typed text not reflected in accessibility tree\n${state.accessibility.tree}`);
-  assert.ok(state.accessibility.tree.includes("Clicks: 1"), "button click not reflected in accessibility tree");
+  assert.ok(state.accessibility.tree.includes("shortcut-ok"), `typed text not reflected in accessibility tree\n${state.accessibility.tree}`);
+  assert.ok(state.accessibility.tree.includes("Clicks: 2"), "button clicks not reflected in accessibility tree");
   passed("action effects verified");
 
   if (python) {
@@ -233,7 +317,7 @@ try {
   passed("error response", unknown.error);
 
   const interruptPath = path.join(
-    codexHome,
+    fastcuaHome,
     "cache",
     "computer-use",
     "interrupts",
@@ -277,7 +361,9 @@ try {
   pending.clear();
   child.kill();
   try { execFileSync("taskkill.exe", ["/IM", "FastCuaFixture.exe", "/F"], { stdio: "ignore" }); } catch {}
-  try { fs.rmSync(codexHome, { recursive: true, force: true }); } catch {}
+  try { fs.rmSync(fastcuaHome, { recursive: true, force: true }); } catch {}
+  try { fs.rmSync(fastcuaCache, { recursive: true, force: true }); } catch {}
+  try { fs.rmSync(legacyHome, { recursive: true, force: true }); } catch {}
 }
 
 process.stdout.write(`\n${results.length} regression checks passed.\n`);

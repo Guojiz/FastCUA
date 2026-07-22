@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Static checks and unit tests
+        shell: pwsh
+        run: |
+          cargo fmt --manifest-path native-host/Cargo.toml -- --check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --manifest-path native-host/Cargo.toml --locked
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --check daemon.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --check server.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --check tests/protocol-regression.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --check tests/fallback-regression.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --check tests/control-plane-integration.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --check tests/approval-lifecycle.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --check tests/installer-contract.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --check tests/server-lifecycle.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --check tests/real-machine-validation.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node tests/installer-contract.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node tests/server-lifecycle.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          [scriptblock]::Create((Get-Content install.ps1 -Raw)) | Out-Null
+          [scriptblock]::Create((Get-Content uninstall.ps1 -Raw)) | Out-Null
+          [scriptblock]::Create((Get-Content overlay.ps1 -Raw)) | Out-Null
+          [scriptblock]::Create((Get-Content tests/run-control-plane.ps1 -Raw)) | Out-Null
+          [xml](Get-Content card.xaml -Raw) | Out-Null
+      - name: Build native artifacts
+        shell: pwsh
+        run: |
+          ./tests/build-fixture.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo build --release --manifest-path native-host/Cargo.toml --locked
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node tests/approval-lifecycle.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Native fallback regression (hosted-runner best effort)
+        continue-on-error: true
+        shell: pwsh
+        run: node tests/fallback-regression.mjs
+      - name: Native desktop regression (hosted-runner best effort)
+        continue-on-error: true
+        shell: pwsh
+        run: node tests/protocol-regression.mjs

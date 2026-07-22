@@ -31,14 +31,22 @@ async function waitFor(predicate, message, timeout = 8_000) {
 }
 
 class PipeClient {
-  constructor() {
+  constructor(clientGroup = null) {
     this.nextId = 1;
     this.pending = new Map();
     this.buffer = "";
+    this.clientGroup = clientGroup;
     this.socket = net.connect(process.env.FASTCUA_PIPE || "\\\\.\\pipe\\fastcua");
     this.socket.setEncoding("utf8");
     this.socket.on("data", chunk => this.onData(chunk));
-    this.closed = new Promise(resolve => this.socket.once("close", resolve));
+    this.closed = new Promise(resolve => this.socket.once("close", () => {
+      for (const entry of this.pending.values()) {
+        clearTimeout(entry.timer);
+        entry.reject(new Error("pipe client closed"));
+      }
+      this.pending.clear();
+      resolve();
+    }));
   }
 
   async ready() {
@@ -73,7 +81,7 @@ class PipeClient {
         reject(new Error(`timeout: ${method}`));
       }, 15_000);
       this.pending.set(id, { resolve, reject, timer });
-      this.socket.write(JSON.stringify({ id, method, params }) + "\n");
+      this.socket.write(JSON.stringify({ id, method, params, clientGroup: this.clientGroup }) + "\n");
     });
   }
 
@@ -101,14 +109,46 @@ try {
   assert.ok(beforePause.binaryPid, "native host should be resident before pause");
   await api("/api/action", { action: "pause" });
   assert.equal((await api("/api/state")).controlState, "paused_by_user");
-  assert.equal((await api("/api/state")).binaryPid, beforePause.binaryPid);
+  assert.equal((await api("/api/state")).binaryPid, null);
   await assert.rejects(client.request("list_windows"), /paused by the user/i);
-  console.log("PASS manual pause preserves the native host and blocks pipe requests");
+  console.log("PASS manual pause aborts in-flight native work and blocks pipe requests");
 
   await api("/api/action", { action: "resume" });
   assert.equal((await api("/api/state")).controlState, "running");
   assert.ok(Array.isArray(await client.request("list_windows")));
+  assert.ok((await api("/api/state")).binaryPid, "native host should restart lazily after resume");
   console.log("PASS one-action resume restores requests");
+
+  await api("/api/config", { ...originalConfig, approvalPolicy: "full" });
+  await client.request("launch_app", { app: fixture });
+  let activeWindow;
+  for (let attempt = 0; attempt < 40 && !activeWindow; attempt++) {
+    activeWindow = (await client.request("list_windows")).find(window => window.title === "FastCUA Host Test Fixture");
+    if (!activeWindow) await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  assert.ok(activeWindow, "fixture window should exist for disconnect cancellation");
+  const disconnecting = new PipeClient();
+  await disconnecting.ready();
+  const burst = Array.from({ length: 16 }, () => disconnecting.request("get_window_state", {
+    window: activeWindow,
+    include_screenshot: false,
+    include_text: true,
+  }).then(
+    () => null,
+    error => error,
+  ));
+  await new Promise((resolve, reject) => disconnecting.socket.write("", error => error ? reject(error) : resolve()));
+  disconnecting.close();
+  await disconnecting.closed;
+  assert.ok((await Promise.all(burst)).some(Boolean), "disconnect should cancel at least one active native request");
+  assert.ok(Array.isArray(await client.request("list_windows")));
+  const replacementPid = (await api("/api/state")).binaryPid;
+  assert.ok(replacementPid, "native host should recover after active-client disconnect");
+  await new Promise(resolve => setTimeout(resolve, 200));
+  assert.equal((await api("/api/state")).binaryPid, replacementPid);
+  assert.ok(Array.isArray(await client.request("list_windows")));
+  try { execFileSync("taskkill.exe", ["/IM", "FastCuaFixture.exe", "/F"], { stdio: "ignore" }); } catch {}
+  console.log("PASS retired helper exit cannot clobber its replacement");
 
   await api("/api/config", { ...originalConfig, approvalPolicy: "safe", whitelist: originalConfig.whitelist.filter(entry => entry.toLowerCase() !== "fastcuafixture.exe") });
   const deniedRequest = client.request("launch_app", { app: fixture }).then(
@@ -129,6 +169,24 @@ try {
   console.log("PASS allow-once resumes and completes the action");
 
   try { execFileSync("taskkill.exe", ["/IM", "FastCuaFixture.exe", "/F"], { stdio: "ignore" }); } catch {}
+  const orphan = new PipeClient();
+  await orphan.ready();
+  const orphanRequest = orphan.request("launch_app", { app: fixture }).then(
+    () => null,
+    error => error,
+  );
+  const orphanState = await waitFor(state => state.controlState === "awaiting_approval", "orphan approval state");
+  const orphanToken = orphanState.pendingApprovals[0].token;
+  orphan.close();
+  await orphan.closed;
+  await waitFor(state => state.pendingApprovals.length === 0, "orphan approval cancellation");
+  assert.match((await orphanRequest)?.message || "", /closed|disconnected/i);
+  await assert.rejects(
+    api("/api/action", { action: "allowOnce", token: orphanToken }),
+    /no longer pending/i,
+  );
+  console.log("PASS client disconnect revokes its pending approval");
+
   const trustedRequest = client.request("launch_app", { app: fixture });
   const trustedState = await waitFor(state => state.controlState === "awaiting_approval", "trusted approval state");
   await api("/api/action", { action: "allowAndWhitelist", token: trustedState.pendingApprovals[0].token });
@@ -147,20 +205,29 @@ try {
   assert.equal(fullState.pendingApprovals.length, 0);
   console.log("PASS full access runs an unknown app without prompting");
 
+  const groupId = `control-plane-group-${Date.now()}`;
+  const groupedA = new PipeClient(groupId);
+  const groupedB = new PipeClient(groupId);
+  await Promise.all([groupedA.ready(), groupedB.ready()]);
+  await Promise.all([groupedA.request("list_windows"), groupedB.request("list_windows")]);
   await api("/api/interject", { text: "integration redirect" });
-  // Interject is atomic: interrupt + paused_by_user (stopAll is optional/idempotent).
-  assert.equal((await api("/api/state")).controlState, "paused_by_user");
-  await assert.rejects(client.request("list_windows"), /paused by the user|integration redirect/i);
-  await api("/api/action", { action: "resume" });
-  // After resume, the same client still holds the interjection latch until close.
+  // Interjection is a one-shot redirect instruction and auto-resumes control.
+  assert.equal((await api("/api/state")).controlState, "running");
+  await assert.rejects(groupedA.request("list_windows"), /integration redirect/i);
+  assert.ok(Array.isArray(await groupedB.request("list_windows")));
+  groupedA.close();
+  groupedB.close();
+  await Promise.all([groupedA.closed, groupedB.closed]);
+  console.log("PASS one-shot interjection is consumed once per logical MCP client");
   await assert.rejects(client.request("list_windows"), /integration redirect/i);
+  assert.ok(Array.isArray(await client.request("list_windows")));
   await client.request("close");
   await client.closed;
   const nextClient = new PipeClient();
   await nextClient.ready();
   assert.ok(Array.isArray(await nextClient.request("list_windows")));
   nextClient.close();
-  console.log("PASS interjection interrupts and pauses; resume + new client can continue");
+  console.log("PASS interjection is delivered once and auto-resumes the same client");
   console.log("PASS close ends the interrupted turn and the next client reconnects cleanly");
 } finally {
   await api("/api/action", { action: "resume" }).catch(() => {});
@@ -169,4 +236,4 @@ try {
   try { execFileSync("taskkill.exe", ["/IM", "FastCuaFixture.exe", "/F"], { stdio: "ignore" }); } catch {}
 }
 
-console.log("8 control-plane integration checks passed.");
+console.log("12 control-plane integration checks passed.");

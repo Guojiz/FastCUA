@@ -85,7 +85,12 @@ try {
   }
   assert.ok(window, "fixture window did not appear");
 
-  let state = await request("get_window_state", { window, include_screenshot: false, include_text: true });
+  let state;
+  for (let attempt = 0; attempt < 40; attempt++) {
+    state = await request("get_window_state", { window, include_screenshot: false, include_text: true });
+    if (state.accessibility.tree.includes("Increment Button")) break;
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
   const buttonIndex = indexFor(state.accessibility.tree, "Increment Button");
   await request("click", { window, element_index: buttonIndex, mouse_button: "left", click_count: 1 });
   state = await request("get_window_state", { window, include_screenshot: false, include_text: true });

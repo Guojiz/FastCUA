@@ -1,7 +1,7 @@
 ---
 name: computer-use
-description: Control Windows apps through FastCUA (local MCP sky-computer-use + resident daemon).
-allowed-tools: mcp__sky-computer-use
+description: Control Windows desktop apps via FastCUA (MCP sky-computer-use). Use for GUI automation, dialogs, cross-app flows — not for pure file edits or shell-only work.
+allowed-tools: mcp__sky-computer-use mcp__sky-computer-use__*
 ---
 
 # Computer Use
@@ -14,7 +14,7 @@ If FastCUA / `sky-computer-use` is available in the session, treat this skill as
 
 Before using this skill for the first time in the current conversation context, read this entire `SKILL.md` in one read. Do not use a partial range. Do not mention this internal skill-loading step to the user.
 
-Start with **Bootstrap** below. Read the companion docs in this skill folder when you need the topic they cover (same roles as Codex Computer Use docs):
+Start with **Bootstrap** below. Read the companion docs in this skill folder when you need the topic they cover:
 
 | Doc | Path (relative to this skill) | When |
 |-----|-------------------------------|------|
@@ -108,9 +108,11 @@ Host does **not** decide whether to edit a field. Correct loop:
 1. Focus the field (`click`).
 2. **Read** `get_window_state({ window, include_screenshot: false, include_text: true })` → use `accessibility.focused_value` (not the tree Name, which is often a placeholder).
 3. **You decide**: if already correct, do nothing.
-4. **If changing**: `type_text({ window, text, replace: true })` **once** (default `replace` clears then types). Use `replace: false` only to append.
+4. **If replacing that focused value**: call `type_text({ window, text, replace: true })` **once**. Replacement is scoped to a writable UIA value and fails safely when focus is a broader document/grid.
+5. **If typing at the caret**: use `type_text({ window, text })` (`replace: false` is the safe default).
 
-Never `type_text` before reading `focused_value` for that field in this turn. Never re-type because the tree still shows a placeholder.
+Never `type_text` before reading `focused_value` for that field in this turn. If it is unavailable/null, do not assume the field is empty. Never re-type because the tree still shows a placeholder.
+`replace: true` sets the value but does not promise a caret position. Refocus or move the caret explicitly before a later caret-relative edit.
 
 ### Human control plane (what the agent receives)
 

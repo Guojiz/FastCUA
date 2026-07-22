@@ -31,6 +31,21 @@ If the intended app is present but has no suitable open window, call `await sky.
 - On timeout: **retry the same call at most once**, then change strategy (e.g. UIA → `grid_view`) or stop and report. Do not poll forever.
 - Human approval wait is separate (user must decide). Do not treat approval wait as a software hang to “fix” by spamming tools.
 
+## Hung or unresponsive target apps
+
+- A wedged UIA provider fails in ~1.5s, not 30s. FastCUA then disables UIA for that app for the session: `get_window_state` still returns (HWND tree, `uia.prefer_vision: true`, reason `timeout_or_provider_disabled`). Switch to `grid_view` — screenshots and grid capture keep working on an unresponsive window.
+- Input into an unresponsive window fails fast with `window <id> is not responding` / `activation timed out`. Do not retry it in a loop; either wait for the app to recover or report.
+- Hung apps still appear in `list_windows` (with their last stored title), so recovery checks stay cheap.
+- `replace:true` on an app with disabled UIA fails fast; use `replace:false` (caret typing) once the app responds again.
+- Host-side stage timing for freeze diagnosis: set `FASTCUA_HOST_TIMING=1` in the daemon environment to log per-stage milliseconds from the native helper.
+
+## Large trees and transitional windows
+
+- Prefer **`include_screenshot: false`** with text when the tree is usable. Requesting both a screenshot and a large UIA tree can produce a huge payload and stall the agent turn.
+- For vision targeting use **`grid_view` alone** (one annotated image), not a raw full-window screenshot plus tree every step.
+- After launch or any modal transition, **re-list windows** when the old HWND becomes stale. `get_window({id, app})` can rebind only when that app has exactly one current window.
+- Prefer MCP **`js`** multi-step cells and keyboard navigation for stable sequences to reduce round-trips.
+
 ## Broken UIA tree → vision immediately
 
 After `get_window_state({ include_text: true })`, read **`state.uia`**:
@@ -48,7 +63,7 @@ Why trees go bad (do not dig into host code mid-task): poor app Accessibility (E
 - Store cross-cell values on `globalThis`. The JavaScript session is persistent: top-level `const` and `let` names cannot be redeclared by later retries. Do not declare retry-prone scratch names such as `tree`, `lines`, `state`, or `accessibility` at top level. Use `globalThis` for state you need later, and wrap temporary parsing code in a short `{ ... }` block or use fresh names for one-off retries.
 - On the first cell, list installed/running apps and print the returned app objects. Each app includes its currently open targetable windows.
 - Choose one app from the latest `apps` array. If it has exactly one suitable open window, call `get_window` on that returned window before the first snapshot. This is the Computer Use equivalent of resolving the chosen target into the current canonical object.
-- For app-control tasks, call `activate_window({ window: targetWindow })` once after selecting the target and before the first snapshot when you need the window foreground. FastCUA also activates on input methods and on `get_window_state` (unlike pure Codex passive snapshot semantics).
+- For app-control tasks, call `activate_window({ window: targetWindow })` once after selecting the target and before the first snapshot when you need the window foreground. FastCUA also activates on input methods and on `get_window_state` (prepare-before-action).
 - Use `list_windows` as a shortcut only when the task is explicitly about currently open windows or when recovering after you already know the app is running.
 - After `get_window_state`, replace `targetWindow` with `state.window`; it is the canonical window object that was actually captured.
 - If bindings still exist after a stale handle error, recover with `sky.get_window({ id: targetWindow.id, app: targetWindow.app })`. If bindings are gone after a reset, call `list_apps` again and choose from the fresh returned objects. Do not reconstruct a window from guessed ids.
@@ -207,7 +222,10 @@ globalThis.state = await sky.get_window_state({
   include_text: true,
 });
 globalThis.targetWindow = state.window;
-const current = state.accessibility?.focused_value ?? "";
+const current = state.accessibility?.focused_value;
+if (typeof current !== "string") {
+  throw new Error("Focused control does not expose a scoped text value; do not assume it is empty");
+}
 const desired = "exact-value-to-set";
 if (current !== desired) {
   // Model decided to change: clear then type once
@@ -233,7 +251,7 @@ GOOD: batch related actions against the selected window, then verify once:
 
 ```js
 await sky.click({ window: targetWindow, x: 400, y: 300 });
-await sky.type_text({ window: targetWindow, text: "hello", replace: true });
+await sky.type_text({ window: targetWindow, text: "hello" });
 await sky.press_key({ window: targetWindow, key: "Return" });
 
 globalThis.state = await sky.get_window_state({ window: targetWindow });
@@ -289,8 +307,10 @@ globalThis.targetWindow = state.window;
 - If Computer Use reports that the Windows desktop is locked, stop immediately and ask the user to unlock. Do not interact through `LockApp.exe`.
 - When opening or launching a Windows app by name, call `list_apps` before launching anything.
 - Call `get_window_state` again only when you need to verify progress, focus may have changed, a modal may have appeared, the user interrupted, or prior state is stale.
-- **Text fields:** read `focused_value` → model decides → if changing, `type_text` once with `replace: true` (default: clear then type). Use `replace: false` only to append. Host does not silently skip when values match.
-- `type_text` types literal text. Use `press_key` for `Enter`, `Tab`, arrows, Escape, and chords — do not embed control characters in `type_text`.
+- **Text fields:** read `focused_value` → model decides → if replacing that scoped value, call `type_text` once with `replace: true`. The safe default is `replace: false`, which types at the current caret or selection. Host does not silently skip when values match.
+- `replace:true` never sends a blind Ctrl+A. It requires a focused writable UIA value and fails safely for broader documents, grids, canvases, and unknown controls. If the user intends a broader replacement, make the selection explicitly with `press_key`, then type with the default `replace:false`.
+- `replace:true` does not guarantee where the caret lands. Refocus or move the caret explicitly before a later caret-relative edit.
+- `type_text` injects literal Unicode text without modifying the clipboard. Use `press_key` for Enter, Tab, arrows, Escape, and chords rather than embedding control actions in text.
 - Prefer X Window System keysym-style names for keys, especially `KP_0`–`KP_9` when apps distinguish numpad keys. Common aliases (`period`, `Numpad_0`, …) are accepted. For shifted punctuation shortcuts include `Shift` (e.g. `Control_L+Shift_L+period`).
 - Prefer input injection / coordinates when UIA indexes are flaky; for stable labeled controls prefer `element_index` from the latest tree. Property name is `element_index`, not `element`.
 - **Coordinate space:** `click`/`drag`/`scroll` x,y are **window screenshot pixels** (origin top-left), identical to `get_window_state().viewport` / `screenshots[0].{width,height}`. Never use uncalibrated guesses.
@@ -306,7 +326,7 @@ globalThis.targetWindow = state.window;
 - Do not use `set_value` for normal text editing in this release (limited to classic Win32 Edit). Prefer click → read → decide → `type_text`.
 - `scroll` uses window-relative coordinates: `sky.scroll({ window, x, y, scrollX: 0, scrollY: 600 })`. Negative `scrollY` is up. Do not pass `element_index` to `scroll`.
 - Use keyboard navigation when it is faster than hunting UI pixels.
-- In Microsoft Office apps, prefer keyboard shortcuts and Alt ribbon sequences over ribbon element indexes.
+- In ribbon-based or highly dynamic apps, prefer stable keyboard shortcuts over brittle ribbon element indexes.
 - Native context menus: focus control, `Shift+F10` or `Menu`, refresh accessibility, then arrows/`Return`. Avoid menu items with external side effects unless requested.
 - For text entry into a document/slide/sheet/editor/canvas, click a stable point inside the editable surface before typing; verify once with `get_window_state` (and `focused_value` when applicable).
 - For drawing/canvas/3D manipulation, use `drag` strokes on the canvas. For Blender-like apps, focus work surface and clear modals with `Escape` before shortcut sequences.

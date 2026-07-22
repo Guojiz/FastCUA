@@ -10,13 +10,11 @@ use std::{
     env, mem,
     path::Path,
     ptr,
-    sync::{
-        Mutex, OnceLock,
-        atomic::{AtomicUsize, Ordering},
-    },
+    sync::{Mutex, OnceLock, mpsc},
+    thread,
+    time::Duration,
 };
 
-static LAST_INPUT_HWND: AtomicUsize = AtomicUsize::new(0);
 static UIA_TIMEOUT_APPS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 static UIA_ELEMENT_MAPS: OnceLock<Mutex<HashMap<u64, HashMap<u64, UiaElementTarget>>>> =
     OnceLock::new();
@@ -31,6 +29,8 @@ struct UiaElementTarget {
 const STALE_UIA_ELEMENT: &str = "UIA element index is unavailable or stale. Call get_window_state with include_text: true again. Prefer sky.grid_view({window}) immediately; do not retry this element_index.";
 const APPS_FOLDER_PREFIX: &str = "shell:AppsFolder\\";
 const PAINT_AUMID: &str = "Microsoft.Paint_8wekyb3d8bbwe!App";
+/// Let the Windows input stack settle before click/scroll/drag dispatch.
+const MOVE_SETTLE_MS: u32 = 50;
 
 #[derive(Clone, Debug, Serialize)]
 pub struct WindowRef {
@@ -107,7 +107,11 @@ pub fn list_apps() -> Vec<AppRef> {
         .collect()
 }
 
-pub fn get_window(id: u64, requested_app: Option<&str>) -> Result<WindowRef, String> {
+fn canonical_app(value: &str) -> String {
+    value.replace('/', "\\").to_ascii_lowercase()
+}
+
+fn get_window_exact(id: u64, requested_app: Option<&str>) -> Result<WindowRef, String> {
     let hwnd = id as usize as HWND;
     if unsafe { IsWindow(hwnd) } == 0 {
         return Err(format!("window {id} no longer exists"));
@@ -118,11 +122,40 @@ pub fn get_window(id: u64, requested_app: Option<&str>) -> Result<WindowRef, Str
         .map(|path| format!("process:{path}"))
         .or_else(|| requested_app.map(str::to_owned))
         .ok_or_else(|| "resolve window process path".to_string())?;
+    if requested_app.is_some_and(|requested| canonical_app(requested) != canonical_app(&app)) {
+        return Err(format!(
+            "window {id} now belongs to a different application"
+        ));
+    }
     Ok(WindowRef {
         app,
         id,
         title: window_text(hwnd),
     })
+}
+
+pub fn get_window(id: u64, requested_app: Option<&str>) -> Result<WindowRef, String> {
+    if let Ok(window) = get_window_exact(id, requested_app) {
+        return Ok(window);
+    }
+    let Some(requested_app) = requested_app else {
+        return Err(format!("window {id} no longer exists"));
+    };
+    let requested = canonical_app(requested_app);
+    let mut matches = list_windows()
+        .into_iter()
+        .filter(|window| canonical_app(&window.app) == requested);
+    let Some(window) = matches.next() else {
+        return Err(format!(
+            "window {id} no longer exists and no current window matches {requested_app}"
+        ));
+    };
+    if matches.next().is_some() {
+        return Err(format!(
+            "window {id} no longer exists and {requested_app} has multiple current windows; call list_windows and choose one"
+        ));
+    }
+    Ok(window)
 }
 
 pub fn validate_launch_app(app: &str) -> Result<String, String> {
@@ -216,9 +249,39 @@ pub fn activate_window(id: u64) -> Result<(), String> {
     if unsafe { IsWindow(hwnd) } == 0 {
         return Err(format!("window {id} no longer exists"));
     }
+    let foreground = unsafe { GetForegroundWindow() };
+    // Re-activating an already-foreground window can collapse a selection or move
+    // focus between two related input calls (for example Ctrl+A, then type).
+    if foreground == hwnd {
+        return Ok(());
+    }
+    if unsafe { IsHungAppWindow(hwnd) } != 0 {
+        return Err(format!("window {id} is not responding"));
+    }
+    // ShowWindow/SetForegroundWindow send synchronous messages to the target
+    // thread. A wedged app would park this synchronous host inside win32k, so
+    // the activation attempt runs on a bounded worker.
+    let hwnd_value = hwnd as usize;
+    let (sender, receiver) = mpsc::channel();
+    thread::Builder::new()
+        .name("cua-activate".into())
+        .spawn(move || {
+            let result = unsafe { activate_window_inner(hwnd_value as HWND) };
+            let _ = sender.send(result);
+        })
+        .map_err(|error| format!("spawn activation worker: {error}"))?;
+    receiver
+        .recv_timeout(Duration::from_millis(ACTIVATE_TIMEOUT_MS))
+        .map_err(|_| format!("window {id} activation timed out (app not responding)"))?
+}
+
+/// One activation attempt must stay well under the daemon's per-request budget.
+const ACTIVATE_TIMEOUT_MS: u64 = 1_500;
+
+unsafe fn activate_window_inner(hwnd: HWND) -> Result<(), String> {
+    let foreground = unsafe { GetForegroundWindow() };
     unsafe {
         ShowWindow(hwnd, SW_RESTORE);
-        let foreground = GetForegroundWindow();
         let foreground_thread = if foreground.is_null() {
             0
         } else {
@@ -235,7 +298,28 @@ pub fn activate_window(id: u64) -> Result<(), String> {
             AttachThreadInput(current_thread, foreground_thread, FALSE);
         }
     }
-    Ok(())
+    // Foreground changes are asynchronous. Do not inject into whichever app
+    // happened to remain foreground when activation was requested.
+    for _ in 0..10 {
+        unsafe { Sleep(10) };
+        let foreground = unsafe { GetForegroundWindow() };
+        if foreground == hwnd {
+            return Ok(());
+        }
+        unsafe {
+            BringWindowToTop(hwnd);
+            SetForegroundWindow(hwnd);
+        }
+    }
+    Err(format!("could not activate window {}", hwnd as usize))
+}
+
+fn ensure_foreground_window(id: u64) -> Result<(), String> {
+    if unsafe { GetForegroundWindow() } == id as usize as HWND {
+        Ok(())
+    } else {
+        Err(format!("window {id} lost foreground; action cancelled"))
+    }
 }
 
 unsafe extern "system" fn enum_child(hwnd: HWND, lparam: LPARAM) -> BOOL {
@@ -273,7 +357,7 @@ fn element_hwnd(window: &WindowRef, index: u64) -> Result<HWND, String> {
         })
 }
 
-fn accessibility_tree(window: &WindowRef) -> (String, String, Vec<HWND>) {
+fn accessibility_tree(window: &WindowRef, pump_free: bool) -> (String, String, Vec<HWND>) {
     let root = window.id as usize as HWND;
     let children = child_elements(root);
     let mut elements = Vec::with_capacity(children.len() + 1);
@@ -291,7 +375,14 @@ fn accessibility_tree(window: &WindowRef) -> (String, String, Vec<HWND>) {
     ));
     let mut document_parts = Vec::new();
     for (index, hwnd) in children.iter().enumerate() {
-        let name = window_text(*hwnd);
+        // pump_free: the owning thread is known-wedged (UIA timed out), so read
+        // stored text instead of sending messages that would each burn the
+        // WINDOW_TEXT_TIMEOUT_MS budget.
+        let name = if pump_free {
+            internal_window_text(*hwnd)
+        } else {
+            window_text(*hwnd)
+        };
         let class = class_name(*hwnd);
         let role = role_for_class(&class);
         if !name.is_empty() {
@@ -382,14 +473,38 @@ fn assess_uia_quality(
     })
 }
 
+/// Passive capture paths (get_window_state, grid_view) tolerate activation
+/// failure against a wedged window: BitBlt screenshots and HWND trees still
+/// work. Input paths keep the hard error.
+fn activation_failure_tolerable(hwnd: HWND, error: &str) -> bool {
+    let hung = unsafe { IsHungAppWindow(hwnd) } != 0;
+    hung || error.contains("activation timed out") || error.contains("not responding")
+}
+
 pub fn get_window_state(
     window: WindowRef,
     include_screenshot: bool,
     include_text: bool,
 ) -> Result<Value, String> {
-    activate_window(window.id)?;
+    let timing = env::var_os("FASTCUA_HOST_TIMING").is_some();
+    let stage = |name: &str, start: std::time::Instant| {
+        if timing {
+            eprintln!("[timing] {name}: {}ms", start.elapsed().as_millis());
+        }
+    };
+    let t = std::time::Instant::now();
+    if let Err(error) = activate_window(window.id) {
+        if !activation_failure_tolerable(window.id as usize as HWND, &error) {
+            return Err(error);
+        }
+    }
+    stage("activate", t);
+    let t = std::time::Instant::now();
     let (accessibility, uia_meta) = if include_text {
         let mut provider_err: Option<String> = None;
+        // Set when the app's UIA provider is unresponsive (timed out or already
+        // disabled). The rest of this request must then stay pump-free.
+        let mut provider_unresponsive = false;
         let (tree, focused_element, document_text, quality_elems) = match uia_snapshot(&window) {
             Ok(snapshot) => {
                 cache_uia_elements(&window, &snapshot)?;
@@ -406,8 +521,11 @@ pub fn get_window_state(
                 )
             }
             Err(err) => {
+                provider_unresponsive =
+                    err.contains("timed out") || err.contains("disabled after provider timeout");
                 provider_err = Some(err);
-                let (tree, document_text, elements) = accessibility_tree(&window);
+                let (tree, document_text, elements) =
+                    accessibility_tree(&window, provider_unresponsive);
                 cache_hwnd_elements(&window, &elements)?;
                 let elems: Vec<(u64, String, String, bool)> = elements
                     .iter()
@@ -423,6 +541,8 @@ pub fn get_window_state(
                             role_for_class(&class_name(*hwnd)).to_string(),
                             if i == 0 {
                                 window.title.clone()
+                            } else if provider_unresponsive {
+                                internal_window_text(*hwnd)
                             } else {
                                 window_text(*hwnd)
                             },
@@ -433,7 +553,13 @@ pub fn get_window_state(
                 (tree, String::new(), document_text, elems)
             }
         };
-        let focused_value = uia::focused_value().unwrap_or_default();
+        // A wedged provider cannot answer the focused-value worker either; skip
+        // it instead of burning its 800ms timeout on every request.
+        let focused_value = if provider_unresponsive {
+            None
+        } else {
+            uia::focused_value(window.id as usize as HWND)
+        };
         let uia = assess_uia_quality(&quality_elems, provider_err.as_deref());
         (
             json!({
@@ -456,12 +582,15 @@ pub fn get_window_state(
             }),
         )
     };
+    stage("text", t);
+    let t = std::time::Instant::now();
     let bounds = window_bounds(window.id)?;
     let screenshots = if include_screenshot {
         vec![capture_window(window.id)?]
     } else {
         Vec::new()
     };
+    stage("capture", t);
     // Prefer screenshot pixel size as the coordinate space (matches capture bitmap).
     let (coord_w, coord_h) = if let Some(shot) = screenshots.first() {
         (
@@ -632,18 +761,23 @@ fn uia_element_target_cached(window: &WindowRef, index: u64) -> Option<UiaElemen
         .cloned()
 }
 
+/// Some when this app's UIA provider already timed out once this session.
+/// UIA queries against it are disabled so requests fail fast instead of
+/// blocking the (synchronous) host on a hung provider again.
+fn uia_disabled_reason(window: &WindowRef) -> Option<String> {
+    let timed_out = UIA_TIMEOUT_APPS.get_or_init(|| Mutex::new(HashSet::new()));
+    let disabled = timed_out.lock().ok()?.contains(&window.app);
+    disabled.then(|| "UI Automation disabled after provider timeout".to_string())
+}
+
 fn uia_snapshot(window: &WindowRef) -> Result<uia::Snapshot, String> {
     if env::var_os("FASTCUA_TEST_FORCE_UIA_FALLBACK").is_some() {
         return Err("UI Automation fallback forced for regression testing".into());
     }
-    let timed_out = UIA_TIMEOUT_APPS.get_or_init(|| Mutex::new(HashSet::new()));
-    if timed_out
-        .lock()
-        .map_err(|_| "UIA timeout cache poisoned".to_string())?
-        .contains(&window.app)
-    {
-        return Err("UI Automation disabled after provider timeout".into());
+    if let Some(reason) = uia_disabled_reason(window) {
+        return Err(reason);
     }
+    let timed_out = UIA_TIMEOUT_APPS.get_or_init(|| Mutex::new(HashSet::new()));
     let result = uia::snapshot(
         window.id as usize as HWND,
         &window.title,
@@ -665,7 +799,26 @@ struct CapturedRgb {
     rgb: Vec<u8>,
 }
 
+/// Bound for one screenshot capture. PrintWindow sends WM_PRINT and can park on
+/// a wedged app; the capture must fail fast instead of blocking the synchronous
+/// host. On timeout the worker is detached (it only touches its own GDI objects).
+const CAPTURE_TIMEOUT_MS: u64 = 3_000;
+
 fn capture_window_rgb(id: u64) -> Result<CapturedRgb, String> {
+    let (sender, receiver) = mpsc::channel();
+    thread::Builder::new()
+        .name("cua-capture".into())
+        .spawn(move || {
+            let result = capture_window_rgb_inner(id);
+            let _ = sender.send(result);
+        })
+        .map_err(|error| format!("spawn capture worker: {error}"))?;
+    receiver
+        .recv_timeout(Duration::from_millis(CAPTURE_TIMEOUT_MS))
+        .map_err(|_| "screenshot capture timed out (target window not responding)".to_string())?
+}
+
+fn capture_window_rgb_inner(id: u64) -> Result<CapturedRgb, String> {
     let hwnd = id as usize as HWND;
     let mut rect = RECT::default();
     if unsafe { GetWindowRect(hwnd, &mut rect) } == 0 {
@@ -687,7 +840,10 @@ fn capture_window_rgb(id: u64) -> Result<CapturedRgb, String> {
         return Err("create screenshot bitmap failed".into());
     }
     let previous = unsafe { SelectObject(memory, bitmap) };
-    if unsafe { PrintWindow(hwnd, memory, PW_RENDERFULLCONTENT) } == 0 {
+    // PrintWindow sends WM_PRINT to the target — a wedged app cannot answer it.
+    // Skip straight to BitBlt (reads the window's current surface) when hung.
+    let hung = unsafe { IsHungAppWindow(hwnd) } != 0;
+    if hung || unsafe { PrintWindow(hwnd, memory, PW_RENDERFULLCONTENT) } == 0 {
         unsafe {
             BitBlt(
                 memory,
@@ -1113,7 +1269,11 @@ fn draw_square_grid_overlay(rgb: &mut [u8], w: i32, h: i32, cells: &[GridCell]) 
 /// (crop to selection → 3×3 squares only inside). Single image to save tokens.
 pub fn grid_view(params: &Value) -> Result<Value, String> {
     let window = params_window(params)?;
-    activate_window(window.id)?;
+    if let Err(error) = activate_window(window.id) {
+        if !activation_failure_tolerable(window.id as usize as HWND, &error) {
+            return Err(error);
+        }
+    }
     let cap = capture_window_rgb(window.id)?;
 
     let path: Vec<String> = params
@@ -1285,21 +1445,7 @@ pub fn click(params: &Value) -> Result<(), String> {
             (x, y)
         }
     };
-    let parent = window.id as usize as HWND;
-    let mut client_point = POINT { x, y };
-    unsafe { ScreenToClient(parent, &mut client_point) };
-    let child = unsafe {
-        ChildWindowFromPointEx(
-            parent,
-            client_point,
-            CWP_SKIPINVISIBLE | CWP_SKIPDISABLED | CWP_SKIPTRANSPARENT,
-        )
-    };
-    LAST_INPUT_HWND.store(
-        if child.is_null() { parent } else { child } as usize,
-        Ordering::SeqCst,
-    );
-    unsafe { SetCursorPos(x, y) };
+    move_and_settle(window.id, x, y)?;
     let button = params
         .get("mouse_button")
         .and_then(Value::as_str)
@@ -1311,17 +1457,48 @@ pub fn click(params: &Value) -> Result<(), String> {
         .unwrap_or(1)
         .clamp(1, 3);
     for _ in 0..count {
-        dispatch_click(if child.is_null() { parent } else { child }, x, y, &button)?;
+        ensure_foreground_window(window.id)?;
+        dispatch_click(x, y, &button)?;
         unsafe { Sleep(35) };
     }
     Ok(())
 }
 
-fn dispatch_click(target: HWND, screen_x: i32, screen_y: i32, button: &str) -> Result<(), String> {
+fn set_cursor_position(x: i32, y: i32) -> Result<(), String> {
+    if unsafe { SetCursorPos(x, y) } == 0 {
+        return Err(format!("SetCursorPos failed (GetLastError={})", unsafe {
+            GetLastError()
+        }));
+    }
+    Ok(())
+}
+
+fn move_and_settle(window_id: u64, x: i32, y: i32) -> Result<(), String> {
+    set_cursor_position(x, y)?;
+    unsafe { Sleep(MOVE_SETTLE_MS) };
+    ensure_cursor_position(x, y)?;
+    ensure_foreground_window(window_id)
+}
+
+fn ensure_cursor_position(x: i32, y: i32) -> Result<(), String> {
+    let mut actual = POINT::default();
+    if unsafe { GetCursorPos(&mut actual) } == 0 {
+        return Err(format!("GetCursorPos failed (GetLastError={})", unsafe {
+            GetLastError()
+        }));
+    }
+    if actual.x != x || actual.y != y {
+        return Err("cursor moved; action cancelled".into());
+    }
+    Ok(())
+}
+
+fn dispatch_click(screen_x: i32, screen_y: i32, button: &str) -> Result<(), String> {
     // Prefer real injected input. Common item dialogs / DirectUI often ignore
     // SendMessage(BM_CLICK) / synthetic WM_LBUTTON* while still accepting SendInput.
-    let _ = (target, screen_x, screen_y);
-    dispatch_input_click(button)
+    ensure_cursor_position(screen_x, screen_y)?;
+    dispatch_input_click(button)?;
+    ensure_cursor_position(screen_x, screen_y)
 }
 
 fn dispatch_input_click(button: &str) -> Result<(), String> {
@@ -1333,8 +1510,7 @@ fn dispatch_input_click(button: &str) -> Result<(), String> {
     };
     send_mouse(down, 0)?;
     unsafe { Sleep(20) };
-    send_mouse(up, 0)?;
-    Ok(())
+    send_mouse_release(up)
 }
 
 pub fn type_text(params: &Value) -> Result<(), String> {
@@ -1344,36 +1520,125 @@ pub fn type_text(params: &Value) -> Result<(), String> {
         .get("text")
         .and_then(Value::as_str)
         .ok_or_else(|| "missing field `text`".to_string())?;
-    // Control flow (model decides, host executes):
-    //   1. Model READs via get_window_state.accessibility.focused_value
-    //   2. Model decides whether to change the field
-    //   3. If changing: type_text with replace:true (default) → clear then type
-    //   4. If appending: type_text with replace:false
-    // Host must NOT silently skip based on current value — that hides state from the model.
+    // Append is the safe default. Replacement is allowed only when UIA exposes
+    // a writable, scoped ValuePattern for the focused control. This prevents a
+    // blind Ctrl+A from selecting an entire document, grid, or application.
     let replace = params
         .get("replace")
         .and_then(Value::as_bool)
-        .unwrap_or(true);
+        .unwrap_or(false);
+    ensure_foreground_window(window.id)?;
     if replace {
-        clear_focused_text()?;
+        // set_focused_value is synchronous by design (a destructive write must
+        // not linger on a detached timeout worker). When this app's provider is
+        // already known-hung, fail fast here instead of blocking the host.
+        if let Some(reason) = uia_disabled_reason(&window) {
+            return Err(format!(
+                "replace:true unavailable: {reason}. Use replace:false to type at the caret, or use sky.grid_view for vision targeting."
+            ));
+        }
+        if !uia::set_focused_value(window.id as usize as HWND, text)? {
+            return Err(
+                "replace:true requires a focused writable text value. Refocus a text field, use replace:false to type at the caret, or explicitly select a broader document region with press_key first."
+                    .into(),
+            );
+        }
+        return Ok(());
     }
-    for unit in text.encode_utf16() {
-        send_unicode(unit)?;
-    }
-    Ok(())
+    send_text(window.id, text)
 }
 
-/// Select-all + delete on the focused control (key events, not UIA).
-fn clear_focused_text() -> Result<(), String> {
-    send_vk(VK_CONTROL, false)?;
-    send_vk(0x41, false)?; // VK for 'A'
-    send_vk(0x41, true)?;
-    send_vk(VK_CONTROL, true)?;
-    unsafe { Sleep(25) };
-    send_vk(VK_DELETE, false)?;
-    send_vk(VK_DELETE, true)?;
-    unsafe { Sleep(15) };
-    Ok(())
+fn keyboard_input(key: WORD, scan: WORD, flags: DWORD) -> INPUT {
+    INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 {
+            ki: KEYBDINPUT {
+                wVk: key,
+                wScan: scan,
+                dwFlags: flags,
+                time: 0,
+                dwExtraInfo: 0,
+            },
+        },
+    }
+}
+
+fn send_inputs(inputs: &[INPUT]) -> Result<(), String> {
+    if inputs.is_empty() {
+        return Ok(());
+    }
+    let sent = unsafe {
+        SendInput(
+            inputs.len() as UINT,
+            inputs.as_ptr(),
+            mem::size_of::<INPUT>() as i32,
+        )
+    };
+    if sent != inputs.len() as UINT {
+        Err(format!(
+            "SendInput inserted {sent}/{} events (GetLastError={})",
+            inputs.len(),
+            unsafe { GetLastError() }
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+fn send_text(window_id: u64, text: &str) -> Result<(), String> {
+    // Chunk input so very large strings do not require one unbounded allocation.
+    let mut inputs = Vec::with_capacity(256);
+    for unit in text.encode_utf16() {
+        inputs.push(keyboard_input(0, unit, KEYEVENTF_UNICODE));
+        inputs.push(keyboard_input(0, unit, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP));
+        if inputs.len() >= 256 {
+            ensure_foreground_window(window_id)?;
+            send_text_inputs(&inputs)?;
+            inputs.clear();
+        }
+    }
+    ensure_foreground_window(window_id)?;
+    send_text_inputs(&inputs)
+}
+
+fn send_text_inputs(inputs: &[INPUT]) -> Result<(), String> {
+    if inputs.is_empty() {
+        return Ok(());
+    }
+    let sent = unsafe {
+        SendInput(
+            inputs.len() as UINT,
+            inputs.as_ptr(),
+            mem::size_of::<INPUT>() as i32,
+        )
+    };
+    if sent == inputs.len() as UINT {
+        return Ok(());
+    }
+    let error = unsafe { GetLastError() };
+    let mut cleanup_error = None;
+    if sent % 2 == 1 {
+        let scan = unsafe { inputs[sent as usize - 1].Anonymous.ki.wScan };
+        let release = keyboard_input(0, scan, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP);
+        let mut released = false;
+        for _ in 0..3 {
+            if unsafe { SendInput(1, &release, mem::size_of::<INPUT>() as i32) } == 1 {
+                released = true;
+                break;
+            }
+            unsafe { Sleep(5) };
+        }
+        if !released {
+            cleanup_error = Some(unsafe { GetLastError() });
+        }
+    }
+    Err(format!(
+        "SendInput inserted {sent}/{} text events (GetLastError={error}){}",
+        inputs.len(),
+        cleanup_error
+            .map(|code| format!("; key release cleanup failed (GetLastError={code})"))
+            .unwrap_or_default()
+    ))
 }
 
 pub fn press_key(params: &Value) -> Result<(), String> {
@@ -1390,11 +1655,16 @@ pub fn press_key(params: &Value) -> Result<(), String> {
     if keys.is_empty() {
         return Err("empty key chord".into());
     }
+    ensure_foreground_window(window.id)?;
     for key in &keys {
-        send_vk(*key, false)?;
+        let scan = unsafe { MapVirtualKeyW(*key as UINT, MAPVK_VK_TO_VSC) } as u8;
+        unsafe { keybd_event(*key as u8, scan, 0, 0) };
+        unsafe { Sleep(8) };
     }
     for key in keys.iter().rev() {
-        send_vk(*key, true)?;
+        let scan = unsafe { MapVirtualKeyW(*key as UINT, MAPVK_VK_TO_VSC) } as u8;
+        unsafe { keybd_event(*key as u8, scan, KEYEVENTF_KEYUP, 0) };
+        unsafe { Sleep(4) };
     }
     Ok(())
 }
@@ -1403,13 +1673,15 @@ pub fn scroll(params: &Value) -> Result<(), String> {
     let window = params_window(params)?;
     activate_window(window.id)?;
     let (x, y) = screen_point_from_params(&window, params)?;
-    unsafe { SetCursorPos(x, y) };
+    move_and_settle(window.id, x, y)?;
     let vertical = params.get("scrollY").and_then(Value::as_i64).unwrap_or(0) as i32;
     let horizontal = params.get("scrollX").and_then(Value::as_i64).unwrap_or(0) as i32;
     if vertical != 0 {
+        ensure_cursor_position(x, y)?;
         send_mouse(MOUSEEVENTF_WHEEL, (-vertical) as u32)?;
     }
     if horizontal != 0 {
+        ensure_cursor_position(x, y)?;
         send_mouse(MOUSEEVENTF_HWHEEL, horizontal as u32)?;
     }
     Ok(())
@@ -1425,18 +1697,35 @@ pub fn drag(params: &Value) -> Result<(), String> {
     let to_y = map_axis(params, "to_y", bounds.height)?;
     let (from_x, from_y) = screen_point(&window, from_x, from_y)?;
     let (to_x, to_y) = screen_point(&window, to_x, to_y)?;
-    unsafe { SetCursorPos(from_x, from_y) };
+    move_and_settle(window.id, from_x, from_y)?;
     send_mouse(MOUSEEVENTF_LEFTDOWN, 0)?;
-    for step in 1..=20 {
-        let x = from_x + (to_x - from_x) * step / 20;
-        let y = from_y + (to_y - from_y) * step / 20;
-        unsafe {
-            SetCursorPos(x, y);
-            Sleep(8);
+    let drag_result = (|| {
+        let mut previous_x = from_x;
+        let mut previous_y = from_y;
+        for step in 1..=20 {
+            ensure_foreground_window(window.id)?;
+            ensure_cursor_position(previous_x, previous_y)?;
+            let x = from_x + (to_x - from_x) * step / 20;
+            let y = from_y + (to_y - from_y) * step / 20;
+            set_cursor_position(x, y)?;
+            previous_x = x;
+            previous_y = y;
+            unsafe { Sleep(8) };
         }
+        ensure_foreground_window(window.id)?;
+        ensure_cursor_position(to_x, to_y)?;
+        Ok(())
+    })();
+    let release_result = send_mouse_release(MOUSEEVENTF_LEFTUP);
+    if let Err(error) = drag_result {
+        return match release_result {
+            Ok(()) => Err(error),
+            Err(release_error) => Err(format!(
+                "{error}; mouse release also failed: {release_error}"
+            )),
+        };
     }
-    send_mouse(MOUSEEVENTF_LEFTUP, 0)?;
-    Ok(())
+    release_result
 }
 
 pub fn set_value(params: &Value) -> Result<(), String> {
@@ -1454,11 +1743,23 @@ pub fn set_value(params: &Value) -> Result<(), String> {
         return Err(format!("element {index} does not support setting a value"));
     }
     let value = wide(value);
-    let result = unsafe { SendMessageW(target, WM_SETTEXT, 0, value.as_ptr() as LPARAM) };
-    if result == 0 {
+    // Bound the cross-process write: a wedged target must fail fast, not park
+    // the synchronous host on its message pump.
+    let mut result: usize = 0;
+    let sent = unsafe {
+        SendMessageTimeoutW(
+            target,
+            WM_SETTEXT,
+            0,
+            value.as_ptr() as LPARAM,
+            SMTO_ABORTIFHUNG | SMTO_BLOCK,
+            1_000,
+            &mut result,
+        )
+    };
+    if sent == 0 || result == 0 {
         return Err(format!("set value failed for element {index}"));
     }
-    LAST_INPUT_HWND.store(target as usize, Ordering::SeqCst);
     Ok(())
 }
 
@@ -1485,7 +1786,7 @@ pub fn params_window(params: &Value) -> Result<WindowRef, String> {
         .and_then(Value::as_u64)
         .ok_or_else(|| "window missing field `id`".to_string())?;
     let app = object.get("app").and_then(Value::as_str);
-    get_window(id, app)
+    get_window_exact(id, app)
 }
 
 #[cfg(test)]
@@ -1581,30 +1882,36 @@ fn screen_point_from_params(window: &WindowRef, params: &Value) -> Result<(i32, 
 }
 
 fn send_mouse(flags: DWORD, data: DWORD) -> Result<(), String> {
-    unsafe { mouse_event(flags, 0, 0, data, 0) };
-    Ok(())
-}
-
-fn send_vk(key: WORD, up: bool) -> Result<(), String> {
-    let scan = unsafe { MapVirtualKeyW(key as UINT, MAPVK_VK_TO_VSC) } as u8;
-    unsafe { keybd_event(key as u8, scan, if up { KEYEVENTF_KEYUP } else { 0 }, 0) };
-    Ok(())
-}
-
-fn send_unicode(unit: WORD) -> Result<(), String> {
-    let last = LAST_INPUT_HWND.load(Ordering::SeqCst) as HWND;
-    let target = if !last.is_null() {
-        last
-    } else {
-        let mut info: GUITHREADINFO = unsafe { mem::zeroed() };
-        info.cbSize = mem::size_of::<GUITHREADINFO>() as DWORD;
-        if unsafe { GetGUIThreadInfo(0, &mut info) } == 0 || info.hwndFocus.is_null() {
-            return Err("resolve focused window for text input".into());
-        }
-        info.hwndFocus
+    let input = INPUT {
+        r#type: INPUT_MOUSE,
+        Anonymous: INPUT_0 {
+            mi: MOUSEINPUT {
+                dx: 0,
+                dy: 0,
+                mouseData: data,
+                dwFlags: flags,
+                time: 0,
+                dwExtraInfo: 0,
+            },
+        },
     };
-    unsafe { SendMessageW(target, WM_CHAR, unit as WPARAM, 1) };
-    Ok(())
+    send_inputs(&[input])
+}
+
+fn send_mouse_release(flags: DWORD) -> Result<(), String> {
+    let mut first_error = None;
+    for _ in 0..3 {
+        match send_mouse(flags, 0) {
+            Ok(()) => return Ok(()),
+            Err(error) if first_error.is_none() => first_error = Some(error),
+            Err(_) => {}
+        }
+        unsafe { Sleep(5) };
+    }
+    Err(format!(
+        "{}; mouse release cleanup failed after 3 attempts",
+        first_error.unwrap_or_else(|| "mouse release failed".into())
+    ))
 }
 
 fn key_to_vk(token: &str) -> Option<WORD> {
@@ -1628,14 +1935,8 @@ fn key_to_vk(token: &str) -> Option<WORD> {
         "LEFT" => VK_LEFT,
         "RIGHT" => VK_RIGHT,
         "SPACE" => VK_SPACE,
-        _ if normalized.starts_with('F') => {
-            let number = normalized[1..].parse::<u16>().ok()?;
-            if (1..=20).contains(&number) {
-                VK_F1 + number - 1
-            } else {
-                return None;
-            }
-        }
+        // Single characters must win over the F-key prefix: bare "F"/"f" is the
+        // letter, while "F1".."F20" are function keys.
         _ if normalized.len() == 1 => {
             let character = normalized.encode_utf16().next()?;
             let scanned = unsafe { VkKeyScanW(character) };
@@ -1643,6 +1944,14 @@ fn key_to_vk(token: &str) -> Option<WORD> {
                 return None;
             }
             scanned as WORD & 0xff
+        }
+        _ if normalized.starts_with('F') => {
+            let number = normalized[1..].parse::<u16>().ok()?;
+            if (1..=20).contains(&number) {
+                VK_F1 + number - 1
+            } else {
+                return None;
+            }
         }
         _ if normalized.starts_with("KP_") || normalized.starts_with("NUMPAD_") => {
             let suffix = normalized.rsplit('_').next()?;
@@ -1672,10 +1981,53 @@ fn number(params: &Value, key: &str) -> Result<i32, String> {
         .ok_or_else(|| format!("missing field `{key}`"))
 }
 
+/// Per-call bound for cross-process window text messages. A wedged app cannot
+/// answer WM_GETTEXT; the synchronous host must never park on its message pump.
+const WINDOW_TEXT_TIMEOUT_MS: UINT = 300;
+
 fn window_text(hwnd: HWND) -> String {
-    let length = unsafe { GetWindowTextLengthW(hwnd) };
-    let mut buffer = vec![0u16; length.max(0) as usize + 1];
-    let copied = unsafe { GetWindowTextW(hwnd, buffer.as_mut_ptr(), buffer.len() as i32) };
+    if unsafe { IsHungAppWindow(hwnd) } != 0 {
+        return internal_window_text(hwnd);
+    }
+    let mut length: usize = 0;
+    if unsafe {
+        SendMessageTimeoutW(
+            hwnd,
+            WM_GETTEXTLENGTH,
+            0,
+            0,
+            SMTO_ABORTIFHUNG | SMTO_BLOCK,
+            WINDOW_TEXT_TIMEOUT_MS,
+            &mut length,
+        )
+    } == 0
+    {
+        return internal_window_text(hwnd);
+    }
+    let mut buffer = vec![0u16; length + 1];
+    let mut copied: usize = 0;
+    if unsafe {
+        SendMessageTimeoutW(
+            hwnd,
+            WM_GETTEXT,
+            buffer.len() as WPARAM,
+            buffer.as_mut_ptr() as LPARAM,
+            SMTO_ABORTIFHUNG | SMTO_BLOCK,
+            WINDOW_TEXT_TIMEOUT_MS,
+            &mut copied,
+        )
+    } == 0
+    {
+        return internal_window_text(hwnd);
+    }
+    String::from_utf16_lossy(&buffer[..copied.min(length)])
+}
+
+/// Read the title stored in the window structure without sending a message.
+/// Safe against wedged apps; used only as the bounded fallback for window_text.
+fn internal_window_text(hwnd: HWND) -> String {
+    let mut buffer = vec![0u16; 512];
+    let copied = unsafe { InternalGetWindowText(hwnd, buffer.as_mut_ptr(), buffer.len() as i32) };
     String::from_utf16_lossy(&buffer[..copied.max(0) as usize])
 }
 

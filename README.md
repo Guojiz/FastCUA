@@ -37,6 +37,8 @@ Through MCP, the agent gets a persistent JS environment (`sky.*`). Related keybo
 
 Each desktop helper request, MCP round-trip, and JS cell defaults to a **30 second** budget. On timeout the runtime fails the call; agents retry once then change strategy (defined in the Skill). Human pause and approval waits are separate — not software hangs.
 
+Hung target apps are bounded much tighter inside the helper: a wedged UIA provider times out in ~1.5s and that app's UIA is then disabled for the session (the request still returns, falling back to the HWND tree with `uia.prefer_vision: true`). Window activation (~1.5s) and screenshot capture (~3s) are bounded too, and screenshots / `grid_view` keep working against an unresponsive window via BitBlt. Cross-process window text never blocks the host, so wedged apps still appear in `list_windows` with their stored title. The shared helper survives all of this — a full helper restart is the last resort, not the default.
+
 ### 6. Visual targeting = Apple-style square number grid
 
 When UIA is weak or `state.uia.prefer_vision` is true, the runtime exposes that signal; agents must switch to vision immediately (Skill). Product shape:
@@ -144,7 +146,15 @@ Local control center: `http://127.0.0.1:8420` (loopback only).
 const windows = await sky.list_windows();
 const window = windows.find((w) => /Notepad/i.test(w.title));
 await sky.activate_window({ window });
-await sky.type_text({ window, text: "FastCUA", replace: true });
+const state = await sky.get_window_state({ window, include_screenshot: false, include_text: true });
+const editor = /^\s*(\d+)\s+(?:Edit|Document)\b/m.exec(state.accessibility.tree || "");
+if (!editor) throw new Error("Notepad editor not found");
+await sky.click({ window, element_index: Number(editor[1]) });
+// Observe focused_value before deciding to replace or type at the caret.
+const focused = await sky.get_window_state({ window, include_screenshot: false, include_text: true });
+if (focused.accessibility.focused_value === undefined) throw new Error("Focused value was not observed");
+// This example intentionally inserts at the current caret; use replace:true only after deciding to replace the observed value.
+await sky.type_text({ window, text: "FastCUA" });
 // Weak UIA? visual square grid, one image at a time:
 let gv = await sky.grid_view({ window });
 gv = await sky.grid_refine({ window, grid: gv.grid, cell: "4" });

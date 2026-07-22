@@ -18,32 +18,73 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const NODE = process.execPath;
 const DAEMON = path.join(HERE, "daemon.mjs");
 const PIPE = process.env.FASTCUA_PIPE || "\\\\.\\pipe\\fastcua";
+const CLIENT_GROUP = crypto.randomUUID();
 // read co-start config: "manual" means don't auto-spawn the daemon (user runs it themselves)
 function readCostart() { if (process.env.FASTCUA_COSTART_MODE) return process.env.FASTCUA_COSTART_MODE; try { return JSON.parse(fs.readFileSync(path.join(HERE, "config.json"), "utf8")).costartMode || "claude"; } catch { return "claude"; } }
 
 // ---- daemon client (named pipe, newline JSON) ----
 class DaemonClient {
-  constructor() { this.sock = null; this.buf = ""; this.pending = new Map(); this.nextId = 1; this.connectPromise = null; }
+  constructor() {
+    this.sock = null;
+    this.pending = new Map();
+    this.nextId = 1;
+    this.connectPromise = null;
+    this.cancelConnect = null;
+    this.generation = 0;
+    this.calls = new Set();
+  }
   async ensure() {
     if (this.sock && this.sock.writable && !this.sock.destroyed) return;
     if (this.connectPromise) return this.connectPromise;
-    this.connectPromise = this.connect();
-    try { await this.connectPromise; } finally { this.connectPromise = null; }
+    const promise = this.connect(this.generation);
+    this.connectPromise = promise;
+    try { await promise; } finally { if (this.connectPromise === promise) this.connectPromise = null; }
   }
-  connect() {
-    return new Promise((resolve) => {
+  connect(generation) {
+    return new Promise((resolve, reject) => {
       let attempt = 0;
+      let candidate = null;
+      let retryTimer = null;
+      let settled = false;
+      const finish = (error) => {
+        if (settled) return;
+        settled = true;
+        if (retryTimer) clearTimeout(retryTimer);
+        if (this.cancelConnect === cancel) this.cancelConnect = null;
+        if (error) reject(error); else resolve();
+      };
+      const cancel = (message) => {
+        if (settled) return;
+        try { candidate && candidate.destroy(); } catch {}
+        finish(new Error(message));
+      };
+      this.cancelConnect = cancel;
       const tryConn = () => {
-        const sock = net.createConnection(PIPE);
-        sock.once("connect", () => { this.sock = sock; this.attach(sock); log("connected to daemon"); resolve(); });
-        sock.once("error", () => {
+        if (generation !== this.generation) {
+          cancel("daemon connection attempt cancelled");
+          return;
+        }
+        candidate = net.createConnection(PIPE);
+        candidate.once("connect", () => {
+          if (settled || generation !== this.generation) {
+            try { candidate.destroy(); } catch {}
+            cancel("daemon connection attempt cancelled");
+            return;
+          }
+          this.sock = candidate;
+          this.attach(candidate);
+          log("connected to daemon");
+          finish();
+        });
+        candidate.once("error", () => {
+          if (settled) return;
           if (attempt === 0 && readCostart() !== "manual") { this.spawnDaemon(); }
           // Cold-start budget: the daemon (esp. spawning the WPF overlay + bundled
           // node cold start) can take several seconds to open the pipe. Retry for
           // up to ~14s so the first call after a cold start succeeds instead of
           // failing with "daemon unavailable".
-          if (attempt < 40) { attempt++; setTimeout(tryConn, 350); }
-          else { log("daemon unavailable after retries"); resolve(); } // requests will reject "daemon unavailable"
+          if (attempt < 40) { attempt++; retryTimer = setTimeout(tryConn, 350); }
+          else { log("daemon unavailable after retries"); finish(); } // requests will reject "daemon unavailable"
         });
       };
       tryConn();
@@ -57,13 +98,15 @@ class DaemonClient {
     } catch (e) { log("spawn daemon failed:", e.message); }
   }
   attach(sock) {
+    let buffer = "";
     sock.setEncoding("utf8");
     sock.on("data", (d) => {
-      this.buf += d;
+      if (this.sock !== sock) return;
+      buffer += d;
       let i;
-      while ((i = this.buf.indexOf("\n")) >= 0) {
-        const line = this.buf.slice(0, i).trim();
-        this.buf = this.buf.slice(i + 1);
+      while ((i = buffer.indexOf("\n")) >= 0) {
+        const line = buffer.slice(0, i).trim();
+        buffer = buffer.slice(i + 1);
         if (!line) continue;
         let m; try { m = JSON.parse(line); } catch { continue; }
         if (m.id == null) continue;
@@ -75,31 +118,99 @@ class DaemonClient {
         else p.resolve(m.result);
       }
     });
-    sock.on("error", () => this.failAll("daemon connection lost"));
-    sock.on("close", () => { this.sock = null; this.failAll("daemon connection closed"); });
+    sock.on("error", () => this.failSocket(sock, "daemon connection lost"));
+    sock.on("close", () => this.failSocket(sock, "daemon connection closed"));
   }
-  failAll(msg) { for (const p of this.pending.values()) { clearTimeout(p.timer); p.reject(new Error(msg)); } this.pending.clear(); this.sock = null; }
+  failSocket(sock, msg) {
+    if (this.sock !== sock) return;
+    this.sock = null;
+    for (const [id, p] of this.pending) {
+      if (p.socket !== sock) continue;
+      clearTimeout(p.timer);
+      p.reject(new Error(msg));
+      this.pending.delete(id);
+    }
+  }
+  failAll(msg) {
+    for (const p of this.pending.values()) { clearTimeout(p.timer); p.reject(new Error(msg)); }
+    this.pending.clear();
+  }
+  disconnect(msg) {
+    this.generation++;
+    const cancel = this.cancelConnect;
+    this.cancelConnect = null;
+    if (cancel) cancel(msg);
+    const socket = this.sock;
+    this.sock = null;
+    this.failAll(msg);
+    try { socket && socket.destroy(); } catch {}
+  }
+  cancelOwner(owner, msg) {
+    const owned = [...this.calls].filter(call => call.owner === owner);
+    if (!owned.length) return false;
+    for (const call of owned) {
+      call.cancelled = true;
+      call.cancelMessage = msg;
+    }
+    // An unsent call is stopped by the post-connect cancellation check. Once a
+    // request is on the pipe, disconnect is the daemon's cancellation boundary.
+    if (owned.some(call => call.sent)) this.disconnect(msg);
+    return true;
+  }
   async request(method, params) {
-    await this.ensure();
-    return new Promise((resolve, reject) => {
-      if (!this.sock || !this.sock.writable || this.sock.destroyed) { reject(new Error("daemon unavailable")); return; }
-      const id = this.nextId++;
-      // Action budget: 30s max per desktop request (matches daemon TIMEOUT_MS).
-      const timer = setTimeout(() => { this.pending.delete(id); reject(new Error("request timed out: " + method + " (30s action budget)")); }, 30000);
-      this.pending.set(id, { resolve, reject, timer });
-      this.sock.write(JSON.stringify({ id, method, params }) + "\n", (e) => { if (e) { clearTimeout(timer); this.pending.delete(id); reject(e); } });
-    });
+    const call = { owner: currentCell()?.id ?? null, sent: false, cancelled: false, cancelMessage: null };
+    this.calls.add(call);
+    try {
+      await this.ensure();
+      if (call.cancelled) throw new Error(call.cancelMessage || "desktop request cancelled");
+      const socket = this.sock;
+      if (!socket || !socket.writable || socket.destroyed) throw new Error("daemon unavailable");
+      call.sent = true;
+      return await new Promise((resolve, reject) => {
+        const id = this.nextId++;
+        // Action budget: 30s max per desktop request (matches daemon TIMEOUT_MS).
+        const timer = setTimeout(() => {
+          this.pending.delete(id);
+          const message = "request timed out: " + method + " (30s action budget)";
+          reject(new Error(message));
+          // Closing the pipe tells the daemon to revoke this client's pending
+          // approval or abort its in-flight native action. A timed-out call must
+          // never execute later.
+          this.disconnect(message);
+        }, 30000);
+        this.pending.set(id, { resolve, reject, timer, socket });
+        socket.write(JSON.stringify({ id, method, params, clientGroup: CLIENT_GROUP }) + "\n", (e) => {
+          if (!e) return;
+          clearTimeout(timer);
+          this.pending.delete(id);
+          reject(e);
+        });
+      });
+    } finally {
+      this.calls.delete(call);
+    }
   }
   async close() {
     const socket = this.sock;
     if (socket && socket.writable && !socket.destroyed) {
       try { await this.request("close", {}); } catch {}
     }
-    this.failAll("computer-use client closed");
+    this.disconnect("computer-use client closed");
     try { socket && socket.end(); } catch {}
   }
 }
 const daemon = new DaemonClient();
+const replDaemon = new DaemonClient();
+let closing = false;
+
+function daemonForCall() {
+  return currentCell()?.daemonClient || daemon;
+}
+
+async function closeDaemonClients() {
+  closing = true;
+  await Promise.allSettled([daemon.close(), replDaemon.close()]);
+}
 
 // Apple Voice Control–style number grid (screenshot/window pixel space = click x,y).
 // - Cells are SQUARES (not viewport-aspect rectangles).
@@ -241,20 +352,20 @@ function viewportFromState(state) {
 
 // thin sky-like wrapper; sky.* forwards to the daemon
 const sky = {
-  list_apps: () => daemon.request("list_apps", {}),
-  list_windows: () => daemon.request("list_windows", {}),
-  get_window: (i) => daemon.request("get_window", i),
-  launch_app: (i) => daemon.request("launch_app", i),
-  get_window_state: (i) => daemon.request("get_window_state", i),
-  click: (i) => daemon.request("click", i),
-  press_key: (i) => daemon.request("press_key", i),
-  type_text: (i) => daemon.request("type_text", i),
-  scroll: (i) => daemon.request("scroll", i),
-  set_value: (i) => daemon.request("set_value", i),
-  drag: (i) => daemon.request("drag", i),
-  perform_secondary_action: (i) => daemon.request("perform_secondary_action", i),
-  activate_window: (i) => daemon.request("activate_window", i),
-  close: async () => { await daemon.close(); return { ok: true }; },
+  list_apps: () => daemonForCall().request("list_apps", {}),
+  list_windows: () => daemonForCall().request("list_windows", {}),
+  get_window: (i) => daemonForCall().request("get_window", i),
+  launch_app: (i) => daemonForCall().request("launch_app", i),
+  get_window_state: (i) => daemonForCall().request("get_window_state", i),
+  click: (i) => daemonForCall().request("click", i),
+  press_key: (i) => daemonForCall().request("press_key", i),
+  type_text: (i) => daemonForCall().request("type_text", i),
+  scroll: (i) => daemonForCall().request("scroll", i),
+  set_value: (i) => daemonForCall().request("set_value", i),
+  drag: (i) => daemonForCall().request("drag", i),
+  perform_secondary_action: (i) => daemonForCall().request("perform_secondary_action", i),
+  activate_window: (i) => daemonForCall().request("activate_window", i),
+  close: async () => { await closeDaemonClients(); return { ok: true }; },
   // Coordinate helpers
   viewport: viewportFromState,
   grid: buildGrid,
@@ -267,7 +378,7 @@ const sky = {
   grid_view: async (input = {}) => {
     const window = input.window;
     const path = Array.isArray(input.path) ? input.path.map(String) : [];
-    return daemon.request("grid_view", { window, path });
+    return daemonForCall().request("grid_view", { window, path });
   },
   /**
    * Drill into a cell: appends id to path and returns a NEW grid_view (single cropped annotated image).
@@ -278,13 +389,13 @@ const sky = {
     if (!window) throw new Error("grid_refine requires { window, grid, cell }");
     cellById(grid, cellId); // validate
     const path = [...(grid.path || []), String(cellId)];
-    return daemon.request("grid_view", { window, path });
+    return daemonForCall().request("grid_view", { window, path });
   },
   /** Explicit click at cell center — only when ready (select ≠ click). */
   click_cell: async (input) => {
     const { window, grid, cell: cellId, mouse_button, click_count, screenshotId } = input || {};
     const cell = cellById(grid, cellId);
-    return daemon.request("click", {
+    return daemonForCall().request("click", {
       window,
       x: cell.cx,
       y: cell.cy,
@@ -297,16 +408,12 @@ const sky = {
 
 // ---- persistent JS REPL (independent `js` tool) ----
 let replSession = { out: [], images: [] };
+let jsQueue = Promise.resolve();
 const cellStorage = new AsyncLocalStorage();
 // Default 30s JS cell budget (override with FASTCUA_JS_TIMEOUT_MS). Long strokes = multiple cells.
 const JS_TIMEOUT_MS = Number(process.env.FASTCUA_JS_TIMEOUT_MS) > 0 ? Number(process.env.FASTCUA_JS_TIMEOUT_MS) : 30000;
 let nextCellId = 1;
 function currentCell() { return cellStorage.getStore(); }
-function assertActiveCell() {
-  const cell = currentCell();
-  if (cell && !cell.active) throw new Error("js cell is no longer active");
-  return cell;
-}
 function trackedSetTimeout(callback, delay, ...args) {
   const cell = currentCell();
   const handle = setTimeout(() => {
@@ -332,41 +439,69 @@ function trackedClearInterval(handle) {
   if (cell) cell.intervals.delete(handle);
   clearInterval(handle);
 }
-function deactivateCell(cell) {
+function deactivateCell(cell, reason = "js cell is no longer active") {
+  if (!cell.active) return;
   cell.active = false;
   for (const handle of cell.timeouts) clearTimeout(handle);
   for (const handle of cell.intervals) clearInterval(handle);
   cell.timeouts.clear();
   cell.intervals.clear();
+  cell.daemonClient.cancelOwner(cell.id, reason);
+}
+function inactiveCellPromise() {
+  // Keep detached async callbacks suspended. Rejecting here can create an
+  // unhandled outer callback promise even when the inner sky promise is caught.
+  return new Promise(() => {});
 }
 const fmtRepl = (a) => (a === null ? "null" : a === undefined ? "undefined" : typeof a === "string" ? a : (() => { try { return JSON.stringify(a, null, 2); } catch { return String(a); } })());
 const skyProxy = new Proxy(sky, {
   get(target, prop, receiver) {
     const v = Reflect.get(target, prop, receiver);
     if (typeof v !== "function") return v;
-    return async (input) => {
-      const cell = assertActiveCell();
-      const r = await Reflect.apply(v, target, [input]);
-      if (prop === "close" && cell) {
-        cell.closeRequested = true;
-        deactivateCell(cell);
-        return r;
+    return (input) => {
+      const cell = currentCell();
+      if (cell && !cell.active) {
+        return inactiveCellPromise();
       }
-      if (cell && !cell.active) throw new Error("js cell is no longer active");
-      // Emit images: grid_view = single annotated frame only (save tokens).
-      // get_window_state still emits screenshots as before.
-      if ((prop === "get_window_state" || prop === "grid_view" || prop === "grid_refine") && r && Array.isArray(r.screenshots)) {
-        // Prefer annotated grid image only when present.
-        const shots = prop === "grid_view" || prop === "grid_refine"
-          ? r.screenshots.filter((s) => s.annotated || s.id === "grid-0").slice(0, 1)
-          : r.screenshots;
-        const use = shots.length ? shots : r.screenshots.slice(0, 1);
-        for (const s of use) {
-          const m = /^data:([^;]+);base64,(.*)$/s.exec(s.url || "");
-          if (m) replSession.images.push({ data: m[2], mimeType: m[1] });
+      const operation = (async () => {
+        let r;
+        try {
+          r = await Reflect.apply(v, target, [input]);
+        } catch (error) {
+          if (cell && !cell.active) return await inactiveCellPromise();
+          throw error;
         }
+        if (prop === "close" && cell) {
+          cell.closeRequested = true;
+          deactivateCell(cell, "js cell requested close");
+          return r;
+        }
+        if (cell && !cell.active) return await inactiveCellPromise();
+        // Emit images: grid_view = single annotated frame only (save tokens).
+        // get_window_state still emits screenshots as before.
+        if ((prop === "get_window_state" || prop === "grid_view" || prop === "grid_refine") && r && Array.isArray(r.screenshots)) {
+          // Prefer annotated grid image only when present.
+          const shots = prop === "grid_view" || prop === "grid_refine"
+            ? r.screenshots.filter((s) => s.annotated || s.id === "grid-0").slice(0, 1)
+            : r.screenshots;
+          const use = shots.length ? shots : r.screenshots.slice(0, 1);
+          for (const s of use) {
+            const m = /^data:([^;]+);base64,(.*)$/s.exec(s.url || "");
+            if (m) replSession.images.push({ data: m[2], mimeType: m[1] });
+          }
+        }
+        return r;
+      })();
+      if (cell) {
+        cell.operations.add(operation);
+        // Register both branches immediately so ignored/detached calls cannot
+        // become unhandled rejections when the cell is cancelled.
+        operation.then(
+          () => cell.operations.delete(operation),
+          () => cell.operations.delete(operation),
+        );
       }
-      return r;
+      return operation;
     };
   },
 });
@@ -393,7 +528,7 @@ const replSandbox = {
 const replContext = vm.createContext(replSandbox);
 async function runJs(code) {
   replSession.out = []; replSession.images = [];
-  const cell = { id: nextCellId++, active: true, closeRequested: false, timeouts: new Set(), intervals: new Set() };
+  const cell = { id: nextCellId++, active: true, closeRequested: false, timeouts: new Set(), intervals: new Set(), operations: new Set(), daemonClient: replDaemon };
   const wrapped = `(async () => {\n${code}\n})()`;
   let p;
   try { p = cellStorage.run(cell, () => new vm.Script(wrapped, { filename: "repl-cell.js" }).runInContext(replContext)); }
@@ -402,14 +537,18 @@ async function runJs(code) {
   try {
     await Promise.race([p, new Promise((_, rej) => { timeoutHandle = setTimeout(() => rej(new Error(`js cell timed out after ${JS_TIMEOUT_MS}ms`)), JS_TIMEOUT_MS); })]);
   } catch (e) {
-    deactivateCell(cell);
+    deactivateCell(cell, /js cell timed out/i.test(e.message || "")
+      ? "js cell timed out; cancel pending desktop work"
+      : "js cell failed; cancel pending desktop work");
     Promise.resolve(p).catch(() => {});
     const text = (replSession.out.length ? replSession.out.join("\n") + "\n" : "") + (e.stack || e.message);
     return { content: [{ type: "text", text }], isError: true, closeRequested: cell.closeRequested };
   } finally {
     if (timeoutHandle) clearTimeout(timeoutHandle);
   }
-  deactivateCell(cell);
+  // Any operation still outstanding here was detached from the cell's returned
+  // promise. Cancel it rather than allowing an unobserved late desktop effect.
+  deactivateCell(cell, "js cell completed; cancel detached desktop work");
   const content = [];
   if (replSession.out.length) content.push({ type: "text", text: replSession.out.join("\n") });
   for (const img of replSession.images) content.push({ type: "image", data: img.data, mimeType: img.mimeType });
@@ -417,17 +556,26 @@ async function runJs(code) {
   return { content, isError: false, closeRequested: cell.closeRequested };
 }
 
+function queueJs(code) {
+  const run = jsQueue.then(() => {
+    if (closing) throw new Error("computer-use client is closing");
+    return runJs(code);
+  });
+  jsQueue = run.catch(() => {});
+  return run;
+}
+
 // ---- tool definitions (window2 + close + js) ----
 const W = { type: "object", properties: { app: { type: "string" }, id: { type: "number" } }, required: ["app", "id"] };
 const TOOLS = [
   { name: "list_apps", desc: "List running apps that currently have visible targetable windows. Each app has windows[]. Choose the task-specific app+window before acting.", inputSchema: { type: "object", properties: {} } },
   { name: "list_windows", desc: "List open windows that can be targeted by the window2 API.", inputSchema: { type: "object", properties: {} } },
-  { name: "get_window", desc: "Rehydrate a currently open window by id (after losing a window binding).", inputSchema: { type: "object", properties: { app: { type: "string" }, id: { type: "number" } }, required: ["id"] } },
+  { name: "get_window", desc: "Rehydrate a window by id. If that id is stale and app identifies exactly one current window, returns the unique replacement; otherwise fails and requires list_windows.", inputSchema: { type: "object", properties: { app: { type: "string" }, id: { type: "number" } }, required: ["id"] } },
   { name: "launch_app", desc: "Launch an app by id from list_apps, an explicit .exe path, the `paint` alias, or a shell:AppsFolder\\<AUMID> packaged-app target. Its window appears in list_apps() afterwards.", inputSchema: { type: "object", properties: { app: { type: "string", description: "app id, .exe process path, `paint`, or shell:AppsFolder\\<AUMID>" } }, required: ["app"] } },
   { name: "get_window_state", desc: "Capture accessibility tree and/or screenshot. Returns viewport, focused_value, and uia {quality,prefer_vision,reason}. If uia.prefer_vision, call sky.grid_view immediately — do not use element_index. 30s action budget.", inputSchema: { type: "object", properties: { window: W, include_screenshot: { type: "boolean", default: true }, include_text: { type: "boolean", default: true } }, required: ["window"] } },
   { name: "click", desc: "Click element_index from latest tree OR screenshot pixel x,y (same units as viewport/screenshot width×height; or both in 0..1 as fractions). Out-of-bounds returns an error with viewport size.", inputSchema: { type: "object", properties: { window: W, element_index: { type: "number" }, x: { type: "number" }, y: { type: "number" }, mouse_button: { type: "string", enum: ["left", "right", "middle", "l", "r", "m"] }, click_count: { type: "number" }, screenshotId: { type: "string" } }, required: ["window"] } },
   { name: "press_key", desc: "Press a key or +-separated chord (e.g. 'Return', 'Control_L+a', 'Ctrl+s', 'space').", inputSchema: { type: "object", properties: { window: W, key: { type: "string" } }, required: ["window", "key"] } },
-  { name: "type_text", desc: "Write into the focused control AFTER the model has read focused_value via get_window_state and decided to edit. replace:true (default) clears the field then types; replace:false appends. Host does not decide whether to edit.", inputSchema: { type: "object", properties: { window: W, text: { type: "string" }, replace: { type: "boolean", default: true, description: "When true (default), clear focused field then type. When false, append." } }, required: ["window", "text"] } },
+  { name: "type_text", desc: "Type into the focused control. replace:false (default) types at the caret. replace:true is scoped to a focused writable UIA value, fails safely instead of sending global Ctrl+A, and does not guarantee the resulting caret position. Read focused_value before replacing.", inputSchema: { type: "object", properties: { window: W, text: { type: "string" }, replace: { type: "boolean", default: false, description: "When false (default), type at the caret. When true, replace only a focused writable UIA value; resulting caret position is unspecified." } }, required: ["window", "text"] } },
   { name: "scroll", desc: "Scroll by a delta from a coordinate in the window screenshot. scrollY: negative=up positive=down. scrollX: negative=left positive=right.", inputSchema: { type: "object", properties: { window: W, x: { type: "number" }, y: { type: "number" }, scrollX: { type: "number" }, scrollY: { type: "number" }, screenshotId: { type: "string" } }, required: ["window", "x", "y", "scrollX", "scrollY"] } },
   { name: "drag", desc: "Drag from one window coordinate to another.", inputSchema: { type: "object", properties: { window: W, from_x: { type: "number" }, from_y: { type: "number" }, to_x: { type: "number" }, to_y: { type: "number" }, screenshotId: { type: "string" } }, required: ["window", "from_x", "from_y", "to_x", "to_y"] } },
   { name: "perform_secondary_action", desc: "Raise the target window. This release supports only action='Raise' on the root element_index 0.", inputSchema: { type: "object", properties: { window: W, element_index: { type: "number", enum: [0] }, action: { type: "string", enum: ["Raise"] } }, required: ["window", "element_index", "action"] } },
@@ -535,7 +683,11 @@ process.stdin.on("data", (chunk) => {
     if (line) handle(line);
   }
 });
-process.stdin.on("end", () => { daemon.failAll("MCP stdin closed"); try { daemon.sock && daemon.sock.end(); } catch {} process.exit(0); });
+process.stdin.on("end", () => {
+  daemon.disconnect("MCP stdin closed");
+  replDaemon.disconnect("MCP stdin closed");
+  process.exit(0);
+});
 
 async function handle(line) {
   let req;
@@ -553,9 +705,10 @@ async function handle(line) {
     } else if (method === "tools/call") {
       const name = params.name;
       const args = params.arguments || {};
+      if (closing) throw new Error("computer-use client is closing");
       log("call", name, JSON.stringify(args).slice(0, 200));
       if (name === "js") {
-        result = await runJs(args.code || "");
+        result = await queueJs(args.code || "");
         closeAfterResponse = result.closeRequested;
         delete result.closeRequested;
       } else {

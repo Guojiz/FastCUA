@@ -7,7 +7,7 @@ Use this as the supported `sky` / MCP window2 surface for FastCUA.
 Tools are available both as individual MCP tools and on `sky` inside the MCP `js` REPL.
 
 ```ts
-// Inside MCP js: sky is already bound (no @oai/sky import).
+// Inside MCP js: sky is already bound by FastCUA (no client-side import).
 
 interface Window2ComputerUseClient {
   list_windows(): Promise<Array<Window>>;
@@ -63,8 +63,14 @@ type GetWindowStateInput = {
 };
 
 type WindowState = {
-  accessibility: AccessibilityState | null;
+  accessibility: AccessibilityState;
+  cacheDiagnostics: {
+    accessibilityRevision: number;
+    accessibilitySnapshotCount: number;
+    captureCachedSessionCount: number;
+  };
   screenshots: Array<Screenshot>;
+  uia: UiaState;
   window: Window;
   /** Present when host supports it: explicit pixel coordinate space for click/drag/scroll. */
   viewport?: {
@@ -74,6 +80,8 @@ type WindowState = {
     originY?: number;
     screenLeft?: number;
     screenTop?: number;
+    screenRight?: number;
+    screenBottom?: number;
     coordinate_space: "window_screenshot_pixels";
     origin: "top_left";
     click_xy?: string;
@@ -107,10 +115,11 @@ type TypeTextInput = {
   text: string;
   window: Window;
   /**
-   * When true (default): clear focused field (select-all + delete), then type.
-   * When false: append without clearing.
-   * Call only after the model has read accessibility.focused_value and decided to edit.
-   * Host does not skip based on current value — that decision is the model's.
+   * When false (default): type at the current caret/selection.
+   * When true: replace only a focused writable UIA ValuePattern. It fails
+   * safely instead of sending Ctrl+A to a document, grid, or application.
+   * Read accessibility.focused_value before requesting replacement.
+   * The resulting caret position is unspecified.
    */
   replace?: boolean;
 };
@@ -156,10 +165,21 @@ type AccessibilityState = {
   document_text?: string;
   focused_element?: string;
   /** UIA ValuePattern text of the focused control — use for form field contents */
-  focused_value?: string;
+  focused_value?: string | null;
   selected_elements?: Array<string>;
   selected_text?: string;
-  tree: string;
+  /** Omitted when include_text is false. */
+  tree?: string;
+};
+
+type UiaState = {
+  quality: "good" | "weak" | "broken" | "unknown";
+  prefer_vision: boolean;
+  reason: string;
+  actionable_count?: number;
+  no_hit_count?: number;
+  element_count?: number;
+  howto?: string;
 };
 
 type Screenshot = {
@@ -180,4 +200,5 @@ type MouseButton = "left" | "right" | "middle" | "l" | "r" | "m";
 1. Model focuses control and calls `get_window_state` with `include_text: true`.
 2. Model reads `accessibility.focused_value`.
 3. If already correct → no `type_text`.
-4. If changing → `type_text({ text, replace: true })` once.
+4. If replacing that focused value → `type_text({ text, replace: true })` once.
+5. If typing at a caret or explicit selection → `type_text({ text })`.

@@ -89,7 +89,8 @@ fn handle_request(request: &Request) -> Value {
     if let Some(app) = approval_app.as_deref() {
         let approved = request
             .meta
-            .get("x-oai-cua-approved-app")
+            .get("x-fastcua-approved-app")
+            .or_else(|| request.meta.get("x-oai-cua-approved-app"))
             .and_then(Value::as_str);
         if approved != Some(app) {
             return json!({
@@ -214,9 +215,12 @@ fn request_app(request: &Request) -> Result<Option<String>, String> {
 fn interrupt_path(meta: &Value) -> Option<PathBuf> {
     let session = meta.get("session_id")?.as_str()?;
     let turn = meta.get("turn_id")?.as_str()?;
-    let codex_home = env::var_os("CODEX_HOME")?;
+    // Prefer FastCUA home; accept CODEX_HOME only as legacy compat for tests / old daemons.
+    let home = env::var_os("FASTCUA_HOME")
+        .or_else(|| env::var_os("FASTCUA_CACHE_DIR"))
+        .or_else(|| env::var_os("CODEX_HOME"))?;
     Some(
-        PathBuf::from(codex_home)
+        PathBuf::from(home)
             .join("cache")
             .join("computer-use")
             .join("interrupts")
