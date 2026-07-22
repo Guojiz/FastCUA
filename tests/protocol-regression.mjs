@@ -174,7 +174,8 @@ try {
   assert.ok(editIndexes.length >= 2, `expected writable and read-only Edit controls\n${tree}`);
   const textIndex = editIndexes[0];
   const buttonIndex = elementIndex(tree, "Increment Button");
-  const readOnlyIndex = editIndexes.at(-1);
+  // Fixture Edit order: [0] writable, [1] read-only, [2] password (issue-3 probe).
+  const readOnlyIndex = editIndexes[1];
   await request("click", { window, element_index: textIndex, mouse_button: "left", click_count: 1 });
   state = await request("get_window_state", { window, include_screenshot: false, include_text: true });
   assert.equal(

@@ -1,0 +1,18 @@
+[package]
+name = "record-feasibility"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Stage-1 diagnostic for FastCUA issue #3: physical input + UIA focus capture feasibility"
+
+[[bin]]
+name = "record-feasibility"
+path = "src/main.rs"
+
+[dependencies]
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "z"
+strip = true

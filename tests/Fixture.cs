@@ -12,6 +12,7 @@ internal static class FixtureProgram
     private const uint WS_TABSTOP = 0x00010000;
     private const uint ES_AUTOHSCROLL = 0x0080;
     private const uint ES_READONLY = 0x0800;
+    private const uint ES_PASSWORD = 0x0020;
     private const uint BS_PUSHBUTTON = 0x00000000;
     private const uint LBS_NOTIFY = 0x0001;
     private const uint TBS_AUTOTICKS = 0x0001;
@@ -79,6 +80,9 @@ internal static class FixtureProgram
         CreateWindowEx(WS_EX_CLIENTEDGE, "EDIT", "read-only-value",
             WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL | ES_READONLY,
             350, 240, 285, 30, window, new IntPtr(1005), instance, IntPtr.Zero);
+        CreateWindowEx(WS_EX_CLIENTEDGE, "EDIT", "",
+            WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_PASSWORD,
+            350, 290, 285, 30, window, new IntPtr(1006), instance, IntPtr.Zero);
 
         ShowWindow(window, SW_SHOW);
         UpdateWindow(window);

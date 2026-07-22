@@ -19,3 +19,6 @@ tests/*.exe
 # Release artifacts generated locally (CI / gh release upload)
 /cua-native-host.exe
 /SHA256SUMS.txt
+
+# Feasibility tool build output
+tools/record-feasibility/target/
