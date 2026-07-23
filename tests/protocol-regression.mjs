@@ -193,6 +193,18 @@ try {
   assert.match(state.accessibility.tree, /Text: initial-value/);
   passed("focused_value is observational", state.accessibility.focused_value);
 
+  // Per-request UIA probe budget (host contract): the meta hint is echoed
+  // back under uia.probe_ms so callers can confirm the budget took effect.
+  // (The daemon-side params.uia_probe_ms -> meta passthrough + 30s clamp is
+  // exercised end-to-end by tests/office-demo-e2e.mjs long-probe replays.)
+  {
+    const probeMeta = { session_id: "protocol-regression", turn_id: "1", "x-fastcua-uia-probe-ms": 7_000 };
+    if (window?.app) probeMeta["x-fastcua-approved-app"] = window.app;
+    const probed = checked(await rawRequest("get_window_state", { window, include_screenshot: false, include_text: true }, probeMeta), "get_window_state");
+    assert.equal(probed.uia?.probe_ms, 7_000, `uia.probe_ms echo: ${JSON.stringify(probed.uia)}`);
+    passed("uia probe budget echo", "meta 7000 -> uia.probe_ms 7000");
+  }
+
   let setValueWorked = true;
   try {
     await request("set_value", { window, element_index: textIndex, value: "set-value-ok" });

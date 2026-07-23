@@ -642,7 +642,10 @@ async function handleClientReq(c, req) {
   const meta = { session_id: c.sessionId, turn_id: String(c.turnId) };
   const app = params?.window?.app || params?.app;
   if (app && isApproved(app)) meta[APPROVED_KEY] = app;
-  const uiaProbe = maybeUiaProfileProbe(method, params, app);
+  const clientProbe = Number(params?.uia_probe_ms);
+  const uiaProbe = Number.isFinite(clientProbe) && clientProbe > 0
+    ? Math.min(clientProbe, 30_000) // explicit client budget wins over profile short-probe
+    : maybeUiaProfileProbe(method, params, app);
   if (uiaProbe) meta["x-fastcua-uia-probe-ms"] = uiaProbe;
   const t0 = Date.now();
   const summary = actionSummary(method, params);

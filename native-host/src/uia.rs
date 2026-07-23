@@ -523,40 +523,52 @@ unsafe fn snapshot_inner(hwnd: HWND, title: &str, app_name: &str) -> Result<Snap
         }
         return Err("GetWindowRect before UIA ElementFromPoint failed".into());
     }
-    let point = POINT {
-        x: bounds.left + (bounds.right - bounds.left) / 2,
-        y: bounds.top + (bounds.bottom - bounds.top) / 2,
-    };
+    // Root at the known window handle first (slot 6 = ElementFromHandle):
+    // strictly more reliable than ElementFromPoint at the window center,
+    // which can land on an overlapping window, a floating Office task pane,
+    // or a windowless layer — Microsoft Office workbook windows degenerate to
+    // a fragment tree when rooted by center-point. Fall back to the legacy
+    // point+walk-up path only if FromHandle yields nothing.
     let mut root = ptr::null_mut();
-    let element_from_point: unsafe extern "system" fn(ComPtr, POINT, *mut ComPtr) -> HRESULT =
-        unsafe { method(automation, 7) };
-    let root_result = unsafe { element_from_point(automation, point, &mut root) };
-    if root_result < 0 || root.is_null() {
-        if !walker.is_null() {
-            unsafe { release(walker) };
-        }
-        unsafe { release(automation) };
-        if should_uninitialize {
-            unsafe { CoUninitialize() };
-        }
-        return Err(format!(
-            "UIA ElementFromPoint failed: 0x{:08x}",
-            root_result as u32
-        ));
-    }
-    if walker_result >= 0 && !walker.is_null() {
-        let get_parent: unsafe extern "system" fn(ComPtr, ComPtr, *mut ComPtr) -> HRESULT =
-            unsafe { method(walker, 3) };
-        for _ in 0..20 {
-            if unsafe { element_hwnd(root) } == Some(hwnd) {
-                break;
+    let element_from_handle: unsafe extern "system" fn(ComPtr, HWND, *mut ComPtr) -> HRESULT =
+        unsafe { method(automation, 6) };
+    let handle_result = unsafe { element_from_handle(automation, hwnd, &mut root) };
+    if handle_result < 0 || root.is_null() {
+        root = ptr::null_mut();
+        let point = POINT {
+            x: bounds.left + (bounds.right - bounds.left) / 2,
+            y: bounds.top + (bounds.bottom - bounds.top) / 2,
+        };
+        let element_from_point: unsafe extern "system" fn(ComPtr, POINT, *mut ComPtr) -> HRESULT =
+            unsafe { method(automation, 7) };
+        let root_result = unsafe { element_from_point(automation, point, &mut root) };
+        if root_result < 0 || root.is_null() {
+            if !walker.is_null() {
+                unsafe { release(walker) };
             }
-            let mut parent = ptr::null_mut();
-            if unsafe { get_parent(walker, root, &mut parent) } < 0 || parent.is_null() {
-                break;
+            unsafe { release(automation) };
+            if should_uninitialize {
+                unsafe { CoUninitialize() };
             }
-            unsafe { release(root) };
-            root = parent;
+            return Err(format!(
+                "UIA ElementFromHandle+ElementFromPoint failed: 0x{:08x} / 0x{:08x}",
+                handle_result as u32, root_result as u32
+            ));
+        }
+        if walker_result >= 0 && !walker.is_null() {
+            let get_parent: unsafe extern "system" fn(ComPtr, ComPtr, *mut ComPtr) -> HRESULT =
+                unsafe { method(walker, 3) };
+            for _ in 0..20 {
+                if unsafe { element_hwnd(root) } == Some(hwnd) {
+                    break;
+                }
+                let mut parent = ptr::null_mut();
+                if unsafe { get_parent(walker, root, &mut parent) } < 0 || parent.is_null() {
+                    break;
+                }
+                unsafe { release(root) };
+                root = parent;
+            }
         }
     }
 

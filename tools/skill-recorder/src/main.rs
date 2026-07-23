@@ -836,9 +836,53 @@ fn value_class(control_type: i32, is_password: bool) -> &'static str {
     }
     match control_type {
         50004 | 50030 | 50003 | 50015 | 50016 => "text", // Edit, Document, ComboBox, Slider, Spinner
+        50029 => "text", // DataItem — e.g. an Excel cell; its ValuePattern carries the cell content
         50000 | 50011 | 50002 | 50013 | 50019 | 50007 | 50024 | 50005 => "action",
         _ => "none",
     }
+}
+
+/// Read an element's value through UIA ValuePattern (bounded string). This is
+/// the ONLY value channel for virtual elements (hwnd == 0) like Excel cells;
+/// skipped for Document controls whose values can be arbitrarily large.
+unsafe fn element_value_pattern(element: ComPtr, control_type: i32) -> Option<String> {
+    if element.is_null() || control_type == 50030 {
+        return None;
+    }
+    let get_pattern: unsafe extern "system" fn(ComPtr, i32, *mut ComPtr) -> i32 =
+        unsafe { mem::transmute(com_method(element, 16)) };
+    let mut pattern = ptr::null_mut();
+    if unsafe { get_pattern(element, UIA_VALUE_PATTERN_ID, &mut pattern) } < 0 || pattern.is_null()
+    {
+        return None;
+    }
+    let qi: unsafe extern "system" fn(ComPtr, *const Guid, *mut ComPtr) -> i32 =
+        unsafe { mem::transmute(com_method(pattern, 0)) };
+    let mut value_pattern = ptr::null_mut();
+    let ok = unsafe {
+        qi(
+            pattern,
+            &IID_IUIAUTOMATION_VALUE_PATTERN,
+            &mut value_pattern,
+        )
+    } >= 0
+        && !value_pattern.is_null();
+    unsafe { release(pattern) };
+    if !ok {
+        return None;
+    }
+    let get_value: unsafe extern "system" fn(ComPtr, *mut *mut u16) -> i32 =
+        unsafe { mem::transmute(com_method(value_pattern, 4)) };
+    let mut bstr = ptr::null_mut();
+    let hr = unsafe { get_value(value_pattern, &mut bstr) };
+    unsafe { release(value_pattern) };
+    if hr < 0 || bstr.is_null() {
+        return None;
+    }
+    let len = (unsafe { SysStringLen(bstr) } as usize).min(1024);
+    let s = String::from_utf16_lossy(unsafe { std::slice::from_raw_parts(bstr, len) });
+    unsafe { SysFreeString(bstr) };
+    Some(s)
 }
 
 /// Bounded cross-process value read for text-class controls (same defense as
@@ -946,7 +990,7 @@ unsafe fn element_to_anchor(automation: ComPtr, element: ComPtr) -> UiaFocus {
     let is_password = is_password_uia.unwrap_or(false) || style_password;
     let class = value_class(control_type, is_password);
     let value = if class == "text" {
-        control_value(hwnd)
+        control_value(hwnd).or_else(|| unsafe { element_value_pattern(element, control_type) })
     } else {
         None
     };
@@ -963,66 +1007,164 @@ unsafe fn element_to_anchor(automation: ComPtr, element: ComPtr) -> UiaFocus {
         error: None,
     }
 }
-
-/// Snapshot the UIA focused element. Bounded: worker thread + timeout,
-/// mirroring the native-host defense against hung providers.
-fn uia_focus_snapshot() -> Option<UiaFocus> {
-    let (tx, rx) = mpsc::channel();
+/// Snapshot the focused element and re-read the values of any PENDING
+/// elements (recently-departed text controls). Commit-on-blur controls —
+/// Excel cells above all — only settle their value AFTER focus leaves, and
+/// the cell element persists, so its ValuePattern becomes readable a tick
+/// later. Pending pointers stay owned by the caller (the worker only reads,
+/// never releases); on timeout the caller leaks them rather than risk a
+/// use-after-free from a still-hung worker. All pointers travel between MTA
+/// threads of one apartment, which is legal COM for UIA proxies.
+fn uia_focus_snapshot(
+    pending: &[(ComPtr, i32, i32, i32, String)],
+) -> Option<(Option<UiaFocus>, ComPtr, Vec<Option<String>>)> {
+    let (tx, rx) = mpsc::channel::<(Option<UiaFocus>, usize, Vec<Option<String>>)>();
+    let pending_flat: Vec<(usize, i32, i32, i32, String)> = pending
+        .iter()
+        .map(|(p, x, y, ct, aid)| (*p as usize, *x, *y, *ct, aid.clone()))
+        .collect();
     thread::Builder::new()
         .name("rec-uia".into())
         .spawn(move || {
-            let _ = tx.send(unsafe { uia_focus_inner() });
+            let (snap, elem, values) = unsafe { uia_focus_inner(&pending_flat) };
+            let _ = tx.send((snap, elem as usize, values));
         })
         .ok()?;
-    rx.recv_timeout(Duration::from_millis(800)).ok()?
+    let (snap, elem, values) = rx.recv_timeout(Duration::from_millis(800)).ok()?;
+    Some((snap, elem as ComPtr, values))
 }
 
-unsafe fn uia_focus_inner() -> Option<UiaFocus> {
+unsafe fn uia_focus_inner(
+    pending: &[(usize, i32, i32, i32, String)],
+) -> (Option<UiaFocus>, ComPtr, Vec<Option<String>>) {
     let init = unsafe { CoInitializeEx(ptr::null_mut(), COINIT_MULTITHREADED) };
     let should_uninit = init == 0 || init == 1;
     if init < 0 && init != RPC_E_CHANGED_MODE {
-        return Some(UiaFocus {
-            error: Some(format!("CoInitializeEx 0x{:08x}", init as u32)),
-            ..Default::default()
-        });
+        return (
+            Some(UiaFocus {
+                error: Some(format!("CoInitializeEx 0x{:08x}", init as u32)),
+                ..Default::default()
+            }),
+            ptr::null_mut(),
+            pending.iter().map(|_| None).collect(),
+        );
     }
-    let result = (|| {
-        let mut automation = ptr::null_mut();
-        let created = unsafe {
-            CoCreateInstance(
-                &CLSID_CUI_AUTOMATION,
-                ptr::null_mut(),
-                CLSCTX_INPROC_SERVER,
-                &IID_IUI_AUTOMATION,
-                &mut automation,
-            )
-        };
-        if created < 0 || automation.is_null() {
-            return UiaFocus {
+    let mut automation = ptr::null_mut();
+    let created = unsafe {
+        CoCreateInstance(
+            &CLSID_CUI_AUTOMATION,
+            ptr::null_mut(),
+            CLSCTX_INPROC_SERVER,
+            &IID_IUI_AUTOMATION,
+            &mut automation,
+        )
+    };
+    let automation_ok = created >= 0 && !automation.is_null();
+    // Pending departed elements: values settle once the commit lands. Virtual
+    // elements (hwnd == 0, e.g. Excel cells) are re-located FRESH via
+    // ElementFromPoint at their last bounds — Office recycles element
+    // objects around an edit, so the stale pointer reads "" forever.
+    // The re-located element must keep the SAME identity (control-type +
+    // AutomationId): Excel's in-cell editor sits exactly over its cell, so
+    // the editor's point re-read lands on the cell and would otherwise
+    // duplicate the cell's value (or read a title-bar neighbour).
+    let pending_values: Vec<Option<String>> = if automation_ok {
+        pending
+            .iter()
+            .map(|(p, cx, cy, want_ct, want_aid)| {
+                let element = *p as ComPtr;
+                let hwnd = {
+                    let getter: unsafe extern "system" fn(ComPtr, *mut HWND) -> i32 =
+                        unsafe { mem::transmute(com_method(element, 36)) };
+                    let mut h: HWND = ptr::null_mut();
+                    if unsafe { getter(element, &mut h) } < 0 {
+                        ptr::null_mut()
+                    } else {
+                        h
+                    }
+                };
+                if !hwnd.is_null() {
+                    let ct = {
+                        let getter: unsafe extern "system" fn(ComPtr, *mut i32) -> i32 =
+                            unsafe { mem::transmute(com_method(element, 21)) };
+                        let mut v = 0;
+                        if unsafe { getter(element, &mut v) } < 0 {
+                            0
+                        } else {
+                            v
+                        }
+                    };
+                    control_value(hwnd).or_else(|| unsafe { element_value_pattern(element, ct) })
+                } else {
+                    let from_point: unsafe extern "system" fn(ComPtr, POINT, *mut ComPtr) -> i32 =
+                        unsafe { mem::transmute(com_method(automation, 7)) };
+                    let mut fresh = ptr::null_mut();
+                    let hr =
+                        unsafe { from_point(automation, POINT { x: *cx, y: *cy }, &mut fresh) };
+                    if hr < 0 || fresh.is_null() {
+                        None
+                    } else {
+                        let ct = {
+                            let getter: unsafe extern "system" fn(ComPtr, *mut i32) -> i32 =
+                                unsafe { mem::transmute(com_method(fresh, 21)) };
+                            let mut v = 0;
+                            if unsafe { getter(fresh, &mut v) } < 0 {
+                                0
+                            } else {
+                                v
+                            }
+                        };
+                        let aid = unsafe { element_bstr(fresh, 29) };
+                        if ct != *want_ct || aid != *want_aid {
+                            // Re-located to a different element (e.g. the cell
+                            // under the just-closed editor) — not ours.
+                            unsafe { release(fresh) };
+                            None
+                        } else {
+                            let v = unsafe { element_value_pattern(fresh, ct) };
+                            unsafe { release(fresh) };
+                            v
+                        }
+                    }
+                }
+            })
+            .collect()
+    } else {
+        pending.iter().map(|_| None).collect()
+    };
+    let (snapshot, new_element) = if !automation_ok {
+        (
+            Some(UiaFocus {
                 error: Some(format!("CoCreateInstance 0x{:08x}", created as u32)),
                 ..Default::default()
-            };
-        }
+            }),
+            ptr::null_mut(),
+        )
+    } else {
         let get_focused: unsafe extern "system" fn(ComPtr, *mut ComPtr) -> i32 =
             unsafe { mem::transmute(com_method(automation, 8)) };
         let mut focused = ptr::null_mut();
         let hr = unsafe { get_focused(automation, &mut focused) };
         if hr < 0 || focused.is_null() {
             unsafe { release(automation) };
-            return UiaFocus {
-                error: Some("no focused element".into()),
-                ..Default::default()
-            };
+            (
+                Some(UiaFocus {
+                    error: Some("no focused element".into()),
+                    ..Default::default()
+                }),
+                ptr::null_mut(),
+            )
+        } else {
+            let anchor = unsafe { element_to_anchor(automation, focused) };
+            // Ownership of `focused` transfers to the caller (do NOT release).
+            unsafe { release(automation) };
+            (Some(anchor), focused)
         }
-        let anchor = unsafe { element_to_anchor(automation, focused) };
-        unsafe { release(focused) };
-        unsafe { release(automation) };
-        anchor
-    })();
+    };
     if should_uninit {
         unsafe { CoUninitialize() };
     }
-    Some(result)
+    (snapshot, new_element, pending_values)
 }
 
 /// Point anchor for clicks: bounded ElementFromPoint at screen coords.
@@ -1455,7 +1597,13 @@ fn writer_main(rx: mpsc::Receiver<Record>, path: &Path) {
                             if password_window == 0 {
                                 password_window = hwnd;
                             }
-                        } else {
+                        } else if trigger != "departed" {
+                            // Key/click anchors track the CURRENT focus. A
+                            // "departed" record re-reads an element focus has
+                            // already LEFT (its value settles late); letting
+                            // it refresh last_focus mis-anchors the next keys
+                            // onto the previous control (Excel cells -> the
+                            // dead in-cell editor).
                             last_focus = Some((unix_ms, u.clone()));
                         }
                         let bounds = u
@@ -1767,11 +1915,134 @@ fn poller_main(
     let mut last_kf_action = Instant::now() - Duration::from_secs(3600);
     let mut keyframe_seq = 0u64;
     let mut last_focus_hwnd: HWND = ptr::null_mut();
+    // Previous tick's focused element (owned) + recently-departed text
+    // controls whose committed value we keep re-reading until it settles or
+    // the deadline passes. This is how Excel cell text is captured: the cell
+    // element persists after the in-cell editor closes, and its ValuePattern
+    // starts returning the committed content a tick later.
+    struct PendingValue {
+        element: ComPtr,
+        uia: UiaFocus,
+        deadline: Instant,
+    }
+    let mut previous: Option<(ComPtr, UiaFocus)> = None;
+    let mut pendings: Vec<PendingValue> = Vec::new();
     loop {
         let _ = wake_rx.recv_timeout(Duration::from_millis(poll_ms));
         while wake_rx.try_recv().is_ok() {}
         let secure = input_desktop_is_secure();
-        let snapshot = if secure { None } else { uia_focus_snapshot() };
+        let (snapshot, departed): (Option<UiaFocus>, Vec<UiaFocus>) = if secure {
+            (None, Vec::new())
+        } else {
+            let pending_ptrs: Vec<(ComPtr, i32, i32, i32, String)> = pendings
+                .iter()
+                .map(|p| {
+                    let (cx, cy) = p
+                        .uia
+                        .bounds
+                        .map(|r| ((r.left + r.right) / 2, (r.top + r.bottom) / 2))
+                        .unwrap_or((0, 0));
+                    (
+                        p.element,
+                        cx,
+                        cy,
+                        p.uia.control_type,
+                        p.uia.automation_id.clone(),
+                    )
+                })
+                .collect();
+            match uia_focus_snapshot(&pending_ptrs) {
+                Some((snap, new_element, values)) => {
+                    let now = Instant::now();
+                    let mut departed: Vec<UiaFocus> = Vec::new();
+                    let mut keep: Vec<PendingValue> = Vec::new();
+                    for (mut p, value) in pendings.into_iter().zip(values) {
+                        let settled = match (&value, &p.uia.value) {
+                            (Some(v), initial) => initial.as_ref() != Some(v),
+                            (None, _) => false,
+                        };
+                        if settled {
+                            p.uia.value = value;
+                            departed.push(p.uia);
+                            unsafe { release(p.element) };
+                        } else if now >= p.deadline {
+                            // Value never settled (dead editor, unchanged
+                            // empty cell) — emit whatever we last read so the
+                            // compiler sees a terminal snapshot.
+                            if let Some(v) = value.or(p.uia.value.clone()) {
+                                p.uia.value = Some(v);
+                                departed.push(p.uia);
+                            }
+                            unsafe { release(p.element) };
+                        } else {
+                            keep.push(p);
+                        }
+                    }
+                    pendings = keep;
+                    // Focus moved? The departed text control becomes pending
+                    // (its value settles on a later tick).
+                    let prev_identity = previous
+                        .as_ref()
+                        .map(|(_, u)| (u.control_type, u.automation_id.clone(), u.name.clone()));
+                    let new_identity = snap
+                        .as_ref()
+                        .filter(|s| s.error.is_none())
+                        .map(|s| (s.control_type, s.automation_id.clone(), s.name.clone()));
+                    let moved = prev_identity != new_identity;
+                    if moved {
+                        if let Some((prev_ptr, prev_uia)) = previous.take() {
+                            if prev_uia.value_class == "text" && !prev_uia.is_password {
+                                // Replace any older pending entry for the same
+                                // element identity (dedup).
+                                pendings.retain(|p| {
+                                    let same = p.uia.control_type == prev_uia.control_type
+                                        && p.uia.automation_id == prev_uia.automation_id
+                                        && p.uia.name == prev_uia.name;
+                                    if same {
+                                        unsafe { release(p.element) };
+                                    }
+                                    !same
+                                });
+                                if pendings.len() >= 4 {
+                                    let evicted = pendings.remove(0);
+                                    unsafe { release(evicted.element) };
+                                }
+                                pendings.push(PendingValue {
+                                    element: prev_ptr,
+                                    uia: prev_uia,
+                                    deadline: now + Duration::from_millis(2500),
+                                });
+                            } else {
+                                unsafe { release(prev_ptr) };
+                            }
+                        }
+                    } else if let Some((prev_ptr, _)) = previous.take() {
+                        // Same element still focused: keep the NEWER pointer,
+                        // release the older one.
+                        unsafe { release(prev_ptr) };
+                    }
+                    previous = match (new_element.is_null(), &snap) {
+                        (false, Some(u)) if u.error.is_none() => Some((new_element, u.clone())),
+                        _ => {
+                            if !new_element.is_null() {
+                                unsafe { release(new_element) };
+                            }
+                            None
+                        }
+                    };
+                    (snap, departed)
+                }
+                None => {
+                    // Timed out: the hung worker may still be reading the
+                    // pending pointers — leak them, never reuse.
+                    pendings = Vec::new();
+                    if let Some((p, _)) = previous.take() {
+                        unsafe { release(p) };
+                    }
+                    (None, Vec::new())
+                }
+            }
+        };
         let focus_hwnd: HWND = snapshot
             .as_ref()
             .filter(|s| s.error.is_none() && s.hwnd != 0)
@@ -1782,6 +2053,17 @@ fn poller_main(
         last_focus_hwnd = focus_hwnd;
         if let Ok(mut latest) = LATEST_FOCUS.lock() {
             *latest = snapshot.clone().map(|s| (unix_ms(), s));
+        }
+        if !ours && !secure {
+            for old in departed {
+                enqueue(Record::Focus {
+                    unix_ms: unix_ms(),
+                    trigger: "departed",
+                    hwnd: focus_hwnd as usize,
+                    uia: Some(old),
+                    secure_desktop: false,
+                });
+            }
         }
         if !ours && (changed || last_poll.elapsed() >= Duration::from_millis(1000)) {
             last_poll = Instant::now();
@@ -2347,6 +2629,19 @@ const IID_IAUDIO_CAPTURE_CLIENT: Guid = Guid {
 const AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM: u32 = 0x8000_0000;
 const AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY: u32 = 0x0800_0000;
 const AUDCLNT_BUFFERFLAGS_SILENT: u32 = 0x2;
+
+// UIA ValuePattern: lets the recorder read committed values from VIRTUAL
+// elements (hwnd == 0) such as Excel cells (DataItem #A1) where WM_GETTEXT
+// has no window to talk to. Same vtable map as the native host (verified
+// there): IUIAutomationElement::GetCurrentPattern slot 16,
+// IUIAutomationValuePattern::get_CurrentValue slot 4.
+const UIA_VALUE_PATTERN_ID: i32 = 10002;
+const IID_IUIAUTOMATION_VALUE_PATTERN: Guid = Guid {
+    data1: 0xa94cd8b1,
+    data2: 0x0844,
+    data3: 0x4cd6,
+    data4: [0x9d, 0x2d, 0x64, 0x05, 0x37, 0xab, 0x39, 0xe9],
+};
 
 #[repr(C)]
 struct WaveFormatEx {

@@ -1,0 +1,760 @@
+{
+  "format": "fastcua-skill-draft/1",
+  "source": "session/session.jsonl (recording session; relative to the run artifacts, not shipped here)",
+  "generated_ts": 1784817886973,
+  "executable": false,
+  "verified": false,
+  "scope": {
+    "apps": [
+      "C:\\Program Files\\Microsoft Office\\root\\Office16\\EXCEL.EXE"
+    ]
+  },
+  "steps": [
+    {
+      "n": 1,
+      "ts": 1784817844645,
+      "action": "click",
+      "app": "C:\\Program Files\\Microsoft Office\\root\\Office16\\EXCEL.EXE",
+      "button": "left",
+      "x": 306,
+      "y": 324,
+      "anchor": {
+        "role": "ListItem",
+        "control_type": 50007,
+        "name": "空白工作簿",
+        "name_localized": true,
+        "bounds": [
+          171,
+          210,
+          441,
+          439
+        ],
+        "value_class": "action",
+        "alignment": "point",
+        "confidence": "high"
+      },
+      "double_click": false,
+      "warnings": [
+        "⚠ unresolved: input was injected, not physically demonstrated"
+      ]
+    },
+    {
+      "n": 2,
+      "ts": 1784817851902,
+      "action": "type",
+      "app": "C:\\Program Files\\Microsoft Office\\root\\Office16\\EXCEL.EXE",
+      "anchor": {
+        "role": "DataItem",
+        "control_type": 50029,
+        "automation_id": "A1",
+        "name": "A1",
+        "name_localized": true,
+        "bounds": [
+          43,
+          355,
+          147,
+          383
+        ],
+        "value_class": "text",
+        "alignment": "focus",
+        "confidence": "high"
+      },
+      "key_count": 2,
+      "observed_text": "项目",
+      "warnings": [
+        "input arrived as VK_PACKET (automation-style Unicode injection)",
+        "⚠ unresolved: input was injected, not physically demonstrated"
+      ],
+      "intent": [
+        "意图：录入两列费用表（项目/金额）"
+      ],
+      "text": "{{text_1}}"
+    },
+    {
+      "n": 3,
+      "ts": 1784817852711,
+      "action": "key",
+      "keys": "Tab",
+      "app": "C:\\Program Files\\Microsoft Office\\root\\Office16\\EXCEL.EXE",
+      "anchor": {
+        "role": "Pane",
+        "control_type": 50033,
+        "name_localized": true,
+        "bounds": [
+          43,
+          355,
+          146,
+          382
+        ],
+        "value_class": "none",
+        "alignment": "focus",
+        "confidence": "high"
+      },
+      "warnings": [
+        "⚠ unresolved: input was injected, not physically demonstrated"
+      ]
+    },
+    {
+      "n": 4,
+      "ts": 1784817853954,
+      "action": "type",
+      "app": "C:\\Program Files\\Microsoft Office\\root\\Office16\\EXCEL.EXE",
+      "anchor": {
+        "role": "DataItem",
+        "control_type": 50029,
+        "automation_id": "B1",
+        "name": "B1",
+        "name_localized": true,
+        "bounds": [
+          147,
+          355,
+          251,
+          383
+        ],
+        "value_class": "text",
+        "alignment": "focus",
+        "confidence": "high"
+      },
+      "key_count": 2,
+      "observed_text": "金额",
+      "warnings": [
+        "input arrived as VK_PACKET (automation-style Unicode injection)",
+        "⚠ unresolved: input was injected, not physically demonstrated"
+      ],
+      "text": "{{text_2}}"
+    },
+    {
+      "n": 5,
+      "ts": 1784817854769,
+      "action": "key",
+      "keys": "Enter",
+      "app": "C:\\Program Files\\Microsoft Office\\root\\Office16\\EXCEL.EXE",
+      "anchor": {
+        "role": "Pane",
+        "control_type": 50033,
+        "name_localized": true,
+        "bounds": [
+          147,
+          355,
+          250,
+          382
+        ],
+        "value_class": "none",
+        "alignment": "focus",
+        "confidence": "high"
+      },
+      "warnings": [
+        "⚠ unresolved: input was injected, not physically demonstrated"
+      ]
+    },
+    {
+      "n": 6,
+      "ts": 1784817856114,
+      "action": "type",
+      "app": "C:\\Program Files\\Microsoft Office\\root\\Office16\\EXCEL.EXE",
+      "anchor": {
+        "role": "DataItem",
+        "control_type": 50029,
+        "automation_id": "A2",
+        "name": "A2",
+        "name_localized": true,
+        "bounds": [
+          43,
+          383,
+          147,
+          411
+        ],
+        "value_class": "text",
+        "alignment": "focus",
+        "confidence": "high"
+      },
+      "key_count": 2,
+      "observed_text": "差旅",
+      "warnings": [
+        "input arrived as VK_PACKET (automation-style Unicode injection)",
+        "⚠ unresolved: input was injected, not physically demonstrated"
+      ],
+      "text": "{{text_3}}"
+    },
+    {
+      "n": 7,
+      "ts": 1784817856922,
+      "action": "key",
+      "keys": "Tab",
+      "app": "C:\\Program Files\\Microsoft Office\\root\\Office16\\EXCEL.EXE",
+      "anchor": {
+        "role": "Pane",
+        "control_type": 50033,
+        "name_localized": true,
+        "bounds": [
+          43,
+          383,
+          146,
+          410
+        ],
+        "value_class": "none",
+        "alignment": "focus",
+        "confidence": "high"
+      },
+      "warnings": [
+        "⚠ unresolved: input was injected, not physically demonstrated"
+      ]
+    },
+    {
+      "n": 8,
+      "ts": 1784817858158,
+      "action": "type",
+      "app": "C:\\Program Files\\Microsoft Office\\root\\Office16\\EXCEL.EXE",
+      "anchor": {
+        "role": "DataItem",
+        "control_type": 50029,
+        "automation_id": "B2",
+        "name": "B2",
+        "name_localized": true,
+        "bounds": [
+          147,
+          383,
+          251,
+          411
+        ],
+        "value_class": "text",
+        "alignment": "focus",
+        "confidence": "high"
+      },
+      "key_count": 4,
+      "observed_text": "1200",
+      "warnings": [
+        "input arrived as VK_PACKET (automation-style Unicode injection)",
+        "⚠ unresolved: input was injected, not physically demonstrated"
+      ],
+      "text": "{{text_4}}"
+    },
+    {
+      "n": 9,
+      "ts": 1784817858970,
+      "action": "key",
+      "keys": "Enter",
+      "app": "C:\\Program Files\\Microsoft Office\\root\\Office16\\EXCEL.EXE",
+      "anchor": {
+        "role": "Pane",
+        "control_type": 50033,
+        "name_localized": true,
+        "bounds": [
+          147,
+          383,
+          250,
+          410
+        ],
+        "value_class": "none",
+        "alignment": "focus",
+        "confidence": "high"
+      },
+      "warnings": [
+        "⚠ unresolved: input was injected, not physically demonstrated"
+      ]
+    },
+    {
+      "n": 10,
+      "ts": 1784817860317,
+      "action": "type",
+      "app": "C:\\Program Files\\Microsoft Office\\root\\Office16\\EXCEL.EXE",
+      "anchor": {
+        "role": "DataItem",
+        "control_type": 50029,
+        "automation_id": "A3",
+        "name": "A3",
+        "name_localized": true,
+        "bounds": [
+          43,
+          411,
+          147,
+          439
+        ],
+        "value_class": "text",
+        "alignment": "focus",
+        "confidence": "high"
+      },
+      "key_count": 2,
+      "observed_text": "餐饮",
+      "warnings": [
+        "input arrived as VK_PACKET (automation-style Unicode injection)",
+        "⚠ unresolved: input was injected, not physically demonstrated"
+      ],
+      "text": "{{text_5}}"
+    },
+    {
+      "n": 11,
+      "ts": 1784817861128,
+      "action": "key",
+      "keys": "Tab",
+      "app": "C:\\Program Files\\Microsoft Office\\root\\Office16\\EXCEL.EXE",
+      "anchor": {
+        "role": "Pane",
+        "control_type": 50033,
+        "name_localized": true,
+        "bounds": [
+          43,
+          411,
+          146,
+          438
+        ],
+        "value_class": "none",
+        "alignment": "focus",
+        "confidence": "high"
+      },
+      "warnings": [
+        "⚠ unresolved: input was injected, not physically demonstrated"
+      ]
+    },
+    {
+      "n": 12,
+      "ts": 1784817862363,
+      "action": "type",
+      "app": "C:\\Program Files\\Microsoft Office\\root\\Office16\\EXCEL.EXE",
+      "anchor": {
+        "role": "DataItem",
+        "control_type": 50029,
+        "automation_id": "B3",
+        "name": "B3",
+        "name_localized": true,
+        "bounds": [
+          147,
+          411,
+          251,
+          439
+        ],
+        "value_class": "text",
+        "alignment": "focus",
+        "confidence": "high"
+      },
+      "key_count": 3,
+      "observed_text": "340",
+      "warnings": [
+        "input arrived as VK_PACKET (automation-style Unicode injection)",
+        "⚠ unresolved: input was injected, not physically demonstrated"
+      ],
+      "text": "{{text_6}}"
+    },
+    {
+      "n": 13,
+      "ts": 1784817863176,
+      "action": "key",
+      "keys": "Enter",
+      "app": "C:\\Program Files\\Microsoft Office\\root\\Office16\\EXCEL.EXE",
+      "anchor": {
+        "role": "Pane",
+        "control_type": 50033,
+        "name_localized": true,
+        "bounds": [
+          147,
+          411,
+          250,
+          438
+        ],
+        "value_class": "none",
+        "alignment": "focus",
+        "confidence": "high"
+      },
+      "warnings": [
+        "⚠ unresolved: input was injected, not physically demonstrated"
+      ]
+    },
+    {
+      "n": 14,
+      "ts": 1784817866405,
+      "action": "type",
+      "app": "C:\\Program Files\\Microsoft Office\\root\\Office16\\EXCEL.EXE",
+      "anchor": {
+        "role": "DataItem",
+        "control_type": 50029,
+        "automation_id": "A4",
+        "name": "A4",
+        "name_localized": true,
+        "bounds": [
+          43,
+          439,
+          147,
+          467
+        ],
+        "value_class": "text",
+        "alignment": "focus",
+        "confidence": "high"
+      },
+      "key_count": 2,
+      "observed_text": "合计",
+      "warnings": [
+        "input arrived as VK_PACKET (automation-style Unicode injection)",
+        "⚠ unresolved: input was injected, not physically demonstrated"
+      ],
+      "intent": [
+        "金额列求和"
+      ],
+      "text": "{{text_7}}"
+    },
+    {
+      "n": 15,
+      "ts": 1784817867213,
+      "action": "key",
+      "keys": "Tab",
+      "app": "C:\\Program Files\\Microsoft Office\\root\\Office16\\EXCEL.EXE",
+      "anchor": {
+        "role": "Pane",
+        "control_type": 50033,
+        "name_localized": true,
+        "bounds": [
+          43,
+          439,
+          146,
+          466
+        ],
+        "value_class": "none",
+        "alignment": "focus",
+        "confidence": "high"
+      },
+      "warnings": [
+        "⚠ unresolved: input was injected, not physically demonstrated"
+      ]
+    },
+    {
+      "n": 16,
+      "ts": 1784817867748,
+      "action": "type",
+      "app": "C:\\Program Files\\Microsoft Office\\root\\Office16\\EXCEL.EXE",
+      "anchor": {
+        "role": "DataItem",
+        "control_type": 50029,
+        "automation_id": "B4",
+        "name": "B4",
+        "name_localized": true,
+        "bounds": [
+          147,
+          439,
+          251,
+          467
+        ],
+        "value_class": "text",
+        "alignment": "focus",
+        "confidence": "high"
+      },
+      "key_count": 11,
+      "observed_text": "1540",
+      "warnings": [
+        "input arrived as VK_PACKET (automation-style Unicode injection)",
+        "⚠ unresolved: input was injected, not physically demonstrated"
+      ],
+      "text": "{{text_8}}"
+    },
+    {
+      "n": 17,
+      "ts": 1784817868566,
+      "action": "key",
+      "keys": "Enter",
+      "app": "C:\\Program Files\\Microsoft Office\\root\\Office16\\EXCEL.EXE",
+      "anchor": {
+        "role": "Pane",
+        "control_type": 50033,
+        "name_localized": true,
+        "bounds": [
+          147,
+          439,
+          250,
+          466
+        ],
+        "value_class": "none",
+        "alignment": "focus",
+        "confidence": "high"
+      },
+      "warnings": [
+        "⚠ unresolved: input was injected, not physically demonstrated"
+      ]
+    },
+    {
+      "n": 18,
+      "ts": 1784817874165,
+      "action": "key",
+      "keys": "F12",
+      "app": "C:\\Program Files\\Microsoft Office\\root\\Office16\\EXCEL.EXE",
+      "anchor": {
+        "role": "DataItem",
+        "control_type": 50029,
+        "automation_id": "A5",
+        "name": "A5",
+        "name_localized": true,
+        "bounds": [
+          43,
+          467,
+          147,
+          495
+        ],
+        "value_class": "text",
+        "alignment": "focus",
+        "confidence": "low"
+      },
+      "warnings": [
+        "⚠ unresolved: input was injected, not physically demonstrated"
+      ],
+      "intent": [
+        "另存为xlsx，文件名按日期参数化"
+      ]
+    },
+    {
+      "n": 19,
+      "ts": 1784817878220,
+      "action": "click",
+      "app": "C:\\Program Files\\Microsoft Office\\root\\Office16\\EXCEL.EXE",
+      "button": "left",
+      "x": 588,
+      "y": 496,
+      "anchor": {
+        "role": "Edit",
+        "control_type": 50004,
+        "automation_id": "1001",
+        "name": "文件名:",
+        "name_localized": true,
+        "bounds": [
+          202,
+          483,
+          975,
+          509
+        ],
+        "value_class": "text",
+        "alignment": "point",
+        "confidence": "high"
+      },
+      "double_click": false,
+      "warnings": [
+        "⚠ unresolved: input was injected, not physically demonstrated"
+      ]
+    },
+    {
+      "n": 20,
+      "ts": 1784817878813,
+      "action": "key",
+      "keys": "Ctrl+A",
+      "app": "C:\\Program Files\\Microsoft Office\\root\\Office16\\EXCEL.EXE",
+      "anchor": {
+        "role": "Edit",
+        "control_type": 50004,
+        "automation_id": "1001",
+        "name": "文件名:",
+        "name_localized": true,
+        "bounds": [
+          202,
+          483,
+          975,
+          509
+        ],
+        "value_class": "text",
+        "alignment": "focus",
+        "confidence": "high"
+      },
+      "warnings": [
+        "⚠ unresolved: input was injected, not physically demonstrated"
+      ]
+    },
+    {
+      "n": 21,
+      "ts": 1784817879175,
+      "action": "type",
+      "app": "C:\\Program Files\\Microsoft Office\\root\\Office16\\EXCEL.EXE",
+      "anchor": {
+        "role": "Edit",
+        "control_type": 50004,
+        "automation_id": "1001",
+        "name": "文件名:",
+        "name_localized": true,
+        "bounds": [
+          202,
+          483,
+          975,
+          509
+        ],
+        "value_class": "text",
+        "alignment": "focus",
+        "confidence": "high"
+      },
+      "key_count": 84,
+      "observed_text": "C:\\Users\\Administrator\\AppData\\Local\\Temp\\fastcua-office-demo\\report-2026-07-23.xlsx",
+      "warnings": [
+        "input arrived as VK_PACKET (automation-style Unicode injection)",
+        "⚠ unresolved: input was injected, not physically demonstrated"
+      ],
+      "text": "C:\\Users\\Administrator\\AppData\\Local\\Temp\\fastcua-office-demo\\report-{{date}}.xlsx"
+    },
+    {
+      "n": 22,
+      "ts": 1784817881940,
+      "action": "key",
+      "keys": "Tab",
+      "app": "C:\\Program Files\\Microsoft Office\\root\\Office16\\EXCEL.EXE",
+      "anchor": {
+        "role": "Edit",
+        "control_type": 50004,
+        "automation_id": "1001",
+        "name": "文件名:",
+        "name_localized": true,
+        "bounds": [
+          202,
+          483,
+          975,
+          509
+        ],
+        "value_class": "text",
+        "alignment": "focus",
+        "confidence": "high"
+      },
+      "warnings": [
+        "⚠ unresolved: input was injected, not physically demonstrated"
+      ]
+    },
+    {
+      "n": 23,
+      "ts": 1784817884674,
+      "action": "click",
+      "app": "C:\\Program Files\\Microsoft Office\\root\\Office16\\EXCEL.EXE",
+      "button": "left",
+      "x": 769,
+      "y": 702,
+      "anchor": {
+        "role": "Button",
+        "control_type": 50000,
+        "automation_id": "1",
+        "name": "保存(S)",
+        "name_localized": true,
+        "bounds": [
+          703,
+          683,
+          835,
+          722
+        ],
+        "value_class": "action",
+        "alignment": "point",
+        "confidence": "high"
+      },
+      "double_click": false,
+      "warnings": [
+        "⚠ unresolved: input was injected, not physically demonstrated"
+      ]
+    }
+  ],
+  "parameters": [
+    {
+      "name": "text_1",
+      "kind": "text",
+      "observed": "项目",
+      "provenance": {
+        "step": 2,
+        "source": "typed-value (UIA snapshot)",
+        "anchor": "DataItem"
+      }
+    },
+    {
+      "name": "text_2",
+      "kind": "text",
+      "observed": "金额",
+      "provenance": {
+        "step": 4,
+        "source": "typed-value (UIA snapshot)",
+        "anchor": "DataItem"
+      }
+    },
+    {
+      "name": "text_3",
+      "kind": "text",
+      "observed": "差旅",
+      "provenance": {
+        "step": 6,
+        "source": "typed-value (UIA snapshot)",
+        "anchor": "DataItem"
+      }
+    },
+    {
+      "name": "text_4",
+      "kind": "text",
+      "observed": "1200",
+      "provenance": {
+        "step": 8,
+        "source": "typed-value (UIA snapshot)",
+        "anchor": "DataItem"
+      }
+    },
+    {
+      "name": "text_5",
+      "kind": "text",
+      "observed": "餐饮",
+      "provenance": {
+        "step": 10,
+        "source": "typed-value (UIA snapshot)",
+        "anchor": "DataItem"
+      }
+    },
+    {
+      "name": "text_6",
+      "kind": "text",
+      "observed": "340",
+      "provenance": {
+        "step": 12,
+        "source": "typed-value (UIA snapshot)",
+        "anchor": "DataItem"
+      }
+    },
+    {
+      "name": "text_7",
+      "kind": "text",
+      "observed": "合计",
+      "provenance": {
+        "step": 14,
+        "source": "typed-value (UIA snapshot)",
+        "anchor": "DataItem"
+      }
+    },
+    {
+      "name": "text_8",
+      "kind": "text",
+      "observed": "1540",
+      "provenance": {
+        "step": 16,
+        "source": "typed-value (UIA snapshot)",
+        "anchor": "DataItem"
+      }
+    },
+    {
+      "name": "date",
+      "kind": "date",
+      "observed": "2026-07-23",
+      "provenance": {
+        "step": 21,
+        "source": "typed-value (UIA snapshot)",
+        "anchor": "Edit"
+      }
+    },
+    {
+      "name": "filename",
+      "kind": "filename",
+      "observed": "report-2026-07-23.xlsx",
+      "provenance": {
+        "step": 21,
+        "source": "typed-value (UIA snapshot)",
+        "anchor": "Edit"
+      }
+    }
+  ],
+  "warnings": [
+    "⚠ unresolved: 23/23 steps were injected input (automation-driven span) — needs human re-demo or explicit review"
+  ],
+  "media": {
+    "video": "video/video.avi",
+    "video_index": "video/index.jsonl",
+    "audio": null,
+    "audio_note": "unavailable: GetService(IAudioCaptureClient) 0x88890003",
+    "keyframes": "keyframes"
+  },
+  "stats": {
+    "events": 366,
+    "steps": 23,
+    "notes": 3,
+    "redacted_events": 0,
+    "keyframes": 19,
+    "keyframe_bytes": 2350474
+  }
+}

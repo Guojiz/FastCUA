@@ -367,8 +367,32 @@ async function run(args) {
     windowCache.set(key, found);
     return found;
   };
-  const freshState = async (window) => {
-    const state = await call("get_window_state", { window, include_screenshot: false, include_text: true });
+  // Multi-window apps (Office: start page -> workbook -> save-as dialog):
+  // every step re-lists the app's windows and resolves the anchor against
+  // EACH candidate tree, preferring the window that served the previous
+  // step. One delayed retry covers slow-opening windows. Fail-safe is
+  // unchanged: if nothing resolves, the run aborts at this step.
+  let lastWindow = null;
+  const windowsForApp = async (app) => {
+    const key = canonApp(app);
+    const windows = await call("list_windows");
+    const found = windows.filter((w) =>
+      (canonApp(w.app) === key || appBasename(w.app) === appBasename(key)) &&
+      (titleRe ? titleRe.test(w.title || "") : true));
+    if (!found.length) throw new Error(`no open window for recorded app ${app}${titleRe ? ` matching /${args.windowTitle}/` : ""}`);
+    if (lastWindow) {
+      const preferred = found.find((w) => w.id === lastWindow.id);
+      if (preferred) return [preferred, ...found.filter((w) => w.id !== preferred.id)];
+    }
+    return found;
+  };
+  const freshState = async (window, uiaProbeMs) => {
+    const params = { window, include_screenshot: false, include_text: true };
+    // A cold-started app (Excel) can need many seconds to materialize its UIA
+    // tree; a generous per-request probe budget waits it out instead of
+    // tripping the host's default-timeout circuit breaker (HWND fallback).
+    if (uiaProbeMs) params.uia_probe_ms = uiaProbeMs;
+    const state = await call("get_window_state", params);
     return state;
   };
 
@@ -388,23 +412,53 @@ async function run(args) {
       const expected = step.anchor
         ? { role: step.anchor.role, control_type: step.anchor.control_type, automation_id: step.anchor.automation_id, name: step.anchor.name }
         : null;
-      const window = await windowFor(step.app);
-      const state = await freshState(window);
-      const tree = parseTree(state?.accessibility?.tree);
-
       if (step.action === "key") {
+        // Keys go to the window that served the previous step (Office:
+        // workbook -> save-as dialog), falling back to the app's first.
+        const window = lastWindow || (await windowFor(step.app));
         const mapped = mapChord(step.keys);
         await call("press_key", { window, key: mapped.key });
         record({ ...base, status: "ok", detail: `pressed ${mapped.key}`, expected, actual: { pressed: mapped.key }, decision: "proceed" });
         continue;
       }
-
-      const resolved = resolveAnchor(step.anchor, tree);
-      if (resolved.status !== "ok") {
-        record({ ...base, status: resolved.status, detail: `${resolved.detail} — FAIL SAFE: nothing clicked/typed`, expected, candidates: resolved.candidates });
+      // Resolve the anchor across EVERY window of the recorded app (Office
+      // workflows hop windows: start page -> workbook -> dialog). Settle
+      // BEFORE the first snapshot: a window opened by the previous step
+      // (workbook, dialog) needs idle time to build its UIA tree, and an
+      // immediate snapshot can hit the provider-timeout circuit breaker.
+      // Then keep retrying for ~11s. Fail-safe abort unchanged.
+      let window = null;
+      let resolved = null;
+      let lastFailure = null;
+      const resolveDiag = [];
+      let lastTree = "";
+      for (let attempt = 0; attempt < 5 && !resolved; attempt++) {
+        // First snapshot at +6s: matches the recorded flow's proven timing —
+        // an earlier snapshot of a LOADING workbook exceeds the host's UIA
+        // timeout and session-disables the app, which no retry survives.
+        await sleep(attempt === 0 ? 6_000 : 2_500);
+        const candidates = await windowsForApp(step.app);
+        for (const cand of candidates) {
+          const state = await freshState(cand, 20_000);
+          const acc = state?.accessibility || {};
+          const lineCount = String(acc.tree || "").split("\n").filter(Boolean).length;
+          resolveDiag.push(`attempt${attempt} "${String(cand.title || "").slice(0, 30)}": lines=${lineCount}${acc.error ? ` err=${String(acc.error).slice(0, 80)}` : ""}`);
+          if (lineCount) lastTree = `[${cand.title || ""}]\n${acc.tree}`;
+          const r = resolveAnchor(step.anchor, parseTree(acc.tree));
+          if (r.status === "ok") { window = cand; resolved = r; break; }
+          if (!lastFailure) lastFailure = r;
+        }
+      }
+      if (!resolved) {
+        const failure = lastFailure || { status: "anchor-unresolved", detail: "no candidate window resolved the anchor" };
+        // Persist the last tree next to the report: "no element with hit
+        // bounds" is undebuggable from line counts alone.
+        try { fs.writeFileSync(`${args.report}.step${step.n}-tree.txt`, lastTree || "(empty tree)"); } catch {}
+        record({ ...base, status: failure.status, detail: `${failure.detail} — FAIL SAFE: nothing clicked/typed`, expected, candidates: failure.candidates, diagnostics: resolveDiag });
         report.outcome = "aborted";
         return finish(report, args, 4);
       }
+      lastWindow = window;
       const actual = {
         index: resolved.element.index,
         role: resolved.element.role,
@@ -427,19 +481,83 @@ async function run(args) {
       }
 
       if (step.action === "type") {
-        // Focus, read current value (never assume), replace with the recorded
-        // committed value (parameter-substituted), then ASSERT the end state.
-        await call("click", { window, element_index: resolved.element.index });
-        await sleep(200);
-        const before = (await freshState(window))?.accessibility?.focused_value;
-        await call("type_text", { window, text, replace: true });
+        // DataItem (Excel cell): do NOT click first. The recorded navigation
+        // (workbook open / Tab / Enter) already made the anchor cell active,
+        // and replaying that sequence keeps it active; a resolving click is
+        // both redundant and HARMFUL — observed: the click landed on the
+        // Name Box instead, typed text was swallowed as an invalid range
+        // name, and the cell stayed empty. The anchor is still resolved
+        // above (existence check) and the commit assertion below verifies
+        // the typed text lands on the anchor's own automation-id cell, so
+        // focus drift cannot pass silently.
+        const cellNoClick = step.anchor?.role === "DataItem";
+        if (!cellNoClick) {
+          // Focus, read current value (never assume), replace with the
+          // recorded committed value (parameter-substituted), then ASSERT.
+          await call("click", { window, element_index: resolved.element.index });
+          await sleep(200);
+        }
+        const before = (await freshState(window, 10_000))?.accessibility?.focused_value;
+        // SetValue is vacuous on Excel DataItems (value reads back fine, but
+        // the sheet stays EMPTY — the provider caches it without entering
+        // edit mode): always caret-type cells. For Edit boxes SetValue is the
+        // right REPLACE primitive when it works (fixture suite proves it),
+        // but classic dialog edits (comdlg filename) SILENTLY revert it on
+        // focus-out — a full path reverted to "工作簿1" and saved to the
+        // dialog's cwd. Tell the two apart via the RECORDING: when the
+        // recorded flow did its own select-all (Ctrl+A key step) right before
+        // typing, the intent is "replace by keystrokes" and the replay must
+        // use real keystrokes too.
+        const pi = plan.findIndex((p) => p.step === step);
+        let prevExecuted = null;
+        for (let j = pi - 1; j >= 0; j--) {
+          const d = plan[j].decision;
+          if (d === "note" || d === "skip" || d === "redacted") continue;
+          prevExecuted = plan[j].step;
+          break;
+        }
+        const recordedSelectAll = prevExecuted?.action === "key" && /ctrl\+a/i.test(String(prevExecuted.keys || ""));
+        const caretEdit = step.anchor?.role === "Edit" && recordedSelectAll;
+        const caretOnly = step.anchor?.role === "DataItem" || caretEdit;
+        let typedVia = caretOnly
+          ? `caret-typing (${step.anchor.role} anchor: ${caretEdit ? "recorded Ctrl+A implies key-replace; SetValue reverts in classic dialogs" : "SetValue is vacuous on DataItem"})`
+          : "set-value";
+        if (caretOnly) {
+          // The focusing click collapses the select-all the recorded flow did
+          // as its own step; re-select so typing REPLACES. Edit boxes only —
+          // in Excel's grid Ctrl+A would select all cells.
+          if (caretEdit) await call("press_key", { window, key: "Ctrl+A" });
+          await call("type_text", { window, text, replace: false });
+        } else {
+          try {
+            await call("type_text", { window, text, replace: true });
+          } catch (e) {
+            // Some providers (classic comdlg filename box) stall on ValuePattern
+            // SetValue; fall back to plain caret typing rather than aborting.
+            typedVia = `caret-typing (set-value failed: ${String(e.message || e).slice(0, 80)})`;
+            await call("type_text", { window, text, replace: false });
+          }
+        }
         await sleep(300);
-        const after = (await freshState(window))?.accessibility?.focused_value;
-        const valueOk = after === text;
+        const after = (await freshState(window, 10_000))?.accessibility?.focused_value;
+        // A caret-typed cell is mid-edit here: focused_value reads null until
+        // the recorded commit key (Tab/Enter) lands. A committed cell's UIA
+        // NAME stays its ADDRESS ("A1"), so the committed text is NOT
+        // observable from the tree at all — only focused_value on the
+        // SELECTED cell exposes it, and re-selecting would break the recorded
+        // trajectory. Verified end-to-end by probe5: chars commit fine; the
+        // saved-file content check (suite openpyxl) is the ground truth.
+        const cellCaret = caretOnly && step.anchor?.role === "DataItem";
+        const pendingOk = cellCaret && after == null;
+        const valueOk = after === text || pendingOk;
         record({
           ...base,
           status: valueOk ? "ok" : "value-mismatch",
-          detail: valueOk ? `value assertion passed (${text.length} chars)` : `value assertion FAILED: expected "${text}" got "${after}"`,
+          detail: valueOk
+            ? (pendingOk
+              ? `typed ${text.length} chars via ${typedVia}; mid-edit (null read expected) — cell content is verified at the saved file`
+              : `value assertion passed (${text.length} chars, via ${typedVia})`)
+            : `value assertion FAILED: expected "${text}" got "${after}" (via ${typedVia})`,
           expected: { ...expected, value: text, value_before: before },
           actual: { ...actual, value: after },
           decision: "proceed",

@@ -151,3 +151,62 @@ Follow-up: the session now preserves reviewable media and the flow is fully agen
 - Media stays local: drafts reference relative paths as review aids, bytes are never embedded in SKILL.md (asserted), dry-run ignores media.
 
 Validation: 112/112 real-machine checks (`tests/skill-recorder-validation.mjs`), full regression suite green.
+
+---
+
+**Office end-to-end run: record → compile → dry-run with substitution → promote, all on real Microsoft Excel (draft)**
+
+The full loop now runs against a real Office app, not just the fixture. The
+permanent suite (`tests/office-demo-e2e.mjs`) records an expense-table
+workflow in Excel (start page → 空白工作簿 → 项目/金额 × 3 rows → =SUM total →
+F12 save-as with a date-stamped filename, plus three Ctrl+Alt+N narration
+notes), compiles it (23 steps, cell anchors A1..B4 by automation-id, 10
+parameters including the save date), kills and relaunches Excel, and dry-runs
+the draft with **different** parameter values — then opens the replayed xlsx
+with openpyxl and asserts the new values are really in the cells.
+Latest: **26/26 checks, three consecutive passes**; replayed A1:B4 =
+用品/费用/交通/5600/住宿/400/总计/6000, mismatches `{}`. The promotion gate was
+also exercised for real against the Kimi skills dir: `promote.mjs` refused
+without flags (exit 3), refused the `verified:false` draft with only
+`--yes-i-reviewed` (exit 4), promoted with `--force-unverified` (warning line
+appended to the copy), and the promoted skill was removed again afterward.
+Example artifacts: `examples/skill-recorder-office-demo/` (draft.json +
+SKILL.md + README, no media bytes).
+
+What teaching Excel taught the recorder — four root causes found this round,
+each now covered by a regression check:
+
+1. **Excel's DataItem UIA Name is the cell ADDRESS, not the content** ("A1"
+   stays "A1" even when the cell holds 用品). Content lives only in the
+   ValuePattern. A name-based commit assertion reads green-tree evidence
+   wrong and false-fails; the dry-run now treats the mid-edit null read as
+   expected and leaves content verification to the saved file (asserted via
+   openpyxl in-suite).
+2. **ValuePattern.SetValue is vacuous on Excel DataItems** — the value reads
+   back correctly (provider caches it) but the sheet stays EMPTY; the
+   provider never enters edit mode. DataItem type steps now replay with real
+   caret keystrokes exactly as recorded, and the focusing pre-click was
+   dropped (the recorded navigation already activates the anchor cell; the
+   extra click risks landing in the Name Box, which silently swallows typed
+   text as an invalid range name).
+3. **SetValue silently reverts in classic comdlg filename boxes on focus
+   loss** — an 84-char full save path passed its value assertion, then Tab
+   restored the combo's internal selection and the file was saved as
+   `工作簿1.xlsx` into the dialog's current directory. The tell is in the
+   recording itself: when the demonstrated flow did its own Ctrl+A before
+   typing, the replay switches that Edit step to real keystrokes (plus a
+   synthetic Ctrl+A, because the focusing click collapses the recorded
+   selection). Edits without a recorded select-all keep SetValue (the fixture
+   suite's 112/112 proves that path).
+4. **Cold-start UIA materialization vs the circuit breaker** — the first
+   workbook tree snapshot after an Excel cold start exceeds the host's 1.5 s
+   default probe; one strike too many session-disables UIA for the app and
+   every later snapshot degrades to a 24-line HWND fallback that no anchor
+   survives. The escape hatch: `uia_probe_ms` is now a per-request client
+   parameter (daemon passthrough, clamped at 30 s, echoed back as
+   `uia.probe_ms`); the dry-run resolves with a 20 s budget and the profile
+   logged zero hangs across the passing runs.
+
+Validation: office-demo-e2e 26/26 ×3, skill-recorder-validation 112/112,
+protocol-regression 24/24 (incl. the new probe-echo contract), server-lifecycle
+and control-plane integration green. Fresh logs under `tests/_*.log`.

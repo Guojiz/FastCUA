@@ -111,11 +111,25 @@ function buildSteps(events) {
     if (!run.anchor) warnings.push(`${UNRESOLVED}: no UIA anchor for this typing`);
     else if (run.anchor.confidence === "low") warnings.push(`${UNRESOLVED}: low-confidence anchor alignment`);
     // Recover committed text ONLY from UIA value snapshots (never from vk).
+    // Virtual elements (Excel cells) all share hwnd 0, so an AutomationId —
+    // when the anchor has one — must participate in the match, and
+    // "departed" snapshots (value read after focus left) count too.
     let observed;
-    if (run.anchor?.hwnd) {
-      const snap = [...focusEvents].reverse().find((f) =>
-        f.uia?.value !== undefined && f.uia.hwnd === run.anchor.hwnd &&
-        f.ts >= run.tsStart - 1000 && f.ts <= run.lastTs + 2500);
+    if (run.anchor) {
+      const sameElement = (f) =>
+        f.uia?.value !== undefined &&
+        f.uia.hwnd === run.anchor.hwnd &&
+        (run.anchor.automation_id ? f.uia.automation_id === run.anchor.automation_id : true) &&
+        (run.anchor.control_type ? f.uia.control_type === run.anchor.control_type : true);
+      // Stage 1: the DEPARTED snapshot is authoritative — it is the value
+      // re-read after focus left, i.e. after the control committed. Burst
+      // typing (one SendInput span) ends the run instantly while the commit
+      // lands seconds later, so allow a generous post-run window.
+      const departed = [...focusEvents].reverse().find((f) =>
+        f.trigger === "departed" && sameElement(f) && f.ts >= run.lastTs && f.ts <= run.lastTs + 8000);
+      // Stage 2 (legacy): latest snapshot of any trigger near the run.
+      const snap = departed || [...focusEvents].reverse().find((f) =>
+        sameElement(f) && f.ts >= run.tsStart - 1000 && f.ts <= run.lastTs + 3000);
       if (snap) observed = snap.uia.value;
     }
     if (observed === undefined) warnings.push(`${UNRESOLVED}: typed text not recoverable from UIA value snapshots`);
@@ -282,7 +296,9 @@ function inferParameters(steps) {
     if ((m = DATE_RE.exec(text))) claims.push({ kind: "date", value: m[0], name: "date" });
     if ((m = FILE_RE.exec(text))) claims.push({ kind: "filename", value: m[0], name: "filename" });
     if (!claims.length && text.trim()) {
-      claims.push({ kind: "text", value: text.trim().slice(0, 80), name: `text_${params.length + 1}` });
+      // 400 matches the recorder's own value-snapshot cap — 80 truncated
+      // legitimate paths, and truncated params replay corrupted text.
+      claims.push({ kind: "text", value: text.trim().slice(0, 400), name: `text_${params.length + 1}` });
     }
     for (const c of claims) {
       let name = c.name;
