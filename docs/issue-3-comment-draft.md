@@ -1,6 +1,7 @@
-# Comment for Guojiz/FastCUA#3 (POSTED 2026-07-22)
+# Comments for Guojiz/FastCUA#3 (POSTED 2026-07-22 / 2026-07-23)
 
-> Posted as https://github.com/Guojiz/FastCUA/issues/3#issuecomment-5049270424
+> Stage-1 comment posted as https://github.com/Guojiz/FastCUA/issues/3#issuecomment-5049270424
+> Stages 2-5 comment posted as https://github.com/Guojiz/FastCUA/issues/3#issuecomment-5054052722
 > Target: https://github.com/Guojiz/FastCUA/issues/3
 
 ---
