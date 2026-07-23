@@ -1,21 +1,25 @@
-# FastCUA Skill Recorder — design notes (issue #3, stages 2–4)
+# FastCUA Skill Recorder — design notes (issue #3, stages 2–5)
 
 A standalone "record a skill" tool, modeled on Claude Cowork's *Record a
 skill*: the user demonstrates a workflow on the real desktop while narrating
 intent; the tool produces a **non-executable, explicitly unverified** SKILL.md
 draft for human review.
 
-Three parts:
+Five parts:
 
 | piece | path | stage |
 |---|---|---|
 | recorder (native, Windows) | `tools/skill-recorder/` | 2 |
 | session → draft compiler | `tools/skill-recorder/compile.mjs` | 3 |
 | draft → SKILL.md generator | `compile.mjs --skill NAME` | 4 |
+| video frame extractor (review aid) | `tools/skill-recorder/frame-extract.mjs` | 5 |
+| gated promotion into a skills dir | `tools/skill-recorder/promote.mjs` | 5 |
 
 End-to-end validation on the live machine: `tests/skill-recorder-validation.mjs`
-(42 checks; drives the FastCuaFixture app through the real daemon, records,
-compiles, and asserts on every stage).
+(112 checks; drives the FastCuaFixture app through the real daemon, records,
+compiles, dry-runs, and asserts on every stage including the AVI/index/WAV
+media tracks, frame extraction with its redaction gate, and the promotion
+gates).
 
 ## Session format: `fastcua-recording/1`
 
@@ -34,7 +38,16 @@ readable partial session:
   (`note` / `action` / `focus` / `periodic`) or `suppressed:true` in a
   password context. Measured cost in validation: ~0.7 MB/min, target < 2 MB/min.
 - `note` — narrator text submitted via the Ctrl+Alt+N dialog.
-- `stats` — hook health (callbacks, avg callback µs, dropped count).
+- `media` — media-track availability note (`kind:"audio"`,
+  `status:"ok"|"unavailable"`, `detail`). Emitted early so a missing/busy
+  microphone is visible in the session without failing it.
+- `stats` — hook health (callbacks, avg callback µs, dropped count) plus
+  media counters (`video_frames`, `video_bytes`, `video_gaps`,
+  `audio_bytes`).
+
+The header also carries a `media` block naming the session-relative media
+files (`video/video.avi`, `video/index.jsonl`, `audio/narration.wav`; `null`
+when a track was disabled).
 
 ### Anchors
 
@@ -57,8 +70,10 @@ The recorder declares Per-Monitor-V2 DPI awareness at startup so hook points,
 
 - Password fields (UIA `IsPassword` **or** `ES_PASSWORD`): vk and value are
   dropped, records are marked `redacted:"password-field"`, keyframes are
-  recorded as `suppressed:true` with no image.
-- Secure desktop (UAC/lock screen): marker only, no snapshots or keyframes.
+  recorded as `suppressed:true` with no image, and **video frames are
+  replaced by marker black frames** logged as gaps (`reason:"password-focus"`).
+- Secure desktop (UAC/lock screen): marker only, no snapshots or keyframes;
+  the video track logs a `secure-desktop` gap.
 - The recorder's own windows (note dialog, REC indicator) are excluded from
   the demonstration stream; its hotkey chords (Ctrl+Alt+N/R/X) are filtered.
 - All input is labeled `injected:true/false`; a session driven entirely by
@@ -69,6 +84,54 @@ The recorder declares Per-Monitor-V2 DPI awareness at startup so hook points,
 Ctrl+Alt+N note dialog (topmost, Enter or button submits a `note` record),
 Ctrl+Alt+R pause/resume, Ctrl+Alt+X emergency stop, topmost REC indicator,
 `--duration-ms` cap, console Ctrl+C handled.
+
+## Media tracks (stage 5)
+
+The session directory is `session.jsonl` + `keyframes/` + `video/` +
+`audio/` — all local, all review aids. Media is **never** embedded in drafts
+and never required by a replay.
+
+**Video** — `video/video.avi`: zero-dependency MJPEG-in-AVI written by hand
+(RIFF/AVI, no codec install, no ffmpeg). Defaults: 4 fps, long edge ≤ 1568 px
+(aspect preserved, even-rounded), JPEG quality 70 — tunable via
+`--video-fps` / `--video-max-edge` / `--video-quality`. Frames are captured
+with `PrintWindow`/`BitBlt` into a fixed HALFTONE-scaled canvas and encoded
+as independent JPEGs (every frame is a keyframe — exactly what random-access
+review wants). `video/index.jsonl` logs `{i, ts, kind:"frame", off, len}` per
+frame (absolute byte offset + JPEG length in the AVI) between a
+`t:"video-index"` header and a `t:"video-footer"` byte-total line, so
+`frame-extract.mjs` can slice any moment out by timestamp without parsing
+the AVI. During password focus or the secure desktop the encoder writes a
+marker **black frame** and the index logs `kind:"gap"` with the reason —
+the moment provably has no pixels. The recorder's own windows never appear.
+
+**Audio** — `audio/narration.wav`: PCM 16 kHz mono 16-bit, captured with
+WASAPI shared-mode (`AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM | SRC_DEFAULT_QUALITY`)
+from the default microphone. Strictly **best-effort**: no device, busy
+device, or denied access produces a `t:media` `unavailable` record with the
+reason and the session continues unaffected (`--no-audio` skips the track
+entirely). Silence-flagged packets are written as zeros so the timeline stays
+aligned. Transcription is deliberately out of scope — the WAV is for the
+reviewing human to listen to.
+
+**Review aids** — `frame-extract.mjs <session-dir> (--at-ms N | --at ISO |
+--note N)` resolves the index entry with largest `ts <= T` and writes its
+JPEG (SOI/EOI-validated); a gap entry exits 4 with an explanation instead of
+inventing pixels. `compile.mjs` surfaces media as session-relative paths in
+`draft.media` and in the SKILL draft's "Review aids" section. `dryrun.mjs`
+ignores media entirely.
+
+**Promotion** — `promote.mjs` is the only path from `skill-draft/` into a
+live skills directory, and it is gated: the agent runs it, but only after
+explicit user approval in conversation (never silently). `--detect-host`
+lists candidate skills directories in priority order (`FASTCUA_SKILLS_DIR` →
+Kimi Work `%APPDATA%\kimi-desktop\daimon-share\daimon\skills` → Claude Code
+`~/.claude/skills` → opencode `~/.config/opencode/skills`), each with an
+`exists` flag. Gates: exit 3 without `--yes-i-reviewed`; exit 4 on a
+`verified:false` draft without `--force-unverified` (forced copies get an
+extra WARNING appended); exit 5 on an existing target without `--overwrite`.
+A successful run verifies the promoted `SKILL.md` exists and prints a reload
+hint (Kimi Work indexes skills at session start).
 
 ## Compiler + generator (`compile.mjs`)
 
@@ -124,15 +187,20 @@ rules:
 
 | | Cowork | FastCUA skill-recorder |
 |---|---|---|
-| capture | screen video + narration audio | UIA event stream + sparse JPEG keyframes + typed notes |
+| capture | screen video + narration audio | UIA event stream + sparse JPEG keyframes + typed notes + local MJPEG video + local WAV narration |
 | anchors | inferred from video by the model | direct UIA element identity at input time |
 | output | skill draft, model-written | deterministic compiler draft, every inference marked |
-| secrets | relies on model discretion | structural: vk/value dropped, frames suppressed |
+| secrets | relies on model discretion | structural: vk/value dropped, keyframes suppressed, video gaps |
 | verification | n/a | `verified:false` + ⚠ markers; nothing is executable |
+| promotion | n/a | gated `promote.mjs`; user approval required, never silent |
 
 ## Known gaps / honest limits
 
-- No audio narration (typed notes instead) and no `+` menu UI (future work).
+- Audio narration is captured as a local WAV for human listening;
+  **transcription is out of scope** (no speech-to-text, no dependency).
+  Video is MJPEG (every frame a keyframe) — simple and seekable, but larger
+  than an inter-frame codec would be; size is bounded by the 4 fps / 1568 px
+  defaults.
 - Physical-input provenance is identical hook code but was validated with
   injected input only (unattended machine) — 62/62 events flagged injected.
 - Type-step text is the control's whole value snapshot (e.g.

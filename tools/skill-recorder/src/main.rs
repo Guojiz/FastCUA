@@ -42,7 +42,7 @@
 use std::collections::HashMap;
 use std::ffi::c_void;
 use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::io::{Seek, SeekFrom, Write};
 use std::mem;
 use std::path::{Path, PathBuf};
 use std::ptr;
@@ -343,6 +343,7 @@ unsafe extern "system" {
     fn GetKeyState(vk: i32) -> i16;
     fn GetSystemMetrics(index: i32) -> i32;
     fn GetWindowDC(hwnd: HWND) -> HDC;
+    fn GetDC(hwnd: HWND) -> HDC;
     fn ReleaseDC(hwnd: HWND, dc: HDC) -> i32;
     fn PrintWindow(hwnd: HWND, dc: HDC, flags: UINT) -> BOOL;
     fn GetDpiForSystem() -> UINT;
@@ -412,6 +413,20 @@ unsafe extern "system" {
     fn CreateSolidBrush(color: DWORD) -> HANDLE;
     fn SetTextColor(dc: HDC, color: DWORD) -> DWORD;
     fn SetBkMode(dc: HDC, mode: i32) -> i32;
+    fn StretchBlt(
+        dst: HDC,
+        x: i32,
+        y: i32,
+        w: i32,
+        h: i32,
+        src: HDC,
+        sx: i32,
+        sy: i32,
+        sw: i32,
+        sh: i32,
+        rop: DWORD,
+    ) -> BOOL;
+    fn SetStretchBltMode(dc: HDC, mode: i32) -> i32;
 }
 #[link(name = "kernel32")]
 unsafe extern "system" {
@@ -512,6 +527,13 @@ enum Record {
         unix_ms: u64,
         text: String,
     },
+    /// Media availability report (audio best-effort, video directory layout).
+    Media {
+        unix_ms: u64,
+        kind: &'static str,
+        status: &'static str,
+        detail: String,
+    },
 }
 
 /// A semantic anchor: the UIA control an input event (or focus) landed on.
@@ -541,6 +563,10 @@ static COALESCED: AtomicU64 = AtomicU64::new(0);
 static LAST_MOVE_MS: AtomicU64 = AtomicU64::new(0);
 static KEYFRAME_COUNT: AtomicU64 = AtomicU64::new(0);
 static KEYFRAME_BYTES: AtomicU64 = AtomicU64::new(0);
+static VIDEO_FRAMES: AtomicU64 = AtomicU64::new(0);
+static VIDEO_BYTES: AtomicU64 = AtomicU64::new(0);
+static VIDEO_GAPS: AtomicU64 = AtomicU64::new(0);
+static AUDIO_BYTES: AtomicU64 = AtomicU64::new(0);
 static ACTION_KEYFRAME: AtomicBool = AtomicBool::new(false);
 static NOTE_KEYFRAME: AtomicBool = AtomicBool::new(false);
 static QPC_FREQ: OnceLock<i64> = OnceLock::new();
@@ -1302,13 +1328,17 @@ fn stats_json(unix_ms_: u64) -> String {
         }
     }
     format!(
-        "{{\"t\":\"stats\",\"ts\":{unix_ms_},\"callbacks\":{count},\"cb_avg_us\":{},\"cb_max_us\":{},\"dropped\":{},\"coalesced_moves\":{},\"keyframes\":{},\"keyframe_bytes\":{},\"working_set_mb\":{:.1},\"peak_working_set_mb\":{:.1},\"cpu_kernel_ms\":{kernel},\"cpu_user_ms\":{user}}}",
+        "{{\"t\":\"stats\",\"ts\":{unix_ms_},\"callbacks\":{count},\"cb_avg_us\":{},\"cb_max_us\":{},\"dropped\":{},\"coalesced_moves\":{},\"keyframes\":{},\"keyframe_bytes\":{},\"video_frames\":{},\"video_bytes\":{},\"video_gaps\":{},\"audio_bytes\":{},\"working_set_mb\":{:.1},\"peak_working_set_mb\":{:.1},\"cpu_kernel_ms\":{kernel},\"cpu_user_ms\":{user}}}",
         if count > 0 { total / count / 1000 } else { 0 },
         max / 1000,
         DROPPED.load(Ordering::Relaxed),
         COALESCED.load(Ordering::Relaxed),
         KEYFRAME_COUNT.load(Ordering::Relaxed),
         KEYFRAME_BYTES.load(Ordering::Relaxed),
+        VIDEO_FRAMES.load(Ordering::Relaxed),
+        VIDEO_BYTES.load(Ordering::Relaxed),
+        VIDEO_GAPS.load(Ordering::Relaxed),
+        AUDIO_BYTES.load(Ordering::Relaxed),
         ws as f64 / 1_048_576.0,
         peak as f64 / 1_048_576.0,
     )
@@ -1491,6 +1521,17 @@ fn writer_main(rx: mpsc::Receiver<Record>, path: &Path) {
                 format!(
                     "{{\"t\":\"marker\",\"ts\":{unix_ms},\"text\":\"{}\"}}",
                     json_escape(&text)
+                )
+            }
+            Record::Media {
+                unix_ms,
+                kind,
+                status,
+                detail,
+            } => {
+                format!(
+                    "{{\"t\":\"media\",\"ts\":{unix_ms},\"kind\":\"{kind}\",\"status\":\"{status}\",\"detail\":\"{}\"}}",
+                    json_escape(&detail)
                 )
             }
         };
@@ -1841,9 +1882,731 @@ unsafe extern "system" fn ctrl_handler(_event: DWORD) -> BOOL {
 
 // ---------------------------------------------------------------- main
 
+// ---------------------------------------------------------------- video (MJPEG-in-AVI)
+
+const HALFTONE: i32 = 4;
+
+/// Hand-rolled RIFF AVI writer for MJPEG (zero-dependency). Frames are JPEG
+/// chunks ('00dc'); sizes and the idx1 table are patched/written at finalize.
+struct AviWriter {
+    file: fs::File,
+    frames: u32,
+    max_frame: u32,
+    movi_fourcc_pos: u64,
+    riff_size_pos: u64,
+    total_frames_pos: u64,
+    avih_suggested_pos: u64,
+    strh_length_pos: u64,
+    strh_suggested_pos: u64,
+    movi_size_pos: u64,
+    index: Vec<(u32, u32)>,
+}
+
+impl AviWriter {
+    fn pos(&mut self) -> std::io::Result<u64> {
+        self.file.stream_position()
+    }
+    fn raw(&mut self, bytes: &[u8]) -> std::io::Result<()> {
+        self.file.write_all(bytes)
+    }
+    fn w32(&mut self, value: u32) -> std::io::Result<()> {
+        self.file.write_all(&value.to_le_bytes())
+    }
+    fn w16(&mut self, value: u16) -> std::io::Result<()> {
+        self.file.write_all(&value.to_le_bytes())
+    }
+    fn patch_at(&mut self, pos: u64, value: u32) -> std::io::Result<()> {
+        let end = self.file.stream_position()?;
+        self.file.seek(SeekFrom::Start(pos))?;
+        self.file.write_all(&value.to_le_bytes())?;
+        self.file.seek(SeekFrom::Start(end))?;
+        Ok(())
+    }
+
+    fn create(path: &Path, w: i32, h: i32, fps: u32) -> std::io::Result<Self> {
+        let file = fs::File::create(path)?;
+        let mut aw = AviWriter {
+            file,
+            frames: 0,
+            max_frame: 0,
+            movi_fourcc_pos: 0,
+            riff_size_pos: 0,
+            total_frames_pos: 0,
+            avih_suggested_pos: 0,
+            strh_length_pos: 0,
+            strh_suggested_pos: 0,
+            movi_size_pos: 0,
+            index: Vec::new(),
+        };
+        aw.raw(b"RIFF")?;
+        aw.riff_size_pos = aw.pos()?;
+        aw.w32(0)?;
+        aw.raw(b"AVI ")?;
+        // hdrl
+        aw.raw(b"LIST")?;
+        let hdrl_size_pos = aw.pos()?;
+        aw.w32(0)?;
+        let hdrl_start = aw.pos()?;
+        aw.raw(b"hdrl")?;
+        aw.raw(b"avih")?;
+        aw.w32(56)?;
+        aw.w32(1_000_000 / fps)?; // µs per frame
+        aw.w32(0)?; // max bytes/sec (unknown)
+        aw.w32(0)?; // padding granularity
+        aw.w32(0x10)?; // AVIF_HASINDEX
+        aw.total_frames_pos = aw.pos()?;
+        aw.w32(0)?;
+        aw.w32(0)?; // initial frames
+        aw.w32(1)?; // streams
+        aw.avih_suggested_pos = aw.pos()?;
+        aw.w32(0)?;
+        aw.w32(w as u32)?;
+        aw.w32(h as u32)?;
+        for _ in 0..4 {
+            aw.w32(0)?;
+        }
+        // strl
+        aw.raw(b"LIST")?;
+        let strl_size_pos = aw.pos()?;
+        aw.w32(0)?;
+        let strl_start = aw.pos()?;
+        aw.raw(b"strl")?;
+        aw.raw(b"strh")?;
+        aw.w32(56)?;
+        aw.raw(b"vids")?;
+        aw.raw(b"MJPG")?;
+        aw.w32(0)?; // flags
+        aw.w16(0)?; // priority
+        aw.w16(0)?; // language
+        aw.w32(0)?; // initial frames
+        aw.w32(1)?; // scale
+        aw.w32(fps)?; // rate
+        aw.w32(0)?; // start
+        aw.strh_length_pos = aw.pos()?;
+        aw.w32(0)?;
+        aw.strh_suggested_pos = aw.pos()?;
+        aw.w32(0)?;
+        aw.w32(0xFFFF_FFFF)?; // quality = default
+        aw.w32(0)?; // sample size
+        aw.w16(0)?;
+        aw.w16(0)?;
+        aw.w16(w as u16)?;
+        aw.w16(h as u16)?; // rcFrame
+                           // strf (BITMAPINFOHEADER)
+        aw.raw(b"strf")?;
+        aw.w32(40)?;
+        aw.w32(40)?;
+        aw.w32(w as u32)?;
+        aw.w32(h as u32)?;
+        aw.w16(1)?; // planes
+        aw.w16(24)?; // bit count
+        aw.raw(b"MJPG")?; // compression fourcc
+        aw.w32((w * h * 3) as u32)?; // size image
+        aw.w32(0)?;
+        aw.w32(0)?;
+        aw.w32(0)?;
+        aw.w32(0)?;
+        let strl_end = aw.pos()?;
+        aw.patch_at(strl_size_pos, (strl_end - strl_start) as u32)?;
+        let hdrl_end = aw.pos()?;
+        aw.patch_at(hdrl_size_pos, (hdrl_end - hdrl_start) as u32)?;
+        // movi
+        aw.raw(b"LIST")?;
+        aw.movi_size_pos = aw.pos()?;
+        aw.w32(0)?;
+        aw.movi_fourcc_pos = aw.pos()?;
+        aw.raw(b"movi")?;
+        Ok(aw)
+    }
+
+    /// Append one JPEG frame. Returns (absolute file offset of the JPEG bytes,
+    /// byte length) for the sidecar extraction index.
+    fn write_frame(&mut self, jpeg: &[u8]) -> std::io::Result<(u64, u32)> {
+        let chunk_pos = self.pos()?;
+        let idx_off = (chunk_pos - self.movi_fourcc_pos) as u32; // first chunk = 4
+        self.raw(b"00dc")?;
+        self.w32(jpeg.len() as u32)?;
+        let data_pos = self.pos()?;
+        self.file.write_all(jpeg)?;
+        if jpeg.len() % 2 == 1 {
+            self.file.write_all(&[0])?;
+        }
+        self.frames += 1;
+        self.max_frame = self.max_frame.max(jpeg.len() as u32);
+        self.index.push((idx_off, jpeg.len() as u32));
+        Ok((data_pos, jpeg.len() as u32))
+    }
+
+    fn finalize(mut self) -> std::io::Result<()> {
+        let chunks_end = self.pos()?;
+        self.raw(b"idx1")?;
+        self.w32((self.index.len() * 16) as u32)?;
+        for (off, len) in self.index.clone() {
+            self.raw(b"00dc")?;
+            self.w32(0x10)?; // AVIIF_KEYFRAME
+            self.w32(off)?;
+            self.w32(len)?;
+        }
+        let end = self.pos()?;
+        self.patch_at(
+            self.movi_size_pos,
+            (chunks_end - self.movi_fourcc_pos) as u32,
+        )?;
+        self.patch_at(self.riff_size_pos, (end - 8) as u32)?;
+        self.patch_at(self.total_frames_pos, self.frames)?;
+        self.patch_at(self.strh_length_pos, self.frames)?;
+        self.patch_at(self.avih_suggested_pos, self.max_frame)?;
+        self.patch_at(self.strh_suggested_pos, self.max_frame)?;
+        self.file.flush()
+    }
+}
+
+fn scaled_canvas(w: i32, h: i32, max_edge: i32) -> (i32, i32) {
+    let long = w.max(h) as f64;
+    let scale = if long > max_edge as f64 {
+        max_edge as f64 / long
+    } else {
+        1.0
+    };
+    let cw = ((w as f64 * scale) as i32) & !1;
+    let ch = ((h as f64 * scale) as i32) & !1;
+    (cw.max(2), ch.max(2))
+}
+
+fn encode_rgb_jpeg(rgb: &[u8], w: i32, h: i32, quality: u8) -> Option<Vec<u8>> {
+    let mut jpeg = Vec::new();
+    jpeg_encoder::Encoder::new(&mut jpeg, quality)
+        .encode(rgb, w as u16, h as u16, jpeg_encoder::ColorType::Rgb)
+        .ok()?;
+    Some(jpeg)
+}
+
+fn encode_black_jpeg(w: i32, h: i32, quality: u8) -> Vec<u8> {
+    let rgb = vec![0u8; (w as usize) * (h as usize) * 3];
+    encode_rgb_jpeg(&rgb, w, h, quality).unwrap_or_default()
+}
+
+/// Capture a window into a fixed cw x ch canvas (HALFTONE stretch) and encode
+/// JPEG. MJPEG-in-AVI needs dimension-stable frames; the canvas is fixed by
+/// the first captured window.
+/// Capture the FULL PRIMARY SCREEN (physical pixels — the recorder declares
+/// PMv2 awareness at startup) into the fixed canvas via HALFTONE StretchBlt,
+/// then JPEG-encode. Screen-DC BitBlt composites every window type —
+/// PrintWindow on a single window returns black for hardware-accelerated
+/// apps (Chromium/Electron), which is exactly what a demo video cannot risk.
+unsafe fn capture_screen_scaled_jpeg(cw: i32, ch: i32, quality: u8) -> Option<Vec<u8>> {
+    let w = unsafe { GetSystemMetrics(SM_CXSCREEN) };
+    let h = unsafe { GetSystemMetrics(SM_CYSCREEN) };
+    if w <= 0 || h <= 0 {
+        return None;
+    }
+    unsafe {
+        let screen = GetDC(ptr::null_mut());
+        if screen.is_null() {
+            return None;
+        }
+        let src_dc = CreateCompatibleDC(screen);
+        let src_bmp = CreateCompatibleBitmap(screen, w, h);
+        let dst_dc = CreateCompatibleDC(screen);
+        let dst_bmp = CreateCompatibleBitmap(screen, cw, ch);
+        if src_dc.is_null() || src_bmp.is_null() || dst_dc.is_null() || dst_bmp.is_null() {
+            if !src_bmp.is_null() {
+                DeleteObject(src_bmp);
+            }
+            if !dst_bmp.is_null() {
+                DeleteObject(dst_bmp);
+            }
+            if !src_dc.is_null() {
+                DeleteDC(src_dc);
+            }
+            if !dst_dc.is_null() {
+                DeleteDC(dst_dc);
+            }
+            ReleaseDC(ptr::null_mut(), screen);
+            return None;
+        }
+        let prev_src = SelectObject(src_dc, src_bmp);
+        BitBlt(src_dc, 0, 0, w, h, screen, 0, 0, SRCCOPY | CAPTUREBLT);
+        let prev_dst = SelectObject(dst_dc, dst_bmp);
+        SetStretchBltMode(dst_dc, HALFTONE);
+        StretchBlt(dst_dc, 0, 0, cw, ch, src_dc, 0, 0, w, h, SRCCOPY);
+        let mut info: BITMAPINFO = mem::zeroed();
+        info.bmiHeader.biSize = mem::size_of::<BITMAPINFOHEADER>() as DWORD;
+        info.bmiHeader.biWidth = cw;
+        info.bmiHeader.biHeight = -ch; // top-down
+        info.bmiHeader.biPlanes = 1;
+        info.bmiHeader.biBitCount = 32;
+        info.bmiHeader.biCompression = BI_RGB;
+        let mut bgra = vec![0u8; cw as usize * ch as usize * 4];
+        let copied = GetDIBits(
+            dst_dc,
+            dst_bmp,
+            0,
+            ch as UINT,
+            bgra.as_mut_ptr().cast(),
+            &mut info,
+            DIB_RGB_COLORS,
+        );
+        SelectObject(src_dc, prev_src);
+        SelectObject(dst_dc, prev_dst);
+        DeleteObject(src_bmp);
+        DeleteObject(dst_bmp);
+        DeleteDC(src_dc);
+        DeleteDC(dst_dc);
+        ReleaseDC(ptr::null_mut(), screen);
+        if copied == 0 {
+            return None;
+        }
+        let mut rgb = Vec::with_capacity(cw as usize * ch as usize * 3);
+        for px in bgra.chunks_exact(4) {
+            rgb.extend_from_slice(&[px[2], px[1], px[0]]);
+        }
+        encode_rgb_jpeg(&rgb, cw, ch, quality)
+    }
+}
+
+fn video_index_line(
+    file: &mut Option<fs::File>,
+    i: u64,
+    kind: &str,
+    reason: Option<&str>,
+    off: u64,
+    len: u32,
+) {
+    if let Some(f) = file.as_mut() {
+        let reason_json = reason
+            .map(|r| format!(",\"reason\":\"{r}\""))
+            .unwrap_or_default();
+        let _ = writeln!(
+            f,
+            "{{\"i\":{i},\"ts\":{},\"kind\":\"{kind}\"{reason_json},\"off\":{off},\"len\":{len}}}",
+            unix_ms()
+        );
+        let _ = f.flush();
+    }
+}
+
+/// Video thread: ~fps frames of the PRIMARY SCREEN into a single MJPEG-AVI +
+/// a JSONL extraction/redaction index. Ticks where the foreground window is
+/// one of OUR OWN windows (note dialog) are skipped, so the recorder never
+/// records itself. Password focus and the secure desktop get marked black
+/// gap frames — pixels are NEVER captured in a secret context (same policy
+/// as keyframes, equal force). The topmost REC indicator stays visible in
+/// frames on purpose: it is the on-tape proof that recording was active.
+fn video_main(video_dir: PathBuf, fps: u32, max_edge: i32, quality: u8) {
+    let frame_dur = Duration::from_millis((1000 / fps.max(1)) as u64);
+    let avi_path = video_dir.join("video.avi");
+    let index_path = video_dir.join("index.jsonl");
+    let mut index_file = match OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&index_path)
+    {
+        Ok(f) => Some(f),
+        Err(e) => {
+            eprintln!("[rec] video index unavailable: {e}");
+            None
+        }
+    };
+    let mut writer: Option<AviWriter> = None;
+    let mut canvas: Option<(i32, i32)> = None;
+    let mut black: Option<Vec<u8>> = None;
+    let mut frame_no: u64 = 0;
+    let mut indexed_header = false;
+    loop {
+        if SHUTDOWN.load(Ordering::Relaxed) {
+            break;
+        }
+        let tick = Instant::now();
+        if RECORDING.load(Ordering::Relaxed) {
+            let secure = input_desktop_is_secure();
+            let password = !secure && is_password_context();
+            let fg = unsafe { GetForegroundWindow() };
+            let ours = is_our_hwnd(fg as usize);
+            // Canvas follows the primary screen, not a window: the demo video
+            // is a SCREEN recording (taskbar, dialogs and all), and screen-DC
+            // capture is the only path that composites hardware-accelerated
+            // windows correctly.
+            let (sw, sh) =
+                unsafe { (GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN)) };
+            if secure || password {
+                let reason = if secure {
+                    "secure-desktop"
+                } else {
+                    "password-focus"
+                };
+                if canvas.is_none() && sw > 0 && sh > 0 {
+                    canvas = Some(scaled_canvas(sw, sh, max_edge));
+                }
+                if let Some((cw, ch)) = canvas {
+                    if writer.is_none() {
+                        writer = AviWriter::create(&avi_path, cw, ch, fps).ok();
+                    }
+                    if let Some(avi) = writer.as_mut() {
+                        let jpg = black
+                            .get_or_insert_with(|| encode_black_jpeg(cw, ch, quality))
+                            .clone();
+                        if !jpg.is_empty() {
+                            if let Ok((off, len)) = avi.write_frame(&jpg) {
+                                VIDEO_FRAMES.fetch_add(1, Ordering::Relaxed);
+                                VIDEO_GAPS.fetch_add(1, Ordering::Relaxed);
+                                VIDEO_BYTES.fetch_add(len as u64, Ordering::Relaxed);
+                                video_index_line(
+                                    &mut index_file,
+                                    frame_no,
+                                    "redacted-gap",
+                                    Some(reason),
+                                    off,
+                                    len,
+                                );
+                                frame_no += 1;
+                            }
+                        }
+                    }
+                } else {
+                    VIDEO_GAPS.fetch_add(1, Ordering::Relaxed);
+                    video_index_line(
+                        &mut index_file,
+                        frame_no,
+                        "redacted-gap-no-canvas",
+                        Some(reason),
+                        0,
+                        0,
+                    );
+                    frame_no += 1;
+                }
+            } else if !ours && sw > 0 && sh > 0 {
+                let (cw, ch) = *canvas.get_or_insert_with(|| scaled_canvas(sw, sh, max_edge));
+                if writer.is_none() {
+                    writer = AviWriter::create(&avi_path, cw, ch, fps).ok();
+                }
+                if let Some(avi) = writer.as_mut() {
+                    if !indexed_header {
+                        if let Some(f) = index_file.as_mut() {
+                            let _ = writeln!(
+                                f,
+                                "{{\"t\":\"video-index\",\"format\":\"fastcua-video-index/1\",\"avi\":\"video.avi\",\"fps\":{fps},\"width\":{cw},\"height\":{ch}}}"
+                            );
+                            let _ = f.flush();
+                        }
+                        indexed_header = true;
+                    }
+                    if let Some(jpg) = unsafe { capture_screen_scaled_jpeg(cw, ch, quality) } {
+                        if let Ok((off, len)) = avi.write_frame(&jpg) {
+                            VIDEO_FRAMES.fetch_add(1, Ordering::Relaxed);
+                            VIDEO_BYTES.fetch_add(len as u64, Ordering::Relaxed);
+                            video_index_line(&mut index_file, frame_no, "frame", None, off, len);
+                            frame_no += 1;
+                        }
+                    }
+                }
+            }
+            // our own foreground windows (note dialog): tick skipped
+        }
+        let elapsed = tick.elapsed();
+        if elapsed < frame_dur {
+            thread::sleep(frame_dur - elapsed);
+        }
+    }
+    if let Some(avi) = writer {
+        let _ = avi.finalize();
+    }
+    if let Some(f) = index_file.as_mut() {
+        let _ = writeln!(f, "{{\"t\":\"video-footer\",\"frames\":{frame_no}}}");
+        let _ = f.flush();
+    }
+}
+
+// ---------------------------------------------------------------- audio (WASAPI)
+
+const CLSID_MM_DEVICE_ENUMERATOR: Guid = Guid {
+    data1: 0xbcde0395,
+    data2: 0xe52f,
+    data3: 0x467c,
+    data4: [0x8e, 0x3d, 0xc4, 0x57, 0x92, 0x91, 0x69, 0x2e],
+};
+const IID_IMM_DEVICE_ENUMERATOR: Guid = Guid {
+    data1: 0xa95664d2,
+    data2: 0x9614,
+    data3: 0x4f35,
+    data4: [0xa7, 0x46, 0xde, 0x8d, 0xb6, 0x36, 0x17, 0xe6],
+};
+const IID_IAUDIO_CLIENT: Guid = Guid {
+    data1: 0x1cb9ad4c,
+    data2: 0xdbfa,
+    data3: 0x4c32,
+    data4: [0xb1, 0x78, 0xc2, 0xf5, 0x68, 0xa7, 0x03, 0xb2],
+};
+const IID_IAUDIO_CAPTURE_CLIENT: Guid = Guid {
+    data1: 0xc8adbd64,
+    data2: 0xe71e,
+    data3: 0x48a0,
+    data4: [0xa4, 0xde, 0x18, 0x5c, 0x39, 0x5c, 0xd3, 0x17],
+};
+
+const AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM: u32 = 0x8000_0000;
+const AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY: u32 = 0x0800_0000;
+const AUDCLNT_BUFFERFLAGS_SILENT: u32 = 0x2;
+
+#[repr(C)]
+struct WaveFormatEx {
+    tag: u16,
+    channels: u16,
+    samples_per_sec: u32,
+    avg_bytes_per_sec: u32,
+    block_align: u16,
+    bits_per_sample: u16,
+    cb_size: u16,
+}
+
+fn audio_main(path: PathBuf) {
+    match unsafe { audio_capture(&path) } {
+        Ok(bytes) => {
+            AUDIO_BYTES.store(bytes, Ordering::Relaxed);
+            println!("[rec] audio: {bytes} bytes -> {}", path.display());
+        }
+        Err(reason) => {
+            // Graceful degradation: audio is additive; the session must never
+            // fail because a microphone is missing, busy, or denied.
+            println!("[rec] audio unavailable (recording continues without it): {reason}");
+            enqueue(Record::Media {
+                unix_ms: unix_ms(),
+                kind: "audio",
+                status: "unavailable",
+                detail: reason,
+            });
+        }
+    }
+}
+
+unsafe fn audio_capture(path: &Path) -> Result<u64, String> {
+    let init = unsafe { CoInitializeEx(ptr::null_mut(), COINIT_MULTITHREADED) };
+    if init < 0 && init != RPC_E_CHANGED_MODE {
+        return Err(format!("CoInitializeEx 0x{:08x}", init as u32));
+    }
+    let result = unsafe { audio_capture_inner(path) };
+    if init == 0 || init == 1 {
+        unsafe { CoUninitialize() };
+    }
+    if result.is_err() {
+        // Contract: no WAV file means the track was unavailable. Drop the
+        // header-only stub so reviewers never see a 44-byte decoy.
+        let _ = fs::remove_file(path);
+    }
+    result
+}
+
+unsafe fn audio_capture_inner(path: &Path) -> Result<u64, String> {
+    let mut file = fs::File::create(path).map_err(|e| format!("create wav: {e}"))?;
+    // Canonical PCM header; sizes patched at finalize.
+    let mut fmt = Vec::with_capacity(16);
+    fmt.extend_from_slice(&1u16.to_le_bytes()); // PCM
+    fmt.extend_from_slice(&1u16.to_le_bytes()); // mono
+    fmt.extend_from_slice(&16_000u32.to_le_bytes());
+    fmt.extend_from_slice(&32_000u32.to_le_bytes());
+    fmt.extend_from_slice(&2u16.to_le_bytes()); // block align
+    fmt.extend_from_slice(&16u16.to_le_bytes()); // bits
+    file.write_all(b"RIFF\0\0\0\0WAVEfmt \x10\0\0\0")
+        .map_err(|e| format!("wav header: {e}"))?;
+    file.write_all(&fmt).map_err(|e| format!("wav fmt: {e}"))?;
+    file.write_all(b"data\0\0\0\0")
+        .map_err(|e| format!("wav data tag: {e}"))?;
+    let mut data_bytes: u64 = 0;
+
+    let wfx = WaveFormatEx {
+        tag: 1,
+        channels: 1,
+        samples_per_sec: 16_000,
+        avg_bytes_per_sec: 32_000,
+        block_align: 2,
+        bits_per_sample: 16,
+        cb_size: 0,
+    };
+    let mut enumerator: ComPtr = ptr::null_mut();
+    let hr = unsafe {
+        CoCreateInstance(
+            &CLSID_MM_DEVICE_ENUMERATOR,
+            ptr::null_mut(),
+            CLSCTX_INPROC_SERVER,
+            &IID_IMM_DEVICE_ENUMERATOR,
+            &mut enumerator,
+        )
+    };
+    if hr < 0 || enumerator.is_null() {
+        return Err(format!("MMDeviceEnumerator 0x{:08x}", hr as u32));
+    }
+    let result = (|| {
+        let get_default: unsafe extern "system" fn(ComPtr, u32, u32, *mut ComPtr) -> i32 =
+            unsafe { mem::transmute(com_method(enumerator, 4)) };
+        let mut device: ComPtr = ptr::null_mut();
+        let hr = unsafe { get_default(enumerator, 0, 0, &mut device) }; // eCapture, eConsole
+        if hr < 0 || device.is_null() {
+            return Err(format!(
+                "no default capture endpoint 0x{:08x} (no microphone?)",
+                hr as u32
+            ));
+        }
+        let activate: unsafe extern "system" fn(
+            ComPtr,
+            *const Guid,
+            u32,
+            *const c_void,
+            *mut ComPtr,
+        ) -> i32 = unsafe { mem::transmute(com_method(device, 3)) };
+        let mut client: ComPtr = ptr::null_mut();
+        let hr = unsafe {
+            activate(
+                device,
+                &IID_IAUDIO_CLIENT,
+                CLSCTX_INPROC_SERVER,
+                ptr::null(),
+                &mut client,
+            )
+        };
+        unsafe { release(device) };
+        if hr < 0 || client.is_null() {
+            return Err(format!("activate IAudioClient 0x{:08x}", hr as u32));
+        }
+        let stream_result = unsafe { audio_stream(client, &wfx, &mut file, &mut data_bytes) };
+        unsafe { release(client) };
+        stream_result
+    })();
+    unsafe { release(enumerator) };
+    // Patch RIFF/WAVE sizes so even a failed capture leaves a valid file.
+    if let Ok(end) = file.stream_position() {
+        let _ = file.seek(SeekFrom::Start(4));
+        let _ = file.write_all(&((end - 8) as u32).to_le_bytes());
+        let _ = file.seek(SeekFrom::Start(40));
+        let _ = file.write_all(&(data_bytes as u32).to_le_bytes());
+        let _ = file.seek(SeekFrom::Start(end));
+    }
+    let _ = file.flush();
+    result?;
+    Ok(data_bytes)
+}
+
+unsafe fn audio_stream(
+    client: ComPtr,
+    wfx: &WaveFormatEx,
+    file: &mut fs::File,
+    data_bytes: &mut u64,
+) -> Result<(), String> {
+    let initialize: unsafe extern "system" fn(
+        ComPtr,
+        u32,
+        u32,
+        i64,
+        i64,
+        *const WaveFormatEx,
+        *const Guid,
+    ) -> i32 = unsafe { mem::transmute(com_method(client, 3)) };
+    let hr = unsafe {
+        initialize(
+            client,
+            0, // shared
+            AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY,
+            2_000_000, // 200 ms buffer, 100-ns units
+            0,
+            wfx,
+            ptr::null(),
+        )
+    };
+    if hr < 0 {
+        return Err(format!(
+            "IAudioClient::Initialize 0x{:08x} (device busy or denied)",
+            hr as u32
+        ));
+    }
+    // IAudioClient vtable: 3 Initialize, 4 GetBufferSize, 5 GetStreamLatency,
+    // 6 GetCurrentPadding, 7 IsFormatSupported, 8 GetMixFormat, 9 GetDevicePeriod,
+    // 10 Start, 11 Stop, 12 Reset, 13 SetEventHandle, 14 GetService.
+    let get_service: unsafe extern "system" fn(ComPtr, *const Guid, *mut ComPtr) -> i32 =
+        unsafe { mem::transmute(com_method(client, 14)) };
+    let mut capture: ComPtr = ptr::null_mut();
+    let hr = unsafe { get_service(client, &IID_IAUDIO_CAPTURE_CLIENT, &mut capture) };
+    if hr < 0 || capture.is_null() {
+        return Err(format!(
+            "GetService(IAudioCaptureClient) 0x{:08x}",
+            hr as u32
+        ));
+    }
+    let start: unsafe extern "system" fn(ComPtr) -> i32 =
+        unsafe { mem::transmute(com_method(client, 10)) };
+    let hr = unsafe { start(client) };
+    if hr < 0 {
+        unsafe { release(capture) };
+        return Err(format!("IAudioClient::Start 0x{:08x}", hr as u32));
+    }
+    enqueue(Record::Media {
+        unix_ms: unix_ms(),
+        kind: "audio",
+        status: "ok",
+        detail: "PCM 16kHz mono 16-bit via WASAPI shared capture".into(),
+    });
+    let get_packet: unsafe extern "system" fn(ComPtr, *mut u32) -> i32 =
+        unsafe { mem::transmute(com_method(capture, 5)) };
+    let get_buffer: unsafe extern "system" fn(
+        ComPtr,
+        *mut *mut u8,
+        *mut u32,
+        *mut u32,
+        *mut u64,
+        *mut u64,
+    ) -> i32 = unsafe { mem::transmute(com_method(capture, 3)) };
+    let release_buffer: unsafe extern "system" fn(ComPtr, u32) -> i32 =
+        unsafe { mem::transmute(com_method(capture, 4)) };
+    while !SHUTDOWN.load(Ordering::Relaxed) {
+        thread::sleep(Duration::from_millis(10));
+        let mut packet: u32 = 0;
+        if unsafe { get_packet(capture, &mut packet) } < 0 {
+            break;
+        }
+        while packet > 0 {
+            let mut data: *mut u8 = ptr::null_mut();
+            let mut frames: u32 = 0;
+            let mut flags: u32 = 0;
+            let hr = unsafe {
+                get_buffer(
+                    capture,
+                    &mut data,
+                    &mut frames,
+                    &mut flags,
+                    ptr::null_mut(),
+                    ptr::null_mut(),
+                )
+            };
+            if hr < 0 {
+                break;
+            }
+            let bytes = frames as usize * 2;
+            if flags & AUDCLNT_BUFFERFLAGS_SILENT != 0 || data.is_null() {
+                let zeros = vec![0u8; bytes];
+                let _ = file.write_all(&zeros);
+            } else {
+                let slice = unsafe { std::slice::from_raw_parts(data, bytes) };
+                let _ = file.write_all(slice);
+            }
+            *data_bytes += bytes as u64;
+            AUDIO_BYTES.store(*data_bytes, Ordering::Relaxed);
+            let _ = unsafe { release_buffer(capture, frames) };
+            if unsafe { get_packet(capture, &mut packet) } < 0 {
+                break;
+            }
+        }
+    }
+    let stop: unsafe extern "system" fn(ComPtr) -> i32 =
+        unsafe { mem::transmute(com_method(client, 11)) };
+    unsafe {
+        stop(client);
+        release(capture);
+    }
+    let _ = file.flush();
+    Ok(())
+}
+
 fn print_help() {
     println!(
-        "skill-recorder — FastCUA issue #3 stages 2-4: demonstration recorder v2\n\
+        "skill-recorder — FastCUA issue #3 stages 2-5: demonstration recorder v2 + media\n\
          \n\
          Options:\n\
          \x20 --out DIR               recording directory (default ./recordings/<timestamp>)\n\
@@ -1851,12 +2614,22 @@ fn print_help() {
          \x20 --keyframe-interval SEC periodic JPEG keyframe cadence (default 30)\n\
          \x20 --uia-poll-ms N         UIA focus poll cadence (default 200)\n\
          \x20 --no-indicator          hide the on-top REC indicator window\n\
+         \x20 --no-video              disable the demo video track\n\
+         \x20 --no-audio              disable microphone narration capture\n\
+         \x20 --video-fps N           demo video frame rate (default 4)\n\
+         \x20 --video-max-edge N      demo video longest edge in px (default 1568)\n\
+         \x20 --video-quality N       demo video JPEG quality 1-100 (default 70)\n\
          \x20 --help\n\
          \n\
          Controls: Ctrl+Alt+N narration note, Ctrl+Alt+R pause/resume, Ctrl+Alt+X stop now.\n\
-         Output: session.jsonl (fastcua-recording/1) + keyframes/*.jpg — local, inspectable.\n\
-         Redaction: key characters never logged; password fields drop vk/value and suppress\n\
-         keyframes; secure desktop logs only a marker."
+         Output: session.jsonl (fastcua-recording/1), keyframes/*.jpg,\n\
+         \x20 video/video.avi (MJPEG, ~4fps) + video/index.jsonl (frame offsets for\n\
+         \x20 frame-extract.mjs), audio/narration.wav (PCM 16kHz mono) — all local.\n\
+         Redaction: key characters never logged; password fields drop vk/value and\n\
+         suppress keyframes; during password focus or the secure desktop the video\n\
+         track stores a marker black frame and an index gap entry, never pixels;\n\
+         secure desktop input logs only a marker. No mic / busy mic degrades to\n\
+         a media note in session.jsonl, never a recording failure."
     );
 }
 
@@ -1899,13 +2672,50 @@ fn main() {
         .unwrap_or(200)
         .max(50);
     let no_indicator = args.iter().any(|a| a == "--no-indicator");
+    let no_video = args.iter().any(|a| a == "--no-video");
+    let no_audio = args.iter().any(|a| a == "--no-audio");
+    let video_fps = opt("--video-fps")
+        .and_then(|v| v.parse::<u32>().ok())
+        .unwrap_or(4)
+        .clamp(1, 15);
+    let video_max_edge = opt("--video-max-edge")
+        .and_then(|v| v.parse::<i32>().ok())
+        .unwrap_or(1568)
+        .max(64);
+    let video_quality = opt("--video-quality")
+        .and_then(|v| v.parse::<u8>().ok())
+        .unwrap_or(70)
+        .clamp(30, 95);
+    let video_dir = out_dir.join("video");
+    let audio_dir = out_dir.join("audio");
 
     fs::create_dir_all(&keyframe_dir).expect("create recording dir");
+    if !no_video {
+        fs::create_dir_all(&video_dir).expect("create video dir");
+    }
+    if !no_audio {
+        fs::create_dir_all(&audio_dir).expect("create audio dir");
+    }
     let session_path = out_dir.join("session.jsonl");
 
     // Header line: versioned format declaration, machine context, policy.
+    let media_video = if no_video {
+        "null".to_string()
+    } else {
+        "\"video/video.avi\"".to_string()
+    };
+    let media_video_index = if no_video {
+        "null".to_string()
+    } else {
+        "\"video/index.jsonl\"".to_string()
+    };
+    let media_audio = if no_audio {
+        "null".to_string()
+    } else {
+        "\"audio/narration.wav\"".to_string()
+    };
     let header = format!(
-        "{{\"t\":\"header\",\"format\":\"{SESSION_FORMAT}\",\"tool\":\"skill-recorder\",\"version\":\"{}\",\"started_ts\":{},\"machine\":{{\"monitors\":{},\"virtual_screen\":[{},{}],\"system_dpi\":{},\"keyboard_layout\":\"0x{:x}\"}},\"redaction\":\"vk codes never resolved to characters; password fields drop vk+value and suppress keyframes; secure desktop logs marker only\",\"controls\":{{\"pause\":\"Ctrl+Alt+R\",\"note\":\"Ctrl+Alt+N\",\"stop\":\"Ctrl+Alt+X\"}}}}",
+        "{{\"t\":\"header\",\"format\":\"{SESSION_FORMAT}\",\"tool\":\"skill-recorder\",\"version\":\"{}\",\"started_ts\":{},\"machine\":{{\"monitors\":{},\"virtual_screen\":[{},{}],\"system_dpi\":{},\"keyboard_layout\":\"0x{:x}\"}},\"media\":{{\"video\":{},\"video_index\":{},\"audio\":{},\"audio_note\":\"audio is best-effort; a t=media record declares availability early in the session\"}},\"redaction\":\"vk codes never resolved to characters; password fields drop vk+value and suppress keyframes AND video frames (marked gaps); secure desktop logs marker only\",\"controls\":{{\"pause\":\"Ctrl+Alt+R\",\"note\":\"Ctrl+Alt+N\",\"stop\":\"Ctrl+Alt+X\"}}}}",
         env!("CARGO_PKG_VERSION"),
         unix_ms(),
         unsafe { GetSystemMetrics(SM_CMONITORS) },
@@ -1913,6 +2723,9 @@ fn main() {
         unsafe { GetSystemMetrics(SM_CYVIRTUALSCREEN) },
         unsafe { GetDpiForSystem() },
         unsafe { GetKeyboardLayout(0) } as usize & 0xffff,
+        media_video,
+        media_video_index,
+        media_audio,
     );
     fs::write(&session_path, header + "\n").expect("write session header");
 
@@ -1933,6 +2746,29 @@ fn main() {
         .name("rec-poller".into())
         .spawn(move || poller_main(wake_rx, poll_dir, uia_poll_ms, keyframe_interval_s))
         .expect("poller thread");
+
+    let video_handle = if no_video {
+        None
+    } else {
+        let dir = video_dir.clone();
+        Some(
+            thread::Builder::new()
+                .name("rec-video".into())
+                .spawn(move || video_main(dir, video_fps, video_max_edge, video_quality))
+                .expect("video thread"),
+        )
+    };
+    let audio_handle = if no_audio {
+        None
+    } else {
+        let path = audio_dir.join("narration.wav");
+        Some(
+            thread::Builder::new()
+                .name("rec-audio".into())
+                .spawn(move || audio_main(path))
+                .expect("audio thread"),
+        )
+    };
 
     {
         let tx = SENDER.get().unwrap().clone();
@@ -2019,6 +2855,28 @@ fn main() {
         keyframe_dir.display()
     );
     println!(
+        "[rec] video: {}",
+        if no_video {
+            "disabled".to_string()
+        } else {
+            format!(
+                "MJPEG-AVI {}fps long-edge≤{} q{} -> {}",
+                video_fps,
+                video_max_edge,
+                video_quality,
+                video_dir.display()
+            )
+        }
+    );
+    println!(
+        "[rec] audio: {}",
+        if no_audio {
+            "disabled".to_string()
+        } else {
+            "WASAPI PCM 16kHz mono (best-effort)".to_string()
+        }
+    );
+    println!(
         "[rec] indicator: {}",
         if no_indicator {
             "disabled"
@@ -2102,6 +2960,13 @@ fn main() {
         if hot_x != 0 {
             UnregisterHotKey(ptr::null_mut(), 3);
         }
+    }
+    // Finalize media before the last stats record so byte counts are complete.
+    if let Some(handle) = video_handle {
+        let _ = handle.join();
+    }
+    if let Some(handle) = audio_handle {
+        let _ = handle.join();
     }
     enqueue(Record::Stats { unix_ms: unix_ms() });
     enqueue(Record::Marker {

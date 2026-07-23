@@ -135,3 +135,19 @@ provenance, ⚠ markers for everything uncertain) -> human review ->
 draft into a live skills directory. Full design:
 `docs/skill-recorder-design.md`; agent-facing procedure:
 `skills/skill-recorder/`.
+
+---
+
+**Media round: screen video + mic audio saved per session, agent-operated promotion (POSTED 2026-07-23)**
+
+Posted as https://github.com/Guojiz/FastCUA/issues/3#issuecomment-MEDIA_ROUND_ID
+
+Follow-up: the session now preserves reviewable media and the flow is fully agent-operated.
+
+- [x] Screen video saved — zero-dep hand-rolled MJPEG-in-AVI (RIFF), 4 fps, long edge ≤1568, ~17.4 MB/min measured; `video/index.jsonl` gives random access by timestamp, and `frame-extract.mjs` pulls any moment as a viewable JPEG so the agent can review a step on demand. One real bug caught by smoke-testing: PrintWindow/BitBlt on hardware-accelerated foreground windows produced all-black frames — capture moved to the screen DC (correct "record the screen" semantics; taskbar and dialogs included).
+- [x] Audio saved with graceful degradation — WASAPI mic capture → PCM 16 kHz mono WAV (`audio/narration.wav`); service down / no mic / busy writes one `media unavailable` record and the session continues (verified for real: Windows Audio service was stopped, no fake 44-byte WAV left behind). Transcription remains future work; typed notes stay the machine-readable intent channel.
+- [x] Video redaction equals keyframe redaction — during password-focus the video writes marked black frames; the index logged 6 `redacted-gap reason:"password-focus"` records inside the password window, and frame extraction at those timestamps refuses (exit 4: "no pixels at that moment, by design").
+- [x] Agent-operated promotion — `skills/skill-recorder/SKILL.md` is now an agent playbook (exact commands, wait points, review template); `promote.mjs --detect-host` finds the host skills dir (env override → Kimi → Claude Code → opencode), refuses without `--yes-i-reviewed`, refuses `verified:false` without `--force-unverified` (which appends its own warning to the copy), and the agent promotes only after explicit user approval in conversation — Cowork's "lands in your skill library" step, with a human gate kept.
+- Media stays local: drafts reference relative paths as review aids, bytes are never embedded in SKILL.md (asserted), dry-run ignores media.
+
+Validation: 112/112 real-machine checks (`tests/skill-recorder-validation.mjs`), full regression suite green.

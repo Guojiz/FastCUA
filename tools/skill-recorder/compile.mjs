@@ -162,9 +162,10 @@ function buildSteps(events) {
       i++;
       continue;
     }
-    // Context records (key releases, focus heartbeats, keyframes, stats) are
-    // observations, not new user intent — they must never split a run.
-    const isContextRecord = ev.t === "key_up" || ev.t === "focus" || ev.t === "keyframe" || ev.t === "stats";
+    // Context records (key releases, focus heartbeats, keyframes, stats,
+    // media availability notes) are observations, not new user intent — they
+    // must never split a run.
+    const isContextRecord = ev.t === "key_up" || ev.t === "focus" || ev.t === "keyframe" || ev.t === "stats" || ev.t === "media";
     if (redactedRun && !isContextRecord) flushRedacted();
 
     if (ev.t === "key_down" && (ev.class === "printable" || ev.class === "ime" || ev.vk === 0x20)
@@ -348,6 +349,26 @@ function compileSession(sessionPath, outDir) {
   if (bad.length) warnings.push(`${UNRESOLVED}: ${bad.length} unparseable JSONL lines (${bad.slice(0, 5).join(",")})`);
 
   const keyframes = events.filter((e) => e.t === "keyframe" && !e.suppressed && e.path);
+  // Media layout: header.media declares the intended files (null when the
+  // track was disabled with --no-video/--no-audio); t:media records then
+  // report runtime availability. Audio is best-effort — an "unavailable"
+  // record downgrades the path to null and keeps the reason. Paths are
+  // session-relative so drafts stay movable and reviewable anywhere.
+  const headerMedia = header?.media || {};
+  const mediaRecords = events.filter((e) => e.t === "media");
+  const audioRec = mediaRecords.find((e) => e.kind === "audio");
+  const audioUnavailable = audioRec?.status === "unavailable";
+  const media = {
+    video: headerMedia.video || null,
+    video_index: headerMedia.video_index || null,
+    audio: audioUnavailable ? null : headerMedia.audio || null,
+    audio_note: audioUnavailable
+      ? `unavailable: ${audioRec.detail}`
+      : headerMedia.audio
+        ? audioRec?.detail || headerMedia.audio_note || null
+        : null,
+    keyframes: "keyframes",
+  };
   // App scope: the exact set of applications the demonstration touched. A
   // recorded workflow may never exceed this scope — the dry-run runner refuses
   // out-of-scope steps outright, and the daemon whitelist enforces it again
@@ -363,6 +384,7 @@ function compileSession(sessionPath, outDir) {
     steps,
     parameters,
     warnings,
+    media,
     stats: {
       events: events.length,
       steps: steps.length,
@@ -401,6 +423,11 @@ function compileSession(sessionPath, outDir) {
     ``,
     `## Keyframes`,
     `- ${keyframes.length} JPEG frames in \`${path.join(path.dirname(sessionPath), "keyframes")}\``,
+    ``,
+    `## Media (review aids — never embedded)`,
+    `- video: ${media.video ? `\`${media.video}\` (MJPEG AVI; per-frame index at \`${media.video_index}\`)` : "(not recorded)"}`,
+    `- audio: ${media.audio ? `\`${media.audio}\` (PCM 16kHz mono narration)` : `(none)${media.audio_note ? ` — ${media.audio_note}` : ""}`}`,
+    `- extract a frame: \`node tools/skill-recorder/frame-extract.mjs <session-dir> --note 1\``,
     ``,
   ].join("\n");
   fs.writeFileSync(draftMd, md);
@@ -449,6 +476,33 @@ ${stepsMd}
 ## Parameters / 参数
 
 ${paramsTable}
+
+## Review aids / 审查辅助
+
+The recording session also captured **review media**, kept next to the source
+session (NOT copied into this folder, and never embedded in this file):
+
+${[
+  draft.media.video
+    ? `- video: \`${path.join(path.dirname(sessionPath), draft.media.video)}\` — MJPEG AVI of the demo (per-frame index: \`${path.join(path.dirname(sessionPath), draft.media.video_index)}\`)`
+    : null,
+  draft.media.audio
+    ? `- audio: \`${path.join(path.dirname(sessionPath), draft.media.audio)}\` — PCM 16kHz mono narration. Listen to it during review; transcription is out of scope.`
+    : draft.media.audio_note
+      ? `- audio: none (${draft.media.audio_note})`
+      : null,
+].filter(Boolean).join("\n") || "- (no media recorded)"}
+
+When a step is unclear, an agent may LOOK at the corresponding moment instead
+of guessing:
+
+\`\`\`
+node tools/skill-recorder/frame-extract.mjs ${JSON.stringify(path.dirname(sessionPath))} --note 1
+\`\`\`
+
+(Also \`--at-ms <epoch-ms>\` or \`--at <ISO-8601>\`.) Moments that were redacted
+(password focus, secure desktop) have no pixels by design — the extractor will
+say so. Media exists to help human review; a replay must never depend on it.
 
 ## Semantic anchors / 语义锚点
 

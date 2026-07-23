@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 //
-// Real-machine validation for FastCUA issue #3 stages 2-4 (skill-recorder).
+// Real-machine validation for FastCUA issue #3 stages 2-5 (skill-recorder).
 //
 // Records a REAL demonstration session on this machine:
 //   FastCuaFixture: click edit -> type "report-2026-07-23" -> note via
@@ -10,7 +10,10 @@
 // LABEL it injected, the compiler must flag it ⚠ unresolved, and the narration
 // notes (also injected, into the recorder's own dialog) must still be accepted
 // while the dialog's own keystrokes stay OUT of the demo stream.
-// Then compiles the session and asserts the draft + Skill folder contract.
+// Then compiles the session and asserts the draft + Skill folder contract,
+// the media tracks (MJPEG AVI + frame index + best-effort WAV), the
+// frame-extract review aid (including the redaction gate), and the gated
+// promotion tool (refusals, forced unverified copy, overwrite).
 //
 // Usage: node tests/skill-recorder-validation.mjs
 // Output: tests/_skillrec-validation-<yyyymmdd-HHmmss>.log
@@ -235,10 +238,12 @@ async function main() {
     await sleep(400);
 
     // Step 2: password box (must be redacted end-to-end).
+    const pwStart = Date.now();
     await client.request("click", { window: fixtureWindow, element_index: editIndexes[2] });
     await sleep(500);
     await client.request("type_text", { window: fixtureWindow, text: "s3cret!" });
     await sleep(800);
+    const pwEnd = Date.now();
 
     // Step 3: click the Increment button.
     await client.request("click", { window: fixtureWindow, element_index: buttonIndex });
@@ -325,6 +330,98 @@ async function main() {
     const stats = events.filter((e) => e?.t === "stats").pop();
     check("zero dropped hook events", stats && stats.dropped === 0, `callbacks=${stats?.callbacks} avg=${stats?.cb_avg_us}us`);
 
+    // ---------------- media tracks: video (stage 5) ----------------
+    log("--- media: MJPEG video track + frame index ---");
+    check("header declares media layout", header?.media?.video === "video/video.avi"
+      && header?.media?.video_index === "video/index.jsonl"
+      && "audio" in (header?.media || {}), JSON.stringify(header?.media));
+    check("stats carry media counters",
+      stats && typeof stats.video_frames === "number" && typeof stats.video_bytes === "number"
+        && typeof stats.video_gaps === "number" && typeof stats.audio_bytes === "number",
+      `video_frames=${stats?.video_frames} video_bytes=${stats?.video_bytes} video_gaps=${stats?.video_gaps} audio_bytes=${stats?.audio_bytes}`);
+
+    const aviPath = path.join(recDir, "video", "video.avi");
+    const indexPath = path.join(recDir, "video", "index.jsonl");
+    check("video.avi + index.jsonl exist", fs.existsSync(aviPath) && fs.existsSync(indexPath), "");
+    const avi = fs.readFileSync(aviPath);
+    const indexLines = fs.readFileSync(indexPath, "utf8").split(/\r?\n/).filter(Boolean)
+      .map((l) => { try { return JSON.parse(l); } catch { return null; } });
+    check("every index line parses", indexLines.every(Boolean), `${indexLines.filter(Boolean).length}/${indexLines.length}`);
+    const idxHeader = indexLines.find((e) => e?.t === "video-index");
+    const idxFooter = indexLines.find((e) => e?.t === "video-footer");
+    const idxFrames = indexLines.filter((e) => e?.kind === "frame");
+    const idxGaps = indexLines.filter((e) => (e?.kind || "").startsWith("redacted-gap"));
+    check("video index header (format + geometry, long edge <= 1568, even)",
+      idxHeader?.format === "fastcua-video-index/1" && idxHeader.width > 0 && idxHeader.height > 0
+        && Math.max(idxHeader.width, idxHeader.height) <= 1568
+        && idxHeader.width % 2 === 0 && idxHeader.height % 2 === 0,
+      JSON.stringify(idxHeader));
+    check("video index footer frame total matches entries",
+      idxFooter && idxFooter.frames === idxFrames.length + idxGaps.length,
+      `footer=${idxFooter?.frames} entries=${idxFrames.length + idxGaps.length}`);
+    check("video captured a useful number of frames",
+      idxFrames.length >= 20, `${idxFrames.length} frames + ${idxGaps.length} gaps over ${(minutes).toFixed(2)} min`);
+
+    // AVI structure: RIFF/AVI, hdrl/movi lists, MJPG stream, idx1 == AVI frames.
+    const asciiAt = (buf, off, n) => buf.subarray(off, off + n).toString("latin1");
+    const findChunk = (buf, fourcc) => buf.indexOf(fourcc, 0, "latin1");
+    check("AVI RIFF container", asciiAt(avi, 0, 4) === "RIFF" && asciiAt(avi, 8, 4) === "AVI ", `${avi.length} bytes`);
+    check("AVI has hdrl/movi/idx1 structure",
+      findChunk(avi, "hdrl") > 0 && findChunk(avi, "movi") > 0 && findChunk(avi, "idx1") > 0, "");
+    check("AVI stream is MJPG", findChunk(avi, "MJPG") > 0, "");
+    const avihPos = findChunk(avi, "avih");
+    const avihTotal = avihPos > 0 ? avi.readUInt32LE(avihPos + 8 + 16) : 0;
+    const idx1Pos = findChunk(avi, "idx1");
+    const idx1Count = idx1Pos > 0 ? avi.readUInt32LE(idx1Pos + 4) / 16 : 0;
+    const aviFrameEntries = idxFrames.length + idxGaps.filter((g) => g.kind === "redacted-gap").length;
+    check("avih total frames == idx1 entries == indexed AVI frames",
+      avihTotal > 0 && idx1Count === avihTotal && avihTotal === aviFrameEntries,
+      `avih=${avihTotal} idx1=${idx1Count} indexed=${aviFrameEntries}`);
+    const videoBytesPerMin = (stats?.video_bytes || 0) / minutes;
+    check("video cost < 30 MB/min (MJPEG sanity budget)", videoBytesPerMin > 0 && videoBytesPerMin < 30_000_000,
+      `${(videoBytesPerMin / 1_000_000).toFixed(2)} MB/min (${(stats?.video_bytes / 1000 || 0).toFixed(0)} KB total, ${idxHeader?.width}x${idxHeader?.height})`);
+
+    // Redaction gaps: password focus produced marked gaps inside the window.
+    const pwGaps = idxGaps.filter((g) => g.reason === "password-focus"
+      && g.ts >= pwStart - 2_000 && g.ts <= pwEnd + 4_000);
+    check("password focus produced marked video gaps (never pixels)",
+      pwGaps.length >= 1 && idxGaps.every((g) => ["password-focus", "secure-desktop"].includes(g.reason)),
+      `${pwGaps.length} password-focus gap(s) in window, ${idxGaps.length} total`);
+    check("gap stats counter consistent", (stats?.video_gaps || 0) >= pwGaps.length, `video_gaps=${stats?.video_gaps}`);
+
+    // ---------------- media tracks: audio (stage 5) ----------------
+    log("--- media: WAV narration track (best-effort) ---");
+    const wavPath = path.join(recDir, "audio", "narration.wav");
+    const mediaRecs = events.filter((e) => e?.t === "media");
+    const audioRec = mediaRecs.find((e) => e.kind === "audio");
+    check("audio availability declared via t:media record", audioRec && ["ok", "unavailable"].includes(audioRec.status),
+      JSON.stringify(audioRec));
+    if (fs.existsSync(wavPath)) {
+      const wav = fs.readFileSync(wavPath);
+      const fmtPos = wav.indexOf("fmt ", 0, "latin1");
+      const dataPos = wav.indexOf("data", 0, "latin1");
+      const channels = fmtPos > 0 ? wav.readUInt16LE(fmtPos + 10) : 0;
+      const sampleRate = fmtPos > 0 ? wav.readUInt32LE(fmtPos + 12) : 0;
+      const bits = fmtPos > 0 ? wav.readUInt16LE(fmtPos + 22) : 0;
+      const dataBytes = dataPos > 0 ? wav.readUInt32LE(dataPos + 4) : 0;
+      const wavSeconds = dataBytes / (sampleRate * channels * (bits / 8));
+      const sessionSeconds = (last - first) / 1000;
+      check("WAV is RIFF/WAVE PCM 16kHz mono 16-bit",
+        asciiAt(wav, 0, 4) === "RIFF" && asciiAt(wav, 8, 4) === "WAVE"
+          && wav.readUInt16LE(fmtPos + 8) === 1 && channels === 1 && sampleRate === 16000 && bits === 16,
+        `fmt=${wav.readUInt16LE(fmtPos + 8)} ch=${channels} rate=${sampleRate} bits=${bits}`);
+      check("WAV duration tracks the session (±3s)", Math.abs(wavSeconds - sessionSeconds) <= 3,
+        `wav=${wavSeconds.toFixed(1)}s session=${sessionSeconds.toFixed(1)}s`);
+      check("audio bytes counter consistent", (stats?.audio_bytes || 0) > 0, `audio_bytes=${stats?.audio_bytes}`);
+      log("audio path validated: microphone present, real WAV captured");
+    } else {
+      check("no microphone: graceful degradation (unavailable record + no WAV, session intact)",
+        audioRec?.status === "unavailable" && typeof audioRec?.detail === "string" && audioRec.detail.length > 0,
+        audioRec?.detail || "");
+      check("audio bytes counter zero on unavailable path", (stats?.audio_bytes || 0) === 0, `audio_bytes=${stats?.audio_bytes}`);
+      log("audio path validated: NO microphone on this machine — graceful-degradation path");
+    }
+
     // ---------------- compile (stage 3) ----------------
     log("--- compiling session to draft + skill folder ---");
     const compileOut = execFileSync(process.execPath, [COMPILE, sessionPath, "--skill", "fixture-report"], { encoding: "utf8" });
@@ -374,6 +471,23 @@ async function main() {
     check("skill draft folder is inert (no runnable code files)",
       fs.readdirSync(path.dirname(skillFile)).every((f) => f === "SKILL.md"),
       fs.readdirSync(path.dirname(skillFile)).join(","));
+
+    // ---------------- compile: media references (stage 5) ----------------
+    check("draft.media carries session-relative paths",
+      draft.media?.video === "video/video.avi" && draft.media?.video_index === "video/index.jsonl"
+        && draft.media?.keyframes === "keyframes", JSON.stringify(draft.media));
+    check("draft.media audio reflects runtime availability",
+      fs.existsSync(wavPath)
+        ? draft.media?.audio === "audio/narration.wav"
+        : draft.media?.audio === null && /unavailable/.test(draft.media?.audio_note || ""),
+      `audio=${draft.media?.audio} note=${draft.media?.audio_note}`);
+    check("draft references media but never embeds it",
+      !draftText.includes("base64") && !draftText.includes("RIFF") && draftText.length < 200_000,
+      `draft.json ${(draftText.length / 1000).toFixed(0)} KB`);
+    const draftMd = fs.readFileSync(path.join(recDir, "draft.md"), "utf8");
+    check("draft.md documents the media section", /## Media/.test(draftMd) && draftMd.includes("video/video.avi"), "");
+    check("SKILL draft carries a Review aids section with extraction command",
+      /Review aids/.test(skill) && skill.includes("frame-extract.mjs") && !skill.includes("base64"), "");
 
     // ---------------- dry-run (stage 5) ----------------
     log("--- stage 5: dry-run through the normal control plane ---");
@@ -500,6 +614,75 @@ async function main() {
       paused.report?.summary?.executed_ok === 0, JSON.stringify(paused.report?.summary));
     await apiJson(base, "/api/action", { action: "resume" });
 
+    // ---------------- frame extraction (stage 5 review aid) ----------------
+    log("--- frame-extract.mjs: agent can look at a chosen moment ---");
+    const EXTRACT = path.join(ROOT, "tools", "skill-recorder", "frame-extract.mjs");
+    const runExtract = (args) => spawnSync(process.execPath, [EXTRACT, recDir, ...args], { encoding: "utf8", timeout: 30_000 });
+
+    const byNote = runExtract(["--note", "1"]);
+    log(`extract[--note 1] exit=${byNote.status} ${(byNote.stdout || "").trim().split("\n").pop()}`);
+    check("frame extraction by narration note succeeds (exit 0)", byNote.status === 0, `exit=${byNote.status}`);
+    const noteResult = JSON.parse(byNote.stdout);
+    const noteJpg = fs.readFileSync(noteResult.out);
+    check("extracted bytes are a well-formed JPEG (SOI/EOI)",
+      noteJpg[0] === 0xff && noteJpg[1] === 0xd8 && noteJpg[noteJpg.length - 2] === 0xff && noteJpg[noteJpg.length - 1] === 0xd9,
+      `${noteJpg.length} bytes at ${noteResult.out}`);
+
+    const atMs = runExtract(["--at-ms", String(notes[1].ts + 3_000)]);
+    check("frame extraction by timestamp succeeds (exit 0)", atMs.status === 0 && JSON.parse(atMs.stdout).ok === true,
+      `exit=${atMs.status}`);
+
+    const pwMoment = runExtract(["--at-ms", String(pwEnd)]);
+    log(`extract[password moment] exit=${pwMoment.status}`);
+    check("extracting a password-focus moment reports redaction (exit 4)",
+      pwMoment.status === 4 && JSON.parse(pwMoment.stdout).redacted === true
+        && JSON.parse(pwMoment.stdout).reason === "password-focus",
+      `exit=${pwMoment.status} ${(pwMoment.stdout || "").slice(0, 160)}`);
+    check("redacted extraction writes no file",
+      !(JSON.parse(pwMoment.stdout).out), "no out path in response");
+
+    const tooEarly = runExtract(["--at-ms", String(first - 60_000)]);
+    check("moment before the first frame is a clean error (exit 3)", tooEarly.status === 3, `exit=${tooEarly.status}`);
+
+    // ---------------- promotion gates (stage 5) ----------------
+    log("--- promote.mjs: gated, agent-executed, never silent ---");
+    const PROMOTE = path.join(ROOT, "tools", "skill-recorder", "promote.mjs");
+    const runPromote = (args) => spawnSync(process.execPath, [PROMOTE, ...args], { encoding: "utf8", timeout: 30_000 });
+
+    const detect = runPromote(["--detect-host"]);
+    check("--detect-host lists candidates in priority order (exit 0)", detect.status === 0, `exit=${detect.status}`);
+    const hosts = JSON.parse(detect.stdout);
+    check("detection includes the Kimi Work skills directory",
+      hosts.candidates?.some((h) => h.id === "kimi" && /kimi-desktop[/\\]daimon-share[/\\]daimon[/\\]skills$/.test(h.dir)),
+      hosts.candidates?.map((h) => `${h.id}:${h.exists}`).join(", "));
+    check("detection includes Claude Code and opencode fallbacks",
+      ["claude-code", "opencode"].every((id) => hosts.candidates?.some((h) => h.id === id)), "");
+
+    const draftDir = path.join(recDir, "skill-draft", "fixture-report");
+    const targetRoot = path.join(temp, "host-skills");
+    const gateReview = runPromote([draftDir, "--to", targetRoot]);
+    check("promotion refused without --yes-i-reviewed (exit 3)", gateReview.status === 3, `exit=${gateReview.status}`);
+    check("refusal created nothing", !fs.existsSync(path.join(targetRoot, "fixture-report")), "");
+
+    const gateVerified = runPromote([draftDir, "--to", targetRoot, "--yes-i-reviewed"]);
+    check("verified:false draft refused without --force-unverified (exit 4)", gateVerified.status === 4, `exit=${gateVerified.status}`);
+
+    const forced = runPromote([draftDir, "--to", targetRoot, "--yes-i-reviewed", "--force-unverified"]);
+    check("forced promotion succeeds after attestation (exit 0)", forced.status === 0, `exit=${forced.status} ${(forced.stderr || "").slice(-120)}`);
+    const promotedFile = path.join(targetRoot, "fixture-report", "SKILL.md");
+    check("promoted SKILL.md exists at the target", fs.existsSync(promotedFile), promotedFile);
+    check("forced promotion appends an explicit warning to the copy",
+      fs.readFileSync(promotedFile, "utf8").includes("--force-unverified")
+        && fs.readFileSync(promotedFile, "utf8").includes("never dry-run"), "");
+    const promoteSummary = JSON.parse(forced.stdout);
+    check("promotion prints discovery + reload guidance",
+      promoteSummary.ok === true && typeof promoteSummary.next_step === "string" && /reload|restart/i.test(promoteSummary.next_step), "");
+
+    const clobber = runPromote([draftDir, "--to", targetRoot, "--yes-i-reviewed", "--force-unverified"]);
+    check("existing target refused without --overwrite (exit 5)", clobber.status === 5, `exit=${clobber.status}`);
+    const over = runPromote([draftDir, "--to", targetRoot, "--yes-i-reviewed", "--force-unverified", "--overwrite"]);
+    check("--overwrite replaces the target (exit 0)", over.status === 0, `exit=${over.status}`);
+
     // ---------------- packaging ----------------
     log("--- packaging: standalone skill + docs ---");
     const pkgSkillPath = path.join(ROOT, "skills", "skill-recorder", "SKILL.md");
@@ -508,8 +691,14 @@ async function main() {
     check("packaged skill frontmatter (name + description)",
       /^---\r?\nname: skill-recorder\r?\ndescription: .+\r?\n---/.test(pkg), "");
     check("packaged skill carries safety invariants",
-      ["secure desktop", "never installs itself", "scope", "unresolved", "Ctrl+Alt+N"].every((t) => pkg.toLowerCase().includes(t.toLowerCase())), "");
-    check("skill cli reference exists", fs.existsSync(path.join(ROOT, "skills", "skill-recorder", "docs", "cli.md")), "");
+      ["secure desktop", "never promote silently", "scope", "unresolved", "Ctrl+Alt+N"].every((t) => pkg.toLowerCase().includes(t.toLowerCase())), "");
+    check("packaged skill is the agent playbook (record -> review -> dry-run -> gated promotion)",
+      ["agent playbook", "promote.mjs", "frame-extract.mjs", "--detect-host", "Ctrl+Alt+X"].every((t) => pkg.includes(t)), "");
+    const cliDoc = path.join(ROOT, "skills", "skill-recorder", "docs", "cli.md");
+    check("skill cli reference exists", fs.existsSync(cliDoc), "");
+    const cliText = fs.existsSync(cliDoc) ? fs.readFileSync(cliDoc, "utf8") : "";
+    check("cli reference documents media flags + frame-extract + promote",
+      ["--no-video", "--video-fps", "frame-extract.mjs", "promote.mjs", "--yes-i-reviewed", "redaction gap"].every((t) => cliText.includes(t)), "");
     const readmeText = fs.readFileSync(path.join(ROOT, "README.md"), "utf8");
     const readmeZhText = fs.readFileSync(path.join(ROOT, "README_zh.md"), "utf8");
     check("README documents Record a Skill (EN+ZH synced)",
