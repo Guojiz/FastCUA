@@ -140,7 +140,7 @@ draft into a live skills directory. Full design:
 
 **Media round: screen video + mic audio saved per session, agent-operated promotion (POSTED 2026-07-23)**
 
-Posted as https://github.com/Guojiz/FastCUA/issues/3#issuecomment-MEDIA_ROUND_ID
+Posted as https://github.com/Guojiz/FastCUA/issues/3#issuecomment-5054733257
 
 Follow-up: the session now preserves reviewable media and the flow is fully agent-operated.
 
