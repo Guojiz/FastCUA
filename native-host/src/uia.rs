@@ -122,7 +122,21 @@ pub struct ElementSnapshot {
     pub bounds: Option<RECT>,
 }
 
+#[allow(dead_code)] // compat wrapper; call sites use snapshot_with_timeout
 pub fn snapshot(hwnd: HWND, title: &str, app_name: &str) -> Result<Snapshot, String> {
+    snapshot_with_timeout(hwnd, title, app_name, 1_500)
+}
+
+/// Same as `snapshot` but with a caller-chosen bound. The per-app UIA quality
+/// profile uses a short (~300ms) probe for known-bad apps instead of the full
+/// timeout; a healthy provider answers well within the probe and is
+/// rehabilitated, a wedged one fails fast again.
+pub fn snapshot_with_timeout(
+    hwnd: HWND,
+    title: &str,
+    app_name: &str,
+    timeout_ms: u64,
+) -> Result<Snapshot, String> {
     let hwnd_value = hwnd as usize;
     let title = title.to_owned();
     let app_name = app_name.to_owned();
@@ -135,8 +149,103 @@ pub fn snapshot(hwnd: HWND, title: &str, app_name: &str) -> Result<Snapshot, Str
         })
         .map_err(|error| format!("spawn UIA worker: {error}"))?;
     receiver
-        .recv_timeout(Duration::from_millis(1_500))
+        .recv_timeout(Duration::from_millis(timeout_ms))
         .map_err(|_| "UI Automation provider timed out".to_string())?
+}
+
+/// Bounded UIA point-hit used by the click snap: resolve the element at a
+/// screen point and return the center of its bounding rect. Any failure
+/// (timeout, no element, no bounds) returns None so the caller keeps the
+/// original point — the snap must never block or fail the click.
+pub fn element_center_from_point(
+    x: i32,
+    y: i32,
+    exclude_window_rect: Option<(i32, i32, i32, i32)>,
+) -> Option<(i32, i32)> {
+    let (sender, receiver) = mpsc::channel();
+    thread::Builder::new()
+        .name("cua-uia-point".into())
+        .spawn(move || {
+            let _ =
+                sender.send(unsafe { element_center_from_point_inner(x, y, exclude_window_rect) });
+        })
+        .ok()?;
+    receiver
+        .recv_timeout(Duration::from_millis(800))
+        .ok()
+        .and_then(Result::ok)
+        .flatten()
+}
+
+unsafe fn element_center_from_point_inner(
+    x: i32,
+    y: i32,
+    exclude_window_rect: Option<(i32, i32, i32, i32)>,
+) -> Result<Option<(i32, i32)>, String> {
+    let init = unsafe { CoInitializeEx(ptr::null_mut(), COINIT_MULTITHREADED) };
+    if init < 0 && init != RPC_E_CHANGED_MODE {
+        return Err(format!("CoInitializeEx failed: 0x{:08x}", init as u32));
+    }
+    let should_uninitialize = init == S_OK || init == S_FALSE;
+    let result = unsafe { element_center_from_point_com(x, y, exclude_window_rect) };
+    if should_uninitialize {
+        unsafe { CoUninitialize() };
+    }
+    result
+}
+
+unsafe fn element_center_from_point_com(
+    x: i32,
+    y: i32,
+    exclude_window_rect: Option<(i32, i32, i32, i32)>,
+) -> Result<Option<(i32, i32)>, String> {
+    let mut automation = ptr::null_mut();
+    let created = unsafe {
+        CoCreateInstance(
+            &CLSID_CUI_AUTOMATION,
+            ptr::null_mut(),
+            CLSCTX_INPROC_SERVER,
+            &IID_IUI_AUTOMATION,
+            &mut automation,
+        )
+    };
+    if created < 0 || automation.is_null() {
+        return Err(format!(
+            "create UI Automation failed: 0x{:08x}",
+            created as u32
+        ));
+    }
+    let mut element = ptr::null_mut();
+    let element_from_point: unsafe extern "system" fn(ComPtr, POINT, *mut ComPtr) -> HRESULT =
+        unsafe { method(automation, 7) };
+    let hit = unsafe { element_from_point(automation, POINT { x, y }, &mut element) };
+    let center = if hit >= 0 && !element.is_null() {
+        unsafe { element_bounds(element) }.and_then(|rect| {
+            // A hit that covers the whole target window is the window background
+            // itself; snapping to its center would hijack clicks aimed at empty
+            // space. Treat it as no-hit and keep the original point.
+            if let Some((wl, wt, wr, wb)) = exclude_window_rect {
+                if (rect.left - wl).abs() <= 2
+                    && (rect.top - wt).abs() <= 2
+                    && (rect.right - wr).abs() <= 2
+                    && (rect.bottom - wb).abs() <= 2
+                {
+                    return None;
+                }
+            }
+            Some((
+                rect.left + (rect.right - rect.left) / 2,
+                rect.top + (rect.bottom - rect.top) / 2,
+            ))
+        })
+    } else {
+        None
+    };
+    if !element.is_null() {
+        unsafe { release(element) };
+    }
+    unsafe { release(automation) };
+    Ok(center)
 }
 
 struct FocusedValuePattern {

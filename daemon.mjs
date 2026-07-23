@@ -198,6 +198,116 @@ function normalizeConfig(value = {}) {
 function loadConfig() { try { return normalizeConfig({ ...DEFAULT_CONFIG, ...JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8")) }); } catch { return { ...DEFAULT_CONFIG }; } }
 function saveConfig(c) { fs.writeFileSync(CONFIG_PATH, JSON.stringify(normalizeConfig(c), null, 2) + "\n"); }
 let config = loadConfig();
+
+// ---- per-app UIA quality profile (PRIOR, not verdict) ----
+// Known-bad apps still get a live probe on their first request of a session --
+// just a SHORT one; a recovered provider rehabilitates the app immediately.
+const UIA_PROFILE_PATH = path.join(path.dirname(CONFIG_PATH), "uia-profile.json");
+const UIA_PROFILE_TTL_MS = 30 * 24 * 3600 * 1000;
+const UIA_PROBE_MS = 300;
+let uiaProfile = loadUiaProfile(); // key -> {app, hangs, obs, avg_ms, last_quality, last_seen}
+const uiaProfileProbed = new Set(); // identity keys already probed since helper (re)start
+const uiaIdentityCache = new Map(); // exe path -> {mtimeMs, size, key}
+let uiaProfileSaveTimer = null;
+function loadUiaProfile() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(UIA_PROFILE_PATH, "utf8"));
+    const now = Date.now();
+    const out = {};
+    for (const [k, e] of Object.entries(raw)) {
+      if (e && typeof e === "object" && now - (e.last_seen || 0) < UIA_PROFILE_TTL_MS) out[k] = e;
+    }
+    return out;
+  } catch { return {}; } // corrupt/missing -> every app unknown
+}
+function saveUiaProfile() {
+  clearTimeout(uiaProfileSaveTimer);
+  uiaProfileSaveTimer = setTimeout(() => {
+    try {
+      const tmp = UIA_PROFILE_PATH + ".tmp";
+      fs.writeFileSync(tmp, JSON.stringify(uiaProfile, null, 1));
+      fs.renameSync(tmp, UIA_PROFILE_PATH);
+    } catch (e) { log("uia-profile save failed:", e.message); }
+  }, 1000);
+}
+// Exe identity = full path + PE header timestamp + content hash (cached by
+// mtime+size). AUMIDs/aliases without an .exe path get no persisted profile.
+function uiaIdentityKey(app) {
+  const filePath = String(app || "").replace(/^process:/, "");
+  if (!/\.exe$/i.test(filePath)) return null;
+  try {
+    const st = fs.statSync(filePath);
+    const cached = uiaIdentityCache.get(filePath);
+    if (cached && cached.mtimeMs === st.mtimeMs && cached.size === st.size) return cached.key;
+    const fd = fs.openSync(filePath, "r");
+    try {
+      const head = Buffer.alloc(4096);
+      fs.readSync(fd, head, 0, head.length, 0);
+      let peTs = 0;
+      const peOff = head.length >= 0x40 ? head.readUInt32LE(0x3c) : 0;
+      if (peOff + 12 <= head.length && head.readUInt32LE(peOff) === 0x4550) peTs = head.readUInt32LE(peOff + 8);
+      const hash = crypto.createHash("sha1");
+      const chunk = Buffer.alloc(1024 * 1024);
+      const limit = Math.min(st.size, 8 * 1024 * 1024);
+      for (let off = 0; off < limit; off += chunk.length) {
+        const n = fs.readSync(fd, chunk, 0, Math.min(chunk.length, limit - off), off);
+        if (n <= 0) break;
+        hash.update(chunk.subarray(0, n));
+      }
+      if (st.size > 64 * 1024 * 1024) {
+        for (let off = st.size - 8 * 1024 * 1024; off < st.size; off += chunk.length) {
+          const n = fs.readSync(fd, chunk, 0, Math.min(chunk.length, st.size - off), off);
+          if (n <= 0) break;
+          hash.update(chunk.subarray(0, n));
+        }
+      }
+      const key = `${filePath.toLowerCase()}|pe:${peTs.toString(16)}|sha1:${hash.digest("hex").slice(0, 16)}`;
+      uiaIdentityCache.set(filePath, { mtimeMs: st.mtimeMs, size: st.size, key });
+      return key;
+    } finally { fs.closeSync(fd); }
+  } catch { return null; }
+}
+function uiaProfileEntry(app) {
+  const key = uiaIdentityKey(app);
+  if (!key) return { key: null, entry: null };
+  const entry = uiaProfile[key];
+  if (entry && Date.now() - (entry.last_seen || 0) >= UIA_PROFILE_TTL_MS) { delete uiaProfile[key]; return { key, entry: null }; }
+  return { key, entry };
+}
+// One short probe per known-bad app per helper session; everything else is untouched.
+function maybeUiaProfileProbe(method, params, app) {
+  if (method !== "get_window_state" || params?.include_text === false || !app) return 0;
+  const { key, entry } = uiaProfileEntry(app);
+  if (!key || !entry || !(entry.hangs > 0) || uiaProfileProbed.has(key)) return 0;
+  uiaProfileProbed.add(key);
+  log("uia-profile: known-bad app", app, "-> short probe " + UIA_PROBE_MS + "ms (prior only; live result decides)");
+  return UIA_PROBE_MS;
+}
+function recordUiaObservation(method, params, app, result, dur, errorMessage) {
+  if (method !== "get_window_state" || params?.include_text === false || !app) return;
+  const { key } = uiaProfileEntry(app);
+  if (!key) return;
+  const reason = result?.uia?.reason || "";
+  const quality = result?.uia?.quality;
+  const timedOut = reason === "timeout_or_provider_disabled" || /timed out/i.test(errorMessage || "");
+  if (!timedOut && !quality) return;
+  const entry = uiaProfile[key] || (uiaProfile[key] = { app: String(app), hangs: 0, obs: 0, avg_ms: 0, last_quality: "unknown", last_seen: 0 });
+  entry.last_seen = Date.now();
+  if (timedOut) {
+    entry.hangs = Math.min((entry.hangs || 0) + 1, 99);
+    entry.last_quality = "timeout";
+  } else {
+    entry.obs = Math.min((entry.obs || 0) + 1, 1000);
+    entry.avg_ms = Math.round(((entry.avg_ms || 0) * (entry.obs - 1) + dur) / entry.obs);
+    entry.last_quality = quality;
+    if (entry.hangs > 0) {
+      // Live evidence beats the prior: a working provider rehabilitates the app.
+      entry.hangs = Math.max(0, entry.hangs - 2);
+      if (!entry.hangs) log("uia-profile:", app, "rehabilitated (UIA answered)");
+    }
+  }
+  saveUiaProfile();
+}
 if (process.env.FASTCUA_HTTP_PORT) {
   config = normalizeConfig({ ...config, port: Number(process.env.FASTCUA_HTTP_PORT) });
 }
@@ -254,6 +364,7 @@ function startBinary() {
       pendingBin.delete(id);
     }
   });
+  uiaProfileProbed.clear(); // new helper process = new UIA session
   log("helper spawned (one shared binary) at", bin);
 }
 function sendToBinary(method, params, meta, extraMeta) {
@@ -531,6 +642,8 @@ async function handleClientReq(c, req) {
   const meta = { session_id: c.sessionId, turn_id: String(c.turnId) };
   const app = params?.window?.app || params?.app;
   if (app && isApproved(app)) meta[APPROVED_KEY] = app;
+  const uiaProbe = maybeUiaProfileProbe(method, params, app);
+  if (uiaProbe) meta["x-fastcua-uia-probe-ms"] = uiaProbe;
   const t0 = Date.now();
   const summary = actionSummary(method, params);
   const action = { action: method, summary, startedAt: t0, client: c.sessionId.slice(0,8) };
@@ -539,12 +652,14 @@ async function handleClientReq(c, req) {
   try {
     const result = await sendToBinary(method, params, meta, {});
     const dur = Date.now() - t0;
+    recordUiaObservation(method, params, app, result, dur, null);
     if (currentAction === action) currentAction = null;
     emitEvent("action_end", { client: c.sessionId.slice(0,8), action: method, duration_ms: dur, summary, ok: true });
     reply(c, id, { result });
   } catch (e) {
     if (currentAction === action) currentAction = null;
     const dur = Date.now() - t0;
+    recordUiaObservation(method, params, app, null, dur, e.message);
     emitEvent("action_end", { client: c.sessionId.slice(0,8), action: method, duration_ms: dur, summary, ok: false, error: e.message });
     reply(c, id, { error: e.message });
   }

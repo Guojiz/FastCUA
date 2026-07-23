@@ -59,6 +59,12 @@ type GetWindowStateInput = {
   include_screenshot?: boolean;
   /** Default true in FastCUA MCP when omitted. Prefer false when only pixels are needed. */
   include_text?: boolean;
+  /**
+   * Max long edge of the returned JPEG (default 1568, env FASTCUA_MAX_EDGE,
+   * <= 0 disables). When downscaled, screenshots[0].scale and viewport.scale
+   * report window px / image px — read scale before any pixel click.
+   */
+  max_edge?: number;
   window: Window;
 };
 
@@ -76,6 +82,8 @@ type WindowState = {
   viewport?: {
     width: number;
     height: number;
+    /** window px / screenshot px (1 when no downscale). window px = screenshot px * scale. */
+    scale?: number;
     originX?: number;
     originY?: number;
     screenLeft?: number;
@@ -100,11 +108,47 @@ type ClickInput = {
   x?: number;
   /** Screenshot/window pixel Y, or 0..1 fraction when both x and y are in 0..1. */
   y?: number;
+  /**
+   * Pixel space of x,y. Default "screenshot_pixels": the space of the latest
+   * get_window_state screenshot (host multiplies by its recorded scale when the
+   * capture was downscaled). "window_pixels": x,y are already full window
+   * pixels (used internally by click_cell / click_view).
+   */
+  space?: "screenshot_pixels" | "window_pixels";
+  /**
+   * When true (click_cell sets this): a bounded (~800ms) UIA point-hit at the
+   * target; if it resolves to an element with valid bounds, that element's
+   * center is clicked instead. Timeout / no-hit / hung app keep the point.
+   */
+  snap?: boolean;
 };
 
-// js-only helpers on sky (no daemon round-trip except click_cell):
+// The five click modes:
+// 1. element_index — click a UIA element from the latest tree (preferred when UIA is healthy).
+// 2. absolute x,y — pixels in the latest get_window_state screenshot space
+//    (read viewport.scale first; the host maps screenshot px -> window px for you).
+// 3. click_cell — sky.click_cell({window, grid, cell}): cell center, with a bounded
+//    UIA snap to the element under the point when UIA is healthy.
+// 4. click_in_cell — sky.click_in_cell({window, grid, cell, x, y, view?}): x,y are
+//    pixels INSIDE the named cell square (cell top-left = 0,0), in image units;
+//    pass view (or view.scale) when the image was downscaled. Out-of-cell coords
+//    are rejected, never clamped. Snaps like click_cell.
+// 5. click_view — sky.click_view({window, view, x, y}): x,y are pixels in the
+//    image returned by grid_view/grid_refine; the helper bounds-checks, then
+//    translates via view.cropLeft/cropTop and view.scale. Rejects out-of-view points.
+
+// Voice-ready interaction (primitives only — no speech engine):
+//   "点击 5"        -> sky.click_cell({window, grid, cell: "5"})
+//   "5 号格内 x,y"   -> sky.click_in_cell({window, grid, cell: "5", x, y, view})
+//   refined pixels  -> sky.click_view({window, view, x, y})
+// Grid JSON already carries everything a voice layer needs per cell:
+// {id, row, col, left, top, right, bottom, cx, cy, side} in window pixels.
+
+// js-only helpers on sky (no daemon round-trip except click_cell/click_in_cell/click_view):
 // sky.viewport(state) / sky.grid({width,height,cols,rows,left?,top?,right?,bottom?})
 // sky.grid_refine(grid, cellId, cols?, rows?) / sky.click_cell({window, grid, cell})
+// sky.click_in_cell({window, grid, cell, x, y, view?})
+// sky.click_view({window, view, x, y, mouse_button?, click_count?})
 
 type PressKeyInput = {
   key: string;
@@ -175,6 +219,8 @@ type AccessibilityState = {
 type UiaState = {
   quality: "good" | "weak" | "broken" | "unknown";
   prefer_vision: boolean;
+  /** Continuous 0..1 companion to quality (higher = more trustworthy tree). */
+  confidence?: number;
   reason: string;
   actionable_count?: number;
   no_hit_count?: number;
@@ -187,6 +233,13 @@ type Screenshot = {
   id: string;
   originX?: number;
   originY?: number;
+  /** Present only when pixels are identical to the previous capture (short-TTL
+   *  dedup, invalidated by any input into the window): url is then omitted and
+   *  the agent MUST reuse the image from the previous response. */
+  unchanged?: boolean;
+  /** window px / image px (1 when no downscale). */
+  scale?: number;
+  /** Omitted when unchanged is true. */
   url: string;
   width?: number;
   zIndex: number;
@@ -202,3 +255,33 @@ type MouseButton = "left" | "right" | "middle" | "l" | "r" | "m";
 3. If already correct → no `type_text`.
 4. If replacing that focused value → `type_text({ text, replace: true })` once.
 5. If typing at a caret or explicit selection → `type_text({ text })`.
+
+### Capture size, scale, and dedup contract
+
+- `get_window_state` / `grid_view` JPEG output is capped at a max long edge of
+  **1568px** (per-request `max_edge`, or `FASTCUA_MAX_EDGE` env; `<= 0`
+  disables). When a capture is downscaled, `scale` (window px / image px) is
+  emitted on `screenshots[]`, `viewport`, and grid `view`. **Always read
+  `scale` before reasoning about pixel positions**; plain x,y clicks are
+  issued in screenshot units and the host maps them through the recorded scale.
+- Short-TTL (2s) per-window pixel dedup: an identical frame returns
+  `unchanged: true` with no new image payload. Treat `unchanged` as *"same
+  pixels as the previous response — reuse that image"*. Dedup never spans
+  different windows and is invalidated by any input (`click`, `type_text`,
+  `press_key`, `scroll`, `drag`, `set_value`) into the window.
+- `grid_view` `view` object: `{cropLeft, cropTop, cropRight, cropBottom,
+  width, height, scale, note}` — the coordinate contract for
+  `sky.click_view({window, view, x, y})`: window px = (cropLeft + x*scale,
+  cropTop + y*scale).
+
+### Per-app UIA quality profile (prior, not verdict)
+
+The daemon keeps `<configDir>/uia-profile.json` with per-app observations
+(exe identity = full path + PE timestamp + content hash; records: quality
+history, avg snapshot ms, hang count, last_seen; 30-day TTL; corrupt/missing
+file = all apps unknown). A known-bad app's first UIA request in a session
+runs a **short ~300ms probe** instead of the full provider timeout: probe
+failure keeps the session-disabled fast path, probe success rehabilitates the
+app immediately (bad score decays, normal path resumes). Real-time
+`assess_uia_quality` still runs on every call — the profile only shortens the
+first failure, it never skips UIA.

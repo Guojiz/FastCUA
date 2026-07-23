@@ -324,7 +324,7 @@ function buildGrid(input = {}) {
       "Prefer sky.grid_view({window}) for ONE image with square outlines + numbers (semi-transparent).",
       "SELECT a number only — does NOT click.",
       "Refine: await sky.grid_refine({window, grid, cell:id}) → crops to that cell, draws 3×3 squares only.",
-      "Click only: sky.click_cell({window, grid, cell:id}).",
+      "Click when ready: sky.click_cell({window, grid, cell:id}) or sky.click_view({window, view, x, y}) for a point inside the view image.",
     ].join(" "),
   };
 }
@@ -378,7 +378,7 @@ const sky = {
   grid_view: async (input = {}) => {
     const window = input.window;
     const path = Array.isArray(input.path) ? input.path.map(String) : [];
-    return daemonForCall().request("grid_view", { window, path });
+    return daemonForCall().request("grid_view", { window, path, max_edge: input.max_edge });
   },
   /**
    * Drill into a cell: appends id to path and returns a NEW grid_view (single cropped annotated image).
@@ -399,6 +399,67 @@ const sky = {
       window,
       x: cell.cx,
       y: cell.cy,
+      space: "window_pixels",
+      snap: true,
+      mouse_button,
+      click_count,
+      screenshotId: screenshotId || "grid-0",
+    });
+  },
+  /**
+   * Click a point INSIDE a grid_view/grid_refine view image (view-local pixels).
+   * view is the `view` object from grid_view; x,y are in the image the agent sees.
+   * Out-of-bounds is rejected here instead of clicking somewhere wrong.
+   */
+  click_view: async (input) => {
+    const { window, view, x, y, mouse_button, click_count, screenshotId } = input || {};
+    if (!window || !view) throw new Error("click_view requires { window, view, x, y } (view = the view object returned by grid_view/grid_refine)");
+    const { cropLeft, cropTop, width, height } = view;
+    const scale = Number(view.scale) > 0 ? Number(view.scale) : 1;
+    for (const [k, v] of Object.entries({ cropLeft, cropTop, width, height })) {
+      if (!Number.isFinite(v)) throw new Error(`click_view: view.${k} is missing or not a number (got ${JSON.stringify(v)})`);
+    }
+    if (!Number.isFinite(x) || !Number.isFinite(y)) throw new Error(`click_view: x and y must be numbers (got x=${JSON.stringify(x)}, y=${JSON.stringify(y)})`);
+    if (x < 0 || y < 0 || x > width || y > height) {
+      throw new Error(`click_view: point (${x},${y}) is outside this view image [0..${width}]x[0..${height}] — re-check the coordinates against the image you see; nothing was clicked`);
+    }
+    const absX = Math.round(cropLeft + x * scale);
+    const absY = Math.round(cropTop + y * scale);
+    return daemonForCall().request("click", {
+      window,
+      x: absX,
+      y: absY,
+      space: "window_pixels",
+      mouse_button,
+      click_count,
+      screenshotId: screenshotId || "grid-0",
+    });
+  },
+  /**
+   * Voice-ready: click a cell-local offset — "5 号格内 (30,20)" means x,y INSIDE cell 5.
+   * x,y are pixels inside the named cell square (cell top-left = 0,0), in the
+   * image units the agent sees; pass view (or view.scale) when the grid_view
+   * image was downscaled. Out-of-cell coords are rejected, never clamped.
+   */
+  click_in_cell: async (input) => {
+    const { window, grid, cell: cellId, x, y, view, mouse_button, click_count, screenshotId } = input || {};
+    const cell = cellById(grid, cellId);
+    const scale = Number(view?.scale) > 0 ? Number(view.scale) : 1;
+    const side = Number(cell.side) || Number(cell.width) || 0;
+    if (!(side > 0)) throw new Error("click_in_cell: grid cell has no side/width: " + JSON.stringify(cell));
+    const left = Number.isFinite(cell.left) ? cell.left : Math.round(cell.cx - side / 2);
+    const top = Number.isFinite(cell.top) ? cell.top : Math.round(cell.cy - side / 2);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) throw new Error(`click_in_cell: x and y must be numbers (got x=${JSON.stringify(x)}, y=${JSON.stringify(y)})`);
+    const localMax = side / scale;
+    if (x < 0 || y < 0 || x >= localMax || y >= localMax) {
+      throw new Error(`click_in_cell: (${x},${y}) is outside cell ${cellId} [0..${localMax})${scale === 1 ? "" : ` (image px; cell side ${side} window px / scale ${scale})`} — a wrong frame must never click elsewhere; nothing was clicked`);
+    }
+    return daemonForCall().request("click", {
+      window,
+      x: Math.round(left + x * scale),
+      y: Math.round(top + y * scale),
+      space: "window_pixels",
+      snap: true,
       mouse_button,
       click_count,
       screenshotId: screenshotId || "grid-0",
@@ -572,7 +633,7 @@ const TOOLS = [
   { name: "list_windows", desc: "List open windows that can be targeted by the window2 API.", inputSchema: { type: "object", properties: {} } },
   { name: "get_window", desc: "Rehydrate a window by id. If that id is stale and app identifies exactly one current window, returns the unique replacement; otherwise fails and requires list_windows.", inputSchema: { type: "object", properties: { app: { type: "string" }, id: { type: "number" } }, required: ["id"] } },
   { name: "launch_app", desc: "Launch an app by id from list_apps, an explicit .exe path, the `paint` alias, or a shell:AppsFolder\\<AUMID> packaged-app target. Its window appears in list_apps() afterwards.", inputSchema: { type: "object", properties: { app: { type: "string", description: "app id, .exe process path, `paint`, or shell:AppsFolder\\<AUMID>" } }, required: ["app"] } },
-  { name: "get_window_state", desc: "Capture accessibility tree and/or screenshot. Returns viewport, focused_value, and uia {quality,prefer_vision,reason}. If uia.prefer_vision, call sky.grid_view immediately — do not use element_index. 30s action budget.", inputSchema: { type: "object", properties: { window: W, include_screenshot: { type: "boolean", default: true }, include_text: { type: "boolean", default: true } }, required: ["window"] } },
+  { name: "get_window_state", desc: "Capture accessibility tree and/or screenshot. Returns viewport, focused_value, and uia {quality,prefer_vision,reason}. If uia.prefer_vision, call sky.grid_view immediately — do not use element_index. 30s action budget.", inputSchema: { type: "object", properties: { window: W, include_screenshot: { type: "boolean", default: true }, include_text: { type: "boolean", default: true }, max_edge: { type: "number", description: "Max long edge of the returned JPEG (default 1568). screenshots[0].scale reports window px / image px." } }, required: ["window"] } },
   { name: "click", desc: "Click element_index from latest tree OR screenshot pixel x,y (same units as viewport/screenshot width×height; or both in 0..1 as fractions). Out-of-bounds returns an error with viewport size.", inputSchema: { type: "object", properties: { window: W, element_index: { type: "number" }, x: { type: "number" }, y: { type: "number" }, mouse_button: { type: "string", enum: ["left", "right", "middle", "l", "r", "m"] }, click_count: { type: "number" }, screenshotId: { type: "string" } }, required: ["window"] } },
   { name: "press_key", desc: "Press a key or +-separated chord (e.g. 'Return', 'Control_L+a', 'Ctrl+s', 'space').", inputSchema: { type: "object", properties: { window: W, key: { type: "string" } }, required: ["window", "key"] } },
   { name: "type_text", desc: "Type into the focused control. replace:false (default) types at the caret. replace:true is scoped to a focused writable UIA value, fails safely instead of sending global Ctrl+A, and does not guarantee the resulting caret position. Read focused_value before replacing.", inputSchema: { type: "object", properties: { window: W, text: { type: "string" }, replace: { type: "boolean", default: false, description: "When false (default), type at the caret. When true, replace only a focused writable UIA value; resulting caret position is unspecified." } }, required: ["window", "text"] } },
@@ -581,8 +642,8 @@ const TOOLS = [
   { name: "perform_secondary_action", desc: "Raise the target window. This release supports only action='Raise' on the root element_index 0.", inputSchema: { type: "object", properties: { window: W, element_index: { type: "number", enum: [0] }, action: { type: "string", enum: ["Raise"] } }, required: ["window", "element_index", "action"] } },
   { name: "activate_window", desc: "Bring an open window to the foreground. Input methods activate their target window automatically; use this only as an escape hatch.", inputSchema: { type: "object", properties: { window: W }, required: ["window"] } },
   { name: "close", desc: "Finish the current computer-use turn and close this MCP client connection. Call once after the task is verified. The shared FastCUA daemon and helper remain available to other clients.", inputSchema: { type: "object", properties: {} } },
-  { name: "js", desc: "Persistent JS REPL with sky + nodeRepl. Prefer sky.grid_view({window}) for ONE annotated square-grid image (semi-transparent outlines + outlined numbers). Refine: sky.grid_refine({window,grid,cell}). Click only: sky.click_cell. Example: let gv=await sky.grid_view({window}); gv=await sky.grid_refine({window,grid:gv.grid,cell:'4'}); await sky.click_cell({window,grid:gv.grid,cell:'5'});", inputSchema: { type: "object", properties: { code: { type: "string", description: "JavaScript to execute. Use await for sky calls. Assign cross-cell state to globalThis." } }, required: ["code"] } },
-  { name: "grid_view", desc: "Capture window once with visual SQUARE number grid overlaid (semi-transparent cell outlines + outlined digits). Optional path drills into prior cell ids (crops + 3x3). Returns one annotated image only. Does not click.", inputSchema: { type: "object", properties: { window: W, path: { type: "array", items: { type: "string" }, description: "Prior selected cell ids for drill-down" } }, required: ["window"] } },
+  { name: "js", desc: "Persistent JS REPL with sky + nodeRepl. Prefer sky.grid_view({window}) for ONE annotated square-grid image (semi-transparent outlines + outlined numbers). Refine: sky.grid_refine({window,grid,cell}). Click when ready: sky.click_cell (cell center) or sky.click_view({window, view, x, y}) (point inside a refined view image). Example: let gv=await sky.grid_view({window}); gv=await sky.grid_refine({window,grid:gv.grid,cell:'4'}); await sky.click_cell({window,grid:gv.grid,cell:'5'});", inputSchema: { type: "object", properties: { code: { type: "string", description: "JavaScript to execute. Use await for sky calls. Assign cross-cell state to globalThis." } }, required: ["code"] } },
+  { name: "grid_view", desc: "Capture window once with visual SQUARE number grid overlaid (semi-transparent cell outlines + outlined digits). Optional path drills into prior cell ids (crops + 3x3). Returns one annotated image only. Does not click.", inputSchema: { type: "object", properties: { window: W, path: { type: "array", items: { type: "string" }, description: "Prior selected cell ids for drill-down" }, max_edge: { type: "number", description: "Max long edge of the view JPEG (default 1568); view.scale reports the factor." } }, required: ["window"] } },
 ];
 
 function win(a) { return a && typeof a === "object" ? { app: a.app, id: a.id } : a; }
@@ -593,8 +654,8 @@ async function callTool(name, args) {
     case "list_windows": return await sky.list_windows();
     case "get_window": return await sky.get_window({ app: args.app, id: args.id });
     case "launch_app": return await sky.launch_app({ app: args.app });
-    case "get_window_state": return await sky.get_window_state({ window: w, include_screenshot: args.include_screenshot ?? true, include_text: args.include_text ?? true });
-    case "grid_view": return await sky.grid_view({ window: w, path: args.path || [] });
+    case "get_window_state": return await sky.get_window_state({ window: w, include_screenshot: args.include_screenshot ?? true, include_text: args.include_text ?? true, max_edge: args.max_edge });
+    case "grid_view": return await sky.grid_view({ window: w, path: args.path || [], max_edge: args.max_edge });
     case "click": return await sky.click({ window: w, element_index: args.element_index, x: args.x, y: args.y, mouse_button: args.mouse_button, click_count: args.click_count, screenshotId: args.screenshotId });
     case "press_key": return await sky.press_key({ window: w, key: args.key });
     case "type_text": return await sky.type_text({ window: w, text: args.text, replace: args.replace });
@@ -619,8 +680,9 @@ function stateToContent(state) {
         `GRID ${g.phase || "initial"} mode=square ${g.rows}x${g.cols} side=${g.side} path=${JSON.stringify(g.path || state.path || [])}`,
         `viewport ${state.viewport?.width}x${state.viewport?.height}  crop=${state.view?.width}x${state.view?.height}`,
         `cells: ${ids}`,
-        "SELECT a number only (no click). Refine: grid_view with path+[id]. Click: click_cell when ready.",
+        "SELECT a number only (no click). Refine: grid_view with path+[id]. Click when ready: click_cell (cell center) or click_view({window, view, x, y}) for a precise point in this view.",
         "Overlay: semi-transparent square outlines + small outlined digits (UI still visible underneath).",
+        state.unchanged ? "UNCHANGED: pixels identical to the previous capture of this window+path — reuse the image you already have; metadata above is current." : `view ${state.view?.width}x${state.view?.height} scale=${state.view?.scale ?? 1} (click_view multiplies view x,y by scale and adds cropLeft/cropTop)`,
       ].join("\n"),
     });
     const s = state.screenshots.find((x) => x.annotated || x.id === "grid-0") || state.screenshots[0];
@@ -637,7 +699,8 @@ function stateToContent(state) {
       type: "text",
       text: [
         "Coordinate space (required for pixel clicks):",
-        `  viewport: ${v.width}x${v.height}  origin=top_left  space=${v.coordinate_space || "window_screenshot_pixels"}`,
+        `  viewport: ${v.width}x${v.height}  origin=top_left  space=${v.coordinate_space || "window_screenshot_pixels"}  scale=${v.scale ?? 1}`,
+        state.screenshots?.[0]?.unchanged ? "  UNCHANGED: pixels identical to the previous capture — reuse the image you already have." : "  click/drag/scroll x,y use viewport units (window px = x,y * scale).",
         `  screen origin: (${v.screenLeft ?? v.originX},${v.screenTop ?? v.originY})`,
         "  Prefer grid_view for targeting (one annotated square-grid image).",
       ].join("\n"),

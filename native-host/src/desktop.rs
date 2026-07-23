@@ -18,6 +18,164 @@ use std::{
 static UIA_TIMEOUT_APPS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 static UIA_ELEMENT_MAPS: OnceLock<Mutex<HashMap<u64, HashMap<u64, UiaElementTarget>>>> =
     OnceLock::new();
+/// window id -> downscale factor (window px / screenshot px) of the most recent
+/// get_window_state screenshot. Plain x,y clicks are issued in that screenshot
+/// space, so click/scroll map through this factor. 1.0 (or absent) = identity.
+static LAST_CAPTURE_SCALE: OnceLock<Mutex<HashMap<u64, f64>>> = OnceLock::new();
+/// (window id + capture kind) -> last frame hash for the short-TTL pixel dedup.
+static CAPTURE_DEDUP: OnceLock<Mutex<HashMap<String, CaptureDedup>>> = OnceLock::new();
+
+struct CaptureDedup {
+    hash: u64,
+    at: std::time::Instant,
+}
+
+/// Max long edge for JPEG capture output. Overridable per request (`max_edge`)
+/// or via FASTCUA_MAX_EDGE; <= 0 disables downscaling.
+const DEFAULT_MAX_EDGE: i32 = 1568;
+/// Identical frames inside this window are reported as `unchanged` instead of
+/// sending a new image payload. Overridable via FASTCUA_CAPTURE_DEDUP_MS; 0 disables.
+const DEFAULT_CAPTURE_DEDUP_MS: u64 = 2_000;
+
+fn resolve_max_edge(param: Option<i64>) -> i32 {
+    param
+        .map(|v| v as i32)
+        .or_else(|| {
+            env::var("FASTCUA_MAX_EDGE")
+                .ok()
+                .and_then(|v| v.parse::<i32>().ok())
+        })
+        .unwrap_or(DEFAULT_MAX_EDGE)
+}
+
+fn capture_dedup_ttl() -> Duration {
+    let ms = env::var("FASTCUA_CAPTURE_DEDUP_MS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(DEFAULT_CAPTURE_DEDUP_MS);
+    Duration::from_millis(ms)
+}
+
+/// FNV-1a over the RGB buffer (cheap, deterministic; collisions only cost a
+/// wasted image re-send, never a wrong click).
+fn frame_hash(rgb: &[u8]) -> u64 {
+    let mut hash = 0xcbf29ce484222325u64;
+    for chunk in rgb.chunks(4096) {
+        for byte in chunk {
+            hash ^= *byte as u64;
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+    }
+    hash
+}
+
+/// Returns true when this frame is a dedup hit (identical pixels within TTL).
+/// On a miss (or expired entry) the new hash is stored and false is returned.
+fn capture_dedup_hit(key: &str, hash: u64) -> bool {
+    let ttl = capture_dedup_ttl();
+    if ttl.is_zero() {
+        return false;
+    }
+    let mut map = match CAPTURE_DEDUP
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+    {
+        Ok(map) => map,
+        Err(_) => return false,
+    };
+    if let Some(entry) = map.get(key) {
+        if entry.hash == hash && entry.at.elapsed() < ttl {
+            return true;
+        }
+    }
+    map.insert(
+        key.to_string(),
+        CaptureDedup {
+            hash,
+            at: std::time::Instant::now(),
+        },
+    );
+    false
+}
+
+/// Any input into a window can change its pixels: drop dedup entries so the
+/// next capture always produces a fresh image.
+fn invalidate_capture_dedup(window_id: u64) {
+    let prefix = format!("{window_id}:");
+    if let Ok(mut map) = CAPTURE_DEDUP
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+    {
+        map.retain(|key, _| !key.starts_with(&prefix));
+    }
+}
+
+fn record_capture_scale(window_id: u64, scale: f64) {
+    if let Ok(mut map) = LAST_CAPTURE_SCALE
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+    {
+        map.insert(window_id, scale);
+    }
+}
+
+fn last_capture_scale(window_id: u64) -> Option<f64> {
+    LAST_CAPTURE_SCALE
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .ok()?
+        .get(&window_id)
+        .copied()
+}
+
+/// Output dims + factor (window px / image px) for a max-edge downscale,
+/// without touching pixels.
+fn downscale_dims(width: i32, height: i32, max_edge: i32) -> (i32, i32, f64) {
+    let long_edge = width.max(height);
+    if max_edge <= 0 || long_edge <= max_edge || width <= 0 || height <= 0 {
+        return (width, height, 1.0);
+    }
+    let scale = long_edge as f64 / max_edge as f64;
+    let out_w = ((width as f64 / scale).round() as i32).max(1);
+    let out_h = ((height as f64 / scale).round() as i32).max(1);
+    (out_w, out_h, long_edge as f64 / out_w.max(out_h) as f64)
+}
+
+/// Box-average downscale so `max(width, height) <= max_edge`. Returns the
+/// (possibly unchanged) RGB, its dims, and the factor window_px / image_px.
+fn downscale_rgb(rgb: &[u8], width: i32, height: i32, max_edge: i32) -> (Vec<u8>, i32, i32, f64) {
+    let (out_w, out_h, factor) = downscale_dims(width, height, max_edge);
+    if (factor - 1.0).abs() < f64::EPSILON {
+        return (rgb.to_vec(), width, height, 1.0);
+    }
+    let scale_x = width as f64 / out_w as f64;
+    let scale_y = height as f64 / out_h as f64;
+    let mut out = vec![0u8; (out_w * out_h * 3) as usize];
+    for oy in 0..out_h {
+        let sy0 = (oy as f64 * scale_y) as i32;
+        let sy1 = (((oy + 1) as f64 * scale_y) as i32).clamp(sy0 + 1, height);
+        for ox in 0..out_w {
+            let sx0 = (ox as f64 * scale_x) as i32;
+            let sx1 = (((ox + 1) as f64 * scale_x) as i32).clamp(sx0 + 1, width);
+            let (mut r, mut g, mut b, mut n) = (0u64, 0u64, 0u64, 0u64);
+            for sy in sy0..sy1 {
+                let row = (sy * width) as usize * 3;
+                for sx in sx0..sx1 {
+                    let i = row + sx as usize * 3;
+                    r += rgb[i] as u64;
+                    g += rgb[i + 1] as u64;
+                    b += rgb[i + 2] as u64;
+                    n += 1;
+                }
+            }
+            let o = ((oy * out_w + ox) * 3) as usize;
+            out[o] = (r / n) as u8;
+            out[o + 1] = (g / n) as u8;
+            out[o + 2] = (b / n) as u8;
+        }
+    }
+    (out, out_w, out_h, factor)
+}
 
 #[derive(Clone)]
 struct UiaElementTarget {
@@ -458,9 +616,41 @@ fn assess_uia_quality(
         ("good", false, "ok")
     };
 
+    // Continuous 0..1 companion to the 3-level quality (kept as-is for
+    // compatibility). Derived from the same counts: a higher actionable ratio
+    // raises confidence; no-hit ratio and provider trouble lower it.
+    let no_hit_ratio = if total > 0 {
+        no_hit as f64 / total as f64
+    } else {
+        1.0
+    };
+    let actionable_ratio = if total > 0 {
+        actionable as f64 / total as f64
+    } else {
+        0.0
+    };
+    let confidence = if provider_error.is_some() || total == 0 {
+        0.05
+    } else if only_shell {
+        0.1
+    } else {
+        let base = if actionable < 3 {
+            0.15
+        } else if no_hit_ratio >= 0.5 {
+            0.3
+        } else if actionable < 5 {
+            0.5
+        } else {
+            0.75
+        };
+        (base + 0.2 * actionable_ratio - 0.3 * no_hit_ratio).clamp(0.0, 0.98)
+    };
+    let confidence = (confidence * 100.0).round() / 100.0;
+
     json!({
         "quality": quality,
         "prefer_vision": prefer_vision,
+        "confidence": confidence,
         "reason": reason,
         "actionable_count": actionable,
         "no_hit_count": no_hit,
@@ -485,6 +675,8 @@ pub fn get_window_state(
     window: WindowRef,
     include_screenshot: bool,
     include_text: bool,
+    max_edge: Option<i64>,
+    uia_probe_ms: Option<u64>,
 ) -> Result<Value, String> {
     let timing = env::var_os("FASTCUA_HOST_TIMING").is_some();
     let stage = |name: &str, start: std::time::Instant| {
@@ -505,54 +697,55 @@ pub fn get_window_state(
         // Set when the app's UIA provider is unresponsive (timed out or already
         // disabled). The rest of this request must then stay pump-free.
         let mut provider_unresponsive = false;
-        let (tree, focused_element, document_text, quality_elems) = match uia_snapshot(&window) {
-            Ok(snapshot) => {
-                cache_uia_elements(&window, &snapshot)?;
-                let elems: Vec<(u64, String, String, bool)> = snapshot
-                    .elements
-                    .iter()
-                    .map(|e| (e.index, e.role.clone(), e.name.clone(), e.bounds.is_some()))
-                    .collect();
-                (
-                    snapshot.tree,
-                    snapshot.focused_element,
-                    snapshot.document_text,
-                    elems,
-                )
-            }
-            Err(err) => {
-                provider_unresponsive =
-                    err.contains("timed out") || err.contains("disabled after provider timeout");
-                provider_err = Some(err);
-                let (tree, document_text, elements) =
-                    accessibility_tree(&window, provider_unresponsive);
-                cache_hwnd_elements(&window, &elements)?;
-                let elems: Vec<(u64, String, String, bool)> = elements
-                    .iter()
-                    .enumerate()
-                    .map(|(i, hwnd)| {
-                        let mut bounds = RECT::default();
-                        let has = unsafe { IsWindow(*hwnd) } != 0
-                            && unsafe { GetWindowRect(*hwnd, &mut bounds) } != 0
-                            && bounds.right > bounds.left
-                            && bounds.bottom > bounds.top;
-                        (
-                            i as u64,
-                            role_for_class(&class_name(*hwnd)).to_string(),
-                            if i == 0 {
-                                window.title.clone()
-                            } else if provider_unresponsive {
-                                internal_window_text(*hwnd)
-                            } else {
-                                window_text(*hwnd)
-                            },
-                            has,
-                        )
-                    })
-                    .collect();
-                (tree, String::new(), document_text, elems)
-            }
-        };
+        let (tree, focused_element, document_text, quality_elems) =
+            match uia_snapshot(&window, uia_probe_ms) {
+                Ok(snapshot) => {
+                    cache_uia_elements(&window, &snapshot)?;
+                    let elems: Vec<(u64, String, String, bool)> = snapshot
+                        .elements
+                        .iter()
+                        .map(|e| (e.index, e.role.clone(), e.name.clone(), e.bounds.is_some()))
+                        .collect();
+                    (
+                        snapshot.tree,
+                        snapshot.focused_element,
+                        snapshot.document_text,
+                        elems,
+                    )
+                }
+                Err(err) => {
+                    provider_unresponsive = err.contains("timed out")
+                        || err.contains("disabled after provider timeout");
+                    provider_err = Some(err);
+                    let (tree, document_text, elements) =
+                        accessibility_tree(&window, provider_unresponsive);
+                    cache_hwnd_elements(&window, &elements)?;
+                    let elems: Vec<(u64, String, String, bool)> = elements
+                        .iter()
+                        .enumerate()
+                        .map(|(i, hwnd)| {
+                            let mut bounds = RECT::default();
+                            let has = unsafe { IsWindow(*hwnd) } != 0
+                                && unsafe { GetWindowRect(*hwnd, &mut bounds) } != 0
+                                && bounds.right > bounds.left
+                                && bounds.bottom > bounds.top;
+                            (
+                                i as u64,
+                                role_for_class(&class_name(*hwnd)).to_string(),
+                                if i == 0 {
+                                    window.title.clone()
+                                } else if provider_unresponsive {
+                                    internal_window_text(*hwnd)
+                                } else {
+                                    window_text(*hwnd)
+                                },
+                                has,
+                            )
+                        })
+                        .collect();
+                    (tree, String::new(), document_text, elems)
+                }
+            };
         // A wedged provider cannot answer the focused-value worker either; skip
         // it instead of burning its 800ms timeout on every request.
         let focused_value = if provider_unresponsive {
@@ -586,7 +779,7 @@ pub fn get_window_state(
     let t = std::time::Instant::now();
     let bounds = window_bounds(window.id)?;
     let screenshots = if include_screenshot {
-        vec![capture_window(window.id)?]
+        vec![capture_window(window.id, resolve_max_edge(max_edge))?]
     } else {
         Vec::new()
     };
@@ -608,6 +801,17 @@ pub fn get_window_state(
         .get("prefer_vision")
         .and_then(Value::as_bool)
         .unwrap_or(false);
+    let mut uia_meta = uia_meta;
+    if let Some(ms) = uia_probe_ms {
+        // Echo the short-probe hint so the daemon-side quality profile can
+        // distinguish probe outcomes from full-timeout observations.
+        uia_meta["probe_ms"] = json!(ms);
+    }
+    let shot_scale = screenshots
+        .first()
+        .and_then(|shot| shot.get("scale"))
+        .and_then(Value::as_f64)
+        .unwrap_or(1.0);
     Ok(json!({
         "window": window,
         "accessibility": accessibility,
@@ -617,6 +821,7 @@ pub fn get_window_state(
         "viewport": {
             "width": coord_w,
             "height": coord_h,
+            "scale": shot_scale,
             "originX": bounds.left,
             "originY": bounds.top,
             "screenLeft": bounds.left,
@@ -625,7 +830,7 @@ pub fn get_window_state(
             "screenBottom": bounds.bottom,
             "coordinate_space": "window_screenshot_pixels",
             "origin": "top_left",
-            "click_xy": "x,y are relative to window top-left; same units as screenshots[0].width/height",
+            "click_xy": "x,y are relative to window top-left; same units as screenshots[0].width/height (multiply by scale if you need full window pixels)",
             "normalized": "optional: pass x,y in 0..1 to mean fractions of width/height",
             "grid_hint": if prefer_vision {
                 "UIA prefer_vision=true: call sky.grid_view({window}) NOW. Do not use element_index."
@@ -742,7 +947,7 @@ fn uia_element_target(window: &WindowRef, index: u64) -> Result<UiaElementTarget
         return Ok(target);
     }
     // One live re-snapshot after UI churn (common dialogs / virtualized trees).
-    if let Ok(snapshot) = uia_snapshot(window) {
+    if let Ok(snapshot) = uia_snapshot(window, None) {
         let _ = cache_uia_elements(window, &snapshot);
         if let Some(target) = uia_element_target_cached(window, index) {
             return Ok(target);
@@ -770,7 +975,7 @@ fn uia_disabled_reason(window: &WindowRef) -> Option<String> {
     disabled.then(|| "UI Automation disabled after provider timeout".to_string())
 }
 
-fn uia_snapshot(window: &WindowRef) -> Result<uia::Snapshot, String> {
+fn uia_snapshot(window: &WindowRef, probe_ms: Option<u64>) -> Result<uia::Snapshot, String> {
     if env::var_os("FASTCUA_TEST_FORCE_UIA_FALLBACK").is_some() {
         return Err("UI Automation fallback forced for regression testing".into());
     }
@@ -778,10 +983,14 @@ fn uia_snapshot(window: &WindowRef) -> Result<uia::Snapshot, String> {
         return Err(reason);
     }
     let timed_out = UIA_TIMEOUT_APPS.get_or_init(|| Mutex::new(HashSet::new()));
-    let result = uia::snapshot(
+    // A known-bad app's first request in a session is a SHORT probe, not the
+    // full timeout: a recovered provider answers within the probe and is
+    // rehabilitated; a still-wedged one fails fast and stays session-disabled.
+    let result = uia::snapshot_with_timeout(
         window.id as usize as HWND,
         &window.title,
         &app_name(&window.app),
+        probe_ms.unwrap_or(1_500),
     );
     if matches!(&result, Err(message) if message.contains("timed out")) {
         let _ = timed_out
@@ -805,17 +1014,124 @@ struct CapturedRgb {
 const CAPTURE_TIMEOUT_MS: u64 = 3_000;
 
 fn capture_window_rgb(id: u64) -> Result<CapturedRgb, String> {
+    capture_rgb_bounded(move || capture_window_rgb_inner(id))
+}
+
+/// Capture only a window-relative region via BitBlt with a source offset —
+/// used by grid_view refine to skip the full-window BGRA/RGB buffers.
+/// BitBlt reads the window's current surface (same fallback the full path
+/// already uses for hung apps); the PrintWindow full-render path stays as-is.
+fn capture_region_rgb(
+    id: u64,
+    left: i32,
+    top: i32,
+    width: i32,
+    height: i32,
+) -> Result<CapturedRgb, String> {
+    capture_rgb_bounded(move || capture_region_rgb_inner(id, left, top, width, height))
+}
+
+fn capture_rgb_bounded<F>(capture: F) -> Result<CapturedRgb, String>
+where
+    F: FnOnce() -> Result<CapturedRgb, String> + Send + 'static,
+{
     let (sender, receiver) = mpsc::channel();
     thread::Builder::new()
         .name("cua-capture".into())
         .spawn(move || {
-            let result = capture_window_rgb_inner(id);
+            let result = capture();
             let _ = sender.send(result);
         })
         .map_err(|error| format!("spawn capture worker: {error}"))?;
     receiver
         .recv_timeout(Duration::from_millis(CAPTURE_TIMEOUT_MS))
         .map_err(|_| "screenshot capture timed out (target window not responding)".to_string())?
+}
+
+fn capture_region_rgb_inner(
+    id: u64,
+    left: i32,
+    top: i32,
+    width: i32,
+    height: i32,
+) -> Result<CapturedRgb, String> {
+    let hwnd = id as usize as HWND;
+    let mut rect = RECT::default();
+    if unsafe { GetWindowRect(hwnd, &mut rect) } == 0 {
+        return Err("GetWindowRect failed".into());
+    }
+    let win_w = rect.right - rect.left;
+    let win_h = rect.bottom - rect.top;
+    let left = left.clamp(0, win_w.saturating_sub(1));
+    let top = top.clamp(0, win_h.saturating_sub(1));
+    let width = width.clamp(1, win_w - left);
+    let height = height.clamp(1, win_h - top);
+    if win_w <= 0 || win_h <= 0 {
+        return Err("window has invalid bounds or is not visible".into());
+    }
+    let source = unsafe { GetWindowDC(hwnd) };
+    if source.is_null() {
+        return Err("GetWindowDC failed".into());
+    }
+    let memory = unsafe { CreateCompatibleDC(source) };
+    let bitmap = unsafe { CreateCompatibleBitmap(source, width, height) };
+    if memory.is_null() || bitmap.is_null() {
+        unsafe { ReleaseDC(hwnd, source) };
+        return Err("create screenshot bitmap failed".into());
+    }
+    let previous = unsafe { SelectObject(memory, bitmap) };
+    unsafe {
+        BitBlt(
+            memory,
+            0,
+            0,
+            width,
+            height,
+            source,
+            left,
+            top,
+            SRCCOPY | CAPTUREBLT,
+        );
+    }
+    let mut info = BITMAPINFO::default();
+    info.bmiHeader.biSize = mem::size_of::<BITMAPINFOHEADER>() as DWORD;
+    info.bmiHeader.biWidth = width;
+    info.bmiHeader.biHeight = -height;
+    info.bmiHeader.biPlanes = 1;
+    info.bmiHeader.biBitCount = 32;
+    info.bmiHeader.biCompression = BI_RGB;
+    let mut bgra = vec![0u8; width as usize * height as usize * 4];
+    let copied = unsafe {
+        GetDIBits(
+            memory,
+            bitmap,
+            0,
+            height as UINT,
+            bgra.as_mut_ptr().cast(),
+            &mut info,
+            DIB_RGB_COLORS,
+        )
+    };
+    unsafe {
+        SelectObject(memory, previous);
+        DeleteObject(bitmap);
+        DeleteDC(memory);
+        ReleaseDC(hwnd, source);
+    }
+    if copied == 0 {
+        return Err("GetDIBits failed".into());
+    }
+    let mut rgb = Vec::with_capacity(width as usize * height as usize * 3);
+    for pixel in bgra.chunks_exact(4) {
+        rgb.extend_from_slice(&[pixel[2], pixel[1], pixel[0]]);
+    }
+    Ok(CapturedRgb {
+        width,
+        height,
+        origin_x: rect.left + left,
+        origin_y: rect.top + top,
+        rgb,
+    })
 }
 
 fn capture_window_rgb_inner(id: u64) -> Result<CapturedRgb, String> {
@@ -909,18 +1225,31 @@ fn encode_jpeg_rgb(rgb: &[u8], width: i32, height: i32, quality: u8) -> Result<V
     Ok(jpeg)
 }
 
-fn capture_window(id: u64) -> Result<Value, String> {
+fn capture_window(id: u64, max_edge: i32) -> Result<Value, String> {
     let cap = capture_window_rgb(id)?;
-    let jpeg = encode_jpeg_rgb(&cap.rgb, cap.width, cap.height, 82)?;
-    Ok(json!({
+    let (rgb, width, height, scale) = downscale_rgb(&cap.rgb, cap.width, cap.height, max_edge);
+    record_capture_scale(id, scale);
+    let hash = frame_hash(&rgb);
+    let base = json!({
         "id": "screenshot-0",
-        "url": format!("data:image/jpeg;base64,{}", BASE64.encode(jpeg)),
-        "width": cap.width,
-        "height": cap.height,
+        "width": width,
+        "height": height,
+        "scale": scale,
         "originX": cap.origin_x,
         "originY": cap.origin_y,
         "zIndex": 0
-    }))
+    });
+    if capture_dedup_hit(&format!("{id}:shot"), hash) {
+        let mut value = base;
+        value["unchanged"] = json!(true);
+        value["note"] =
+            json!("pixels identical to the previous capture of this window; reuse that image");
+        return Ok(value);
+    }
+    let jpeg = encode_jpeg_rgb(&rgb, width, height, 82)?;
+    let mut value = base;
+    value["url"] = json!(format!("data:image/jpeg;base64,{}", BASE64.encode(jpeg)));
+    Ok(value)
 }
 
 #[derive(Clone, Debug)]
@@ -1274,7 +1603,8 @@ pub fn grid_view(params: &Value) -> Result<Value, String> {
             return Err(error);
         }
     }
-    let cap = capture_window_rgb(window.id)?;
+    let max_edge = resolve_max_edge(params.get("max_edge").and_then(Value::as_i64));
+    let bounds = window_bounds(window.id)?;
 
     let path: Vec<String> = params
         .get("path")
@@ -1290,8 +1620,8 @@ pub fn grid_view(params: &Value) -> Result<Value, String> {
     // Walk path on full-window coordinates to find the crop region.
     let mut region_l = 0i32;
     let mut region_t = 0i32;
-    let mut region_r = cap.width;
-    let mut region_b = cap.height;
+    let mut region_r = bounds.width;
+    let mut region_b = bounds.height;
     for (depth, id) in path.iter().enumerate() {
         // depth 0: initial square pack; depth>=1: 3×3 refine inside previous cell.
         let (_rows, _cols, _side, cells) =
@@ -1317,9 +1647,23 @@ pub fn grid_view(params: &Value) -> Result<Value, String> {
     let (rows, cols, side, cells_abs) =
         pack_square_cells(region_l, region_t, region_r, region_b, display_refine);
 
-    let (cw, ch, mut crop) = crop_rgb(
-        &cap.rgb, cap.width, cap.height, region_l, region_t, region_r, region_b,
-    )?;
+    // Capture: full window for the initial view; region-only BitBlt for refine
+    // (skips the full-window BGRA/RGB buffers).
+    let (cw, ch, mut crop) = if display_refine {
+        let cap = capture_region_rgb(
+            window.id,
+            region_l,
+            region_t,
+            region_r - region_l,
+            region_b - region_t,
+        )?;
+        (cap.width, cap.height, cap.rgb)
+    } else {
+        let cap = capture_window_rgb(window.id)?;
+        crop_rgb(
+            &cap.rgb, cap.width, cap.height, region_l, region_t, region_r, region_b,
+        )?
+    };
 
     let cells_local: Vec<GridCell> = cells_abs
         .iter()
@@ -1337,9 +1681,11 @@ pub fn grid_view(params: &Value) -> Result<Value, String> {
         })
         .collect();
 
-    draw_square_grid_overlay(&mut crop, cw, ch, &cells_local);
+    // Dedup on the raw crop pixels (before overlay): identical frame within the
+    // TTL returns metadata only — no new image payload.
+    let dedup_key = format!("{}:grid:{}", window.id, path.join("."));
+    let unchanged = capture_dedup_hit(&dedup_key, frame_hash(&crop));
 
-    let jpeg = encode_jpeg_rgb(&crop, cw, ch, 72)?;
     let cells_json: Vec<Value> = cells_abs
         .iter()
         .map(|c| {
@@ -1360,32 +1706,66 @@ pub fn grid_view(params: &Value) -> Result<Value, String> {
         })
         .collect();
 
+    // width/height/scale describe the image the agent sees; on an unchanged hit
+    // there is no new image, but the dims stay so click_view bounds checks and
+    // translation still line up with the previous image.
+    let (dw, dh, dscale) = downscale_dims(cw, ch, max_edge);
+    let mut view = json!({
+        "cropLeft": region_l,
+        "cropTop": region_t,
+        "cropRight": region_r,
+        "cropBottom": region_b,
+        "width": dw,
+        "height": dh,
+        "scale": dscale,
+        "note": "Single annotated image: semi-transparent square outlines + outlined numbers. Crop zooms current region. Click a point in this view: sky.click_view({window, view, x, y})."
+    });
+    let mut screenshots = Vec::new();
+    if unchanged {
+        view["unchanged"] = json!(true);
+        view["note"] = json!(
+            "pixels identical to the previous capture of this window+path; reuse that image. Click a point in this view: sky.click_view({window, view, x, y})."
+        );
+    } else {
+        draw_square_grid_overlay(&mut crop, cw, ch, &cells_local);
+        let (rgb_d, dw, dh, dscale) = downscale_rgb(&crop, cw, ch, max_edge);
+        let jpeg = encode_jpeg_rgb(&rgb_d, dw, dh, 72)?;
+        view["width"] = json!(dw);
+        view["height"] = json!(dh);
+        view["scale"] = json!(dscale);
+        screenshots.push(json!({
+            "id": "grid-0",
+            "url": format!("data:image/jpeg;base64,{}", BASE64.encode(jpeg)),
+            "width": dw,
+            "height": dh,
+            "scale": dscale,
+            "originX": bounds.left + region_l,
+            "originY": bounds.top + region_t,
+            "zIndex": 0,
+            "annotated": true,
+            "overlay": "square_cells_semi_transparent_lines_outlined_numbers"
+        }));
+    }
+
     Ok(json!({
         "window": window,
         "path": path,
         "select_only": true,
+        "unchanged": unchanged,
         "phase": if display_refine { "refine" } else { "initial" },
         "viewport": {
-            "width": cap.width,
-            "height": cap.height,
-            "originX": cap.origin_x,
-            "originY": cap.origin_y,
+            "width": bounds.width,
+            "height": bounds.height,
+            "originX": bounds.left,
+            "originY": bounds.top,
             "coordinate_space": "window_screenshot_pixels",
             "origin": "top_left",
             "click_xy": "grid cells use absolute window pixels (cx,cy); click_cell uses those"
         },
-        "view": {
-            "cropLeft": region_l,
-            "cropTop": region_t,
-            "cropRight": region_r,
-            "cropBottom": region_b,
-            "width": cw,
-            "height": ch,
-            "note": "Single annotated image: semi-transparent square outlines + outlined numbers. Crop zooms current region."
-        },
+        "view": view,
         "grid": {
-            "width": cap.width,
-            "height": cap.height,
+            "width": bounds.width,
+            "height": bounds.height,
             "cols": cols,
             "rows": rows,
             "side": side,
@@ -1395,19 +1775,9 @@ pub fn grid_view(params: &Value) -> Result<Value, String> {
             "region": { "left": region_l, "top": region_t, "right": region_r, "bottom": region_b },
             "cells": cells_json,
             "select_only": true,
-            "howto": "SELECT a number (no click). Refine: grid_view path+[id]. Click: click_cell only when ready."
+            "howto": "SELECT a number (no click). Refine: grid_view path+[id]. Click when ready: click_cell (cell center) or click_view (x,y point inside this view image)."
         },
-        "screenshots": [{
-            "id": "grid-0",
-            "url": format!("data:image/jpeg;base64,{}", BASE64.encode(jpeg)),
-            "width": cw,
-            "height": ch,
-            "originX": cap.origin_x + region_l,
-            "originY": cap.origin_y + region_t,
-            "zIndex": 0,
-            "annotated": true,
-            "overlay": "square_cells_semi_transparent_lines_outlined_numbers"
-        }]
+        "screenshots": screenshots
     }))
 }
 
@@ -1445,6 +1815,30 @@ pub fn click(params: &Value) -> Result<(), String> {
             (x, y)
         }
     };
+    // Optional snap (used by click_cell): a bounded UIA point-hit at the target
+    // — when it resolves to an element with valid bounds, click that element's
+    // center instead. Timeout / no-hit / disabled UIA all keep the point. A hit
+    // that is just the window background itself also keeps the point.
+    let (x, y) = if params.get("snap").and_then(Value::as_bool).unwrap_or(false)
+        && uia_disabled_reason(&window).is_none()
+    {
+        let mut window_rect = RECT::default();
+        let exclude = if unsafe { GetWindowRect(window.id as usize as HWND, &mut window_rect) } != 0
+        {
+            Some((
+                window_rect.left,
+                window_rect.top,
+                window_rect.right,
+                window_rect.bottom,
+            ))
+        } else {
+            None
+        };
+        uia::element_center_from_point(x, y, exclude).unwrap_or((x, y))
+    } else {
+        (x, y)
+    };
+    invalidate_capture_dedup(window.id);
     move_and_settle(window.id, x, y)?;
     let button = params
         .get("mouse_button")
@@ -1516,6 +1910,7 @@ fn dispatch_input_click(button: &str) -> Result<(), String> {
 pub fn type_text(params: &Value) -> Result<(), String> {
     let window = params_window(params)?;
     activate_window(window.id)?;
+    invalidate_capture_dedup(window.id);
     let text = params
         .get("text")
         .and_then(Value::as_str)
@@ -1644,6 +2039,7 @@ fn send_text_inputs(inputs: &[INPUT]) -> Result<(), String> {
 pub fn press_key(params: &Value) -> Result<(), String> {
     let window = params_window(params)?;
     activate_window(window.id)?;
+    invalidate_capture_dedup(window.id);
     let chord = params
         .get("key")
         .and_then(Value::as_str)
@@ -1672,6 +2068,7 @@ pub fn press_key(params: &Value) -> Result<(), String> {
 pub fn scroll(params: &Value) -> Result<(), String> {
     let window = params_window(params)?;
     activate_window(window.id)?;
+    invalidate_capture_dedup(window.id);
     let (x, y) = screen_point_from_params(&window, params)?;
     move_and_settle(window.id, x, y)?;
     let vertical = params.get("scrollY").and_then(Value::as_i64).unwrap_or(0) as i32;
@@ -1690,6 +2087,7 @@ pub fn scroll(params: &Value) -> Result<(), String> {
 pub fn drag(params: &Value) -> Result<(), String> {
     let window = params_window(params)?;
     activate_window(window.id)?;
+    invalidate_capture_dedup(window.id);
     let bounds = window_bounds(window.id)?;
     let from_x = map_axis(params, "from_x", bounds.width)?;
     let from_y = map_axis(params, "from_y", bounds.height)?;
@@ -1730,6 +2128,7 @@ pub fn drag(params: &Value) -> Result<(), String> {
 
 pub fn set_value(params: &Value) -> Result<(), String> {
     let window = params_window(params)?;
+    invalidate_capture_dedup(window.id);
     let index = params
         .get("element_index")
         .and_then(Value::as_u64)
@@ -1791,7 +2190,10 @@ pub fn params_window(params: &Value) -> Result<WindowRef, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{APPS_FOLDER_PREFIX, PAINT_AUMID, validate_launch_app};
+    use super::{
+        APPS_FOLDER_PREFIX, PAINT_AUMID, downscale_dims, downscale_rgb, frame_hash,
+        validate_launch_app,
+    };
 
     #[test]
     fn paint_alias_resolves_to_packaged_app() {
@@ -1810,6 +2212,42 @@ mod tests {
         assert_eq!(validate_launch_app(target).unwrap(), target);
         assert!(validate_launch_app(r"shell:AppsFolder\missing-app-id").is_err());
         assert!(validate_launch_app(r"shell:AppsFolder\Family!App&command").is_err());
+    }
+
+    #[test]
+    fn downscale_dims_keeps_small_frames_untouched() {
+        assert_eq!(downscale_dims(1365, 953, 1568), (1365, 953, 1.0));
+        assert_eq!(downscale_dims(100, 100, 0), (100, 100, 1.0)); // disabled
+    }
+
+    #[test]
+    fn downscale_dims_caps_long_edge_and_reports_factor() {
+        let (w, h, scale) = downscale_dims(3136, 1960, 1568);
+        assert_eq!((w, h), (1568, 980));
+        assert!((scale - 2.0).abs() < 0.01);
+        // Tall window: factor comes from the long edge, not the width.
+        let (w, h, scale) = downscale_dims(500, 4000, 1000);
+        assert_eq!(h, 1000);
+        assert!(w >= 124 && w <= 126);
+        assert!((scale - 4.0).abs() < 0.02);
+    }
+
+    #[test]
+    fn downscale_rgb_box_average_preserves_solid_color() {
+        let rgb = vec![200u8; 4 * 4 * 3];
+        let (out, w, h, scale) = downscale_rgb(&rgb, 4, 4, 2);
+        assert_eq!((w, h), (2, 2));
+        assert!((scale - 2.0).abs() < f64::EPSILON);
+        assert!(out.iter().all(|v| *v == 200));
+    }
+
+    #[test]
+    fn frame_hash_is_deterministic_and_sensitive() {
+        let a = vec![7u8; 1024];
+        let mut b = vec![7u8; 1024];
+        assert_eq!(frame_hash(&a), frame_hash(&a));
+        b[512] = 8;
+        assert_ne!(frame_hash(&a), frame_hash(&b));
     }
 }
 
@@ -1873,10 +2311,25 @@ fn screen_point_from_params(window: &WindowRef, params: &Value) -> Result<(i32, 
             map_axis_normalized(params, "y", bounds.height)?,
         )
     } else {
-        (
-            map_axis(params, "x", bounds.width)?,
-            map_axis(params, "y", bounds.height)?,
-        )
+        let mut px = map_axis(params, "x", bounds.width)?;
+        let mut py = map_axis(params, "y", bounds.height)?;
+        // The default pixel space is the latest get_window_state screenshot,
+        // which may be downscaled (see screenshots[0].scale). Callers that
+        // already computed full window pixels (click_cell / click_view) pass
+        // space:"window_pixels" to bypass this mapping.
+        let space = params
+            .get("space")
+            .and_then(Value::as_str)
+            .unwrap_or("screenshot_pixels");
+        if space != "window_pixels" {
+            if let Some(scale) = last_capture_scale(window.id) {
+                if scale > 1.0 + f64::EPSILON {
+                    px = (px as f64 * scale).round() as i32;
+                    py = (py as f64 * scale).round() as i32;
+                }
+            }
+        }
+        (px, py)
     };
     screen_point(window, x, y)
 }

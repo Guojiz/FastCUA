@@ -19,6 +19,7 @@ internal static class FixtureProgram
     private const uint WS_EX_CLIENTEDGE = 0x00000200;
     private const uint WM_DESTROY = 0x0002;
     private const uint WM_COMMAND = 0x0111;
+    private const uint WM_LBUTTONDOWN = 0x0201;
     private const uint LB_ADDSTRING = 0x0180;
     private const int EN_CHANGE = 0x0300;
     private const int SW_SHOW = 5;
@@ -28,6 +29,7 @@ internal static class FixtureProgram
     private static readonly WndProc WindowProcedure = HandleMessage;
     private static IntPtr statusWindow;
     private static IntPtr textStatusWindow;
+    private static IntPtr clickStatusWindow;
     private static int clicks;
 
     [STAThread]
@@ -83,6 +85,8 @@ internal static class FixtureProgram
         CreateWindowEx(WS_EX_CLIENTEDGE, "EDIT", "",
             WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_PASSWORD,
             350, 290, 285, 30, window, new IntPtr(1006), instance, IntPtr.Zero);
+        clickStatusWindow = CreateWindowEx(0, "STATIC", "LastClick: -", WS_CHILD | WS_VISIBLE,
+            350, 340, 285, 24, window, IntPtr.Zero, instance, IntPtr.Zero);
 
         ShowWindow(window, SW_SHOW);
         UpdateWindow(window);
@@ -109,6 +113,11 @@ internal static class FixtureProgram
         if (message == WM_COMMAND && commandId == ButtonId)
         {
             SetWindowText(statusWindow, "Clicks: " + (++clicks));
+            POINT cursor = new POINT();
+            if (GetCursorPos(out cursor) && ScreenToClient(hwnd, ref cursor))
+            {
+                SetWindowText(clickStatusWindow, "BtnClick: " + cursor.x + "," + cursor.y);
+            }
             return IntPtr.Zero;
         }
         if (message == WM_COMMAND && commandId == 1002 && notification == EN_CHANGE)
@@ -117,6 +126,12 @@ internal static class FixtureProgram
             GetWindowText(lParam, value, value.Capacity);
             SetWindowText(textStatusWindow, "Text: " + value);
             return IntPtr.Zero;
+        }
+        if (message == WM_LBUTTONDOWN)
+        {
+            var lx = (short)(lParam.ToInt64() & 0xffff);
+            var ly = (short)((lParam.ToInt64() >> 16) & 0xffff);
+            SetWindowText(clickStatusWindow, "LastClick: " + lx + "," + ly);
         }
         if (message == WM_DESTROY)
         {
@@ -203,4 +218,10 @@ internal static class FixtureProgram
 
     [DllImport("user32.dll")]
     private static extern IntPtr LoadCursor(IntPtr instance, IntPtr cursorName);
+
+    [DllImport("user32.dll")]
+    private static extern bool GetCursorPos(out POINT point);
+
+    [DllImport("user32.dll")]
+    private static extern bool ScreenToClient(IntPtr hwnd, ref POINT point);
 }

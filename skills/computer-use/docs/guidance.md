@@ -314,13 +314,17 @@ globalThis.targetWindow = state.window;
 - Prefer X Window System keysym-style names for keys, especially `KP_0`–`KP_9` when apps distinguish numpad keys. Common aliases (`period`, `Numpad_0`, …) are accepted. For shifted punctuation shortcuts include `Shift` (e.g. `Control_L+Shift_L+period`).
 - Prefer input injection / coordinates when UIA indexes are flaky; for stable labeled controls prefer `element_index` from the latest tree. Property name is `element_index`, not `element`.
 - **Coordinate space:** `click`/`drag`/`scroll` x,y are **window screenshot pixels** (origin top-left), identical to `get_window_state().viewport` / `screenshots[0].{width,height}`. Never use uncalibrated guesses.
+- **Scale first:** captures may be downscaled to a 1568px long edge. Before any pixel reasoning, read `viewport.scale` / `screenshots[0].scale` (window px = image px × scale; 1 = no downscale). Plain x,y clicks use screenshot units — the host maps them for you; never pre-multiply by scale yourself.
+- **Unchanged frames:** if a capture comes back with `unchanged: true` (no image), the pixels are identical to the previous response — reuse that image and act on the fresh metadata. Any input into the window invalidates this.
 - **Resolution first:** after every relevant `get_window_state`, record `viewport.width/height` (or screenshot size) before any pixel click.
 - **Visual square grid (when UIA fails, Apple Voice Control model):**
   - `sky.grid_view({window})` returns **one** image with **semi-transparent square outlines** + small outlined numbers (not a solid fill — UI stays readable).
   - Prefer 3 rows of squares (2 if width is tight). Numbers `1..N`.
   - **Select a number only** — does not click.
   - `sky.grid_refine({window, grid, cell})` crops to that cell and draws **3×3 squares inside only** (still one image).
-  - `sky.click_cell` only when ready. Select ≠ click. Do not spam raw full-window screenshots for targeting.
+  - `sky.click_cell` only when ready (cell center; snaps to the UIA element under the point when UIA is healthy). Select ≠ click. Do not spam raw full-window screenshots for targeting.
+  - **Precise point inside a (refined) view:** `sky.click_view({window, view, x, y})` — x,y are pixels in the image you see; it bounds-checks and translates via `view.cropLeft/cropTop` + `view.scale`. Prefer `click_cell` when a numbered cell fits; use `click_view` for exact points cells don't cover; use absolute x,y only against a full-window screenshot.
+  - **Cell-local offsets (voice-ready):** `sky.click_in_cell({window, grid, cell, x, y, view})` — x,y are pixels INSIDE the named cell (cell top-left = 0,0); out-of-cell coordinates are rejected, never clamped. This is the primitive for commands like "5 号格内 (30,20)".
 - **Normalized coords:** both `x` and `y` in `0..1` are treated as fractions of the viewport.
 - Out-of-bounds clicks error with viewport bounds; recompute instead of retrying the same bad point.
 - Do not use `set_value` for normal text editing in this release (limited to classic Win32 Edit). Prefer click → read → decide → `type_text`.

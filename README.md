@@ -31,7 +31,7 @@ Through MCP, the agent gets a persistent JS environment (`sky.*`). Related keybo
 
 ### 4. Window screenshot pixels are the coordinate space
 
-`click` / `drag` / `scroll` **x,y** are in **window screenshot pixels**, origin top-left of the target window — same space as `get_window_state().viewport` and `screenshots[0].width/height`. Never invent desktop-absolute coordinates.
+`click` / `drag` / `scroll` **x,y** are in **window screenshot pixels**, origin top-left of the target window — same space as `get_window_state().viewport` and `screenshots[0].width/height`. Never invent desktop-absolute coordinates. Captures may be downscaled (1568px long edge): read `viewport.scale` before pixel work; `unchanged: true` means reuse the previous image.
 
 ### 5. Fail fast on software work (30s)
 
@@ -46,7 +46,7 @@ When UIA is weak or `state.uia.prefer_vision` is true, the runtime exposes that 
 1. `sky.grid_view({ window })` → **one** annotated image: semi-transparent **square** cell outlines + small outlined numbers.
 2. **Select** a number only (does **not** click).
 3. `sky.grid_refine({ window, grid, cell })` → crop **inside that cell only**, draw a 3×3 of squares (still one image).
-4. `sky.click_cell(...)` only when ready.
+4. `sky.click_cell(...)` (cell center), `sky.click_in_cell(...)` (cell-local x,y), or `sky.click_view({window, view, x, y})` (precise point in the view image) only when ready.
 
 Select ≠ click. Prefer `grid_view` over raw full screenshots for targeting.
 

@@ -161,7 +161,12 @@ try {
   });
   assert.ok(state.accessibility?.tree.includes("Fixture Text"), state.accessibility?.tree);
   assert.ok(state.accessibility?.tree.includes("Text: initial-value"), state.accessibility?.tree);
-  assert.match(state.screenshots?.[0]?.url || "", /^data:image\/jpeg;base64,/);
+  if (state.screenshots?.[0]?.unchanged === true) {
+    // Capture dedup: an identical frame within the TTL comes back without a URL.
+    assert.ok(!state.screenshots[0].url, "deduplicated capture must omit the image");
+  } else {
+    assert.match(state.screenshots?.[0]?.url || "", /^data:image\/jpeg;base64,/);
+  }
   passed("get_window_state", `${state.screenshots[0].width}x${state.screenshots[0].height}`);
 
   state = await request("get_window_state", {

@@ -105,14 +105,14 @@ fn handle_request(request: &Request) -> Value {
         }
     }
 
-    let result = dispatch(&request.method, &request.params);
+    let result = dispatch(&request.method, &request.params, &request.meta);
     match result {
         Ok(result) => json!({"id": request.id, "ok": true, "result": result}),
         Err(error) => error_response(request, &error),
     }
 }
 
-fn dispatch(method: &str, params: &Value) -> Result<Value, String> {
+fn dispatch(method: &str, params: &Value, meta: &Value) -> Result<Value, String> {
     match method {
         "list_apps" => {
             serde_json::to_value(desktop::list_apps()).map_err(|error| error.to_string())
@@ -151,7 +151,17 @@ fn dispatch(method: &str, params: &Value) -> Result<Value, String> {
                 .get("include_text")
                 .and_then(Value::as_bool)
                 .unwrap_or(true);
-            desktop::get_window_state(window, include_screenshot, include_text)
+            let max_edge = params.get("max_edge").and_then(Value::as_i64);
+            // Daemon-side UIA quality profile: known-bad apps get one short
+            // probe instead of the full provider timeout.
+            let uia_probe_ms = meta.get("x-fastcua-uia-probe-ms").and_then(Value::as_u64);
+            desktop::get_window_state(
+                window,
+                include_screenshot,
+                include_text,
+                max_edge,
+                uia_probe_ms,
+            )
         }
         "grid_view" => desktop::grid_view(params),
         "click" | "click_element" => {
