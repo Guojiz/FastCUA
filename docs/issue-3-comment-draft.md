@@ -154,7 +154,7 @@ Validation: 112/112 real-machine checks (`tests/skill-recorder-validation.mjs`),
 
 ---
 
-**Office end-to-end run: record → compile → dry-run with substitution → promote, all on real Microsoft Excel (draft)**
+**Office end-to-end run: record → compile → dry-run with substitution → promote, all on real Microsoft Excel (POSTED 2026-07-23 as comment-5059954597)**
 
 The full loop now runs against a real Office app, not just the fixture. The
 permanent suite (`tests/office-demo-e2e.mjs`) records an expense-table
