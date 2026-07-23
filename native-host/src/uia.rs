@@ -619,6 +619,7 @@ unsafe fn walk_element(
     let index = *next_index;
     *next_index += 1;
     let name = unsafe { element_bstr(element, 23) }.unwrap_or_default();
+    let automation_id = unsafe { element_bstr(element, 29) }.unwrap_or_default();
     let control_type = unsafe { element_i32(element, 21) }.unwrap_or(UIA_CUSTOM);
     let role = role_name(control_type);
     elements.push(ElementSnapshot {
@@ -629,6 +630,15 @@ unsafe fn walk_element(
     });
     tree.push_str(&"\t".repeat(depth + 1));
     tree.push_str(&format!("{index} {role}"));
+    if !automation_id.is_empty() {
+        // AutomationId is the restart-stable element key (developer-assigned,
+        // not localized): expose it so anchors can re-resolve after app
+        // restarts and display-language changes.
+        tree.push_str(&format!(
+            " #{}",
+            automation_id.replace(['\r', '\n', '\t', ' '], "_")
+        ));
+    }
     if !name.is_empty() {
         tree.push(' ');
         tree.push_str(&name.replace(['\r', '\n'], " "));

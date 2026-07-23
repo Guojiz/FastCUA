@@ -162,6 +162,20 @@ await sky.click_cell({ window, grid: gv.grid, cell: "5" });
 await sky.close(); // end this MCP turn; daemon stays up
 ```
 
+## Record a Skill (preview)
+
+> **Status: validated preview.** Works on real Windows 11; end-to-end validated against the FastCUA test fixture (60+ real-machine checks: record -> compile -> dry-run with a new parameter value after an app restart -> fail-safe drills). Audio narration is future work; a short human-input comparison session is still owed (all validation input was automation-injected and is labeled as such).
+
+`tools/skill-recorder` watches a real demonstration — yours or a synthetic one driven through FastCUA itself — and compiles it into an **auditable, non-executable** skill draft:
+
+1. **Record** — global hooks + UI Automation anchors (numeric control-type IDs + AutomationIds, localized names as hints only), sparse JPEG keyframes (~0.7 MB/min measured), `Ctrl+Alt+N` typed narration notes, `Ctrl+Alt+R` pause, `Ctrl+Alt+X` stop. Password fields are structurally redacted at the hook; the secure desktop is excluded; the recorder never records its own windows.
+2. **Compile** — `session.jsonl` -> `draft.json`/`draft.md` + an inert `skill-draft/<name>/SKILL.md` marked `verified: false` with a bilingual UNVERIFIED banner. Parameters (dates, filenames, text) are inferred **with provenance**; anything uncertain stays an explicit `⚠ unresolved` marker.
+3. **Review** — the draft is presented with its parameter table, ⚠ markers, redactions, and recorded app scope. The human decides every unresolved step.
+4. **Dry-run** — replays the draft through the **normal control plane** (approvals, whitelist, F7–F10 all active). Unresolved steps pause for explicit decisions; redacted steps never execute; a workflow can never exceed its recorded app scope; an anchor that fails to re-resolve aborts instead of clicking somewhere wrong. Every step logs expected-vs-actual.
+5. **Promote** — only the user copies a reviewed, dry-run-clean draft into a live skills directory. The draft never installs itself.
+
+Agent procedure lives in `skills/skill-recorder/`; format + design in [docs/skill-recorder-design.md](docs/skill-recorder-design.md).
+
 ## Current boundaries
 
 Windows 11 x64. Secure Desktop, UAC elevation, auth dialogs, password managers, and Windows security UI are outside the normal path. Apps with little accessibility data need screenshots / grid targeting. Element indexes belong to the latest UIA snapshot — refresh after layout changes.

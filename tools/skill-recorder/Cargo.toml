@@ -1,0 +1,19 @@
+[package]
+name = "skill-recorder"
+version = "0.2.0"
+edition = "2021"
+license = "MIT"
+description = "FastCUA issue #3 stages 2-4: demonstration recorder v2 (aligned anchors, JPEG keyframes, narration notes)"
+
+[[bin]]
+name = "skill-recorder"
+path = "src/main.rs"
+
+[dependencies]
+jpeg-encoder = "0.6"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "z"
+strip = true

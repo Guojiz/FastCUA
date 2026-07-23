@@ -22,3 +22,6 @@ tests/*.exe
 
 # Feasibility tool build output
 tools/record-feasibility/target/
+
+# Skill recorder build output
+tools/skill-recorder/target/
