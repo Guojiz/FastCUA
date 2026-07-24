@@ -48,6 +48,8 @@ fs.writeFileSync(
     checkForUpdates: false,
   }),
 );
+const nativeHostFixture = path.join(temp, "cua-native-host-fixture.exe");
+fs.writeFileSync(nativeHostFixture, "");
 const child = spawn(process.execPath, [path.join(root, "daemon.mjs")], {
   cwd: root,
   stdio: ["ignore", "ignore", "pipe"],
@@ -59,6 +61,7 @@ const child = spawn(process.execPath, [path.join(root, "daemon.mjs")], {
     FASTCUA_CONFIG_PATH: configPath,
     FASTCUA_HOME: path.join(temp, "data"),
     FASTCUA_DISABLE_OVERLAY: "1",
+    CUA_BIN: nativeHostFixture,
   },
 });
 let stderr = "";
@@ -97,7 +100,7 @@ try {
   assert.equal(result.result.pipe, pipe);
   assert.equal(result.result.httpPort, port);
   assert.equal(path.resolve(result.result.dataDir), path.join(temp, "data"));
-  assert.equal(path.resolve(result.result.nativeHostPath), path.join(root, "native-host", "target", "release", "cua-native-host.exe"));
+  assert.equal(path.resolve(result.result.nativeHostPath), nativeHostFixture);
   console.log("PASS runtime identity integration: daemon reports one coherent root, version, pipe, port, data directory, and native host");
 } catch (error) {
   error.message += `\ndaemon stderr:\n${stderr}`;
