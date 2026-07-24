@@ -17,6 +17,7 @@ native-host/.rustup-home/
 tests/*.exe
 
 # Release artifacts generated locally (CI / gh release upload)
+/dist/
 /cua-native-host.exe
 /SHA256SUMS.txt
 
@@ -25,3 +26,7 @@ tools/record-feasibility/target/
 
 # Skill recorder build output
 tools/skill-recorder/target/
+
+# Local Skill-writer credentials
+skill-writer-auth.json
+.fastcua/

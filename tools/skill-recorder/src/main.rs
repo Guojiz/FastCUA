@@ -689,7 +689,7 @@ unsafe extern "system" fn mouse_proc(code: i32, wparam: WPARAM, lparam: LPARAM) 
         let msg = wparam as UINT;
         let now = unix_ms();
         if msg == WM_MOUSEMOVE {
-            // Coalesce pure moves to one per ~40ms (counted, not logged).
+            // Coalesce pure moves to one sampled event per ~40ms; count the suppressed events.
             let last = LAST_MOVE_MS.load(Ordering::Relaxed);
             if now.saturating_sub(last) < 40 {
                 COALESCED.fetch_add(1, Ordering::Relaxed);
@@ -1399,6 +1399,22 @@ fn process_path(pid: DWORD) -> String {
     }
 }
 
+fn window_bounds_json(hwnd: usize) -> String {
+    let mut rect = RECT::default();
+    if hwnd == 0
+        || unsafe { GetWindowRect(hwnd as HWND, &mut rect) } == 0
+        || rect.right <= rect.left
+        || rect.bottom <= rect.top
+    {
+        "null".into()
+    } else {
+        format!(
+            "[{},{},{},{}]",
+            rect.left, rect.top, rect.right, rect.bottom
+        )
+    }
+}
+
 fn describe_window(hwnd: usize, cache: &mut HashMap<usize, (String, String)>) -> (String, String) {
     if let Some(hit) = cache.get(&hwnd) {
         return hit.clone();
@@ -1534,11 +1550,13 @@ fn writer_main(rx: mpsc::Receiver<Record>, path: &Path) {
                     continue; // recorder's own UI is never demo content
                 }
                 let (app, title) = describe_window(fg, &mut cache);
+                let fg_bounds = window_bounds_json(fg);
                 let base = format!(
-                    "\"ts\":{unix_ms},\"event_time\":{event_time},\"injected\":{injected},\"lower_il\":{lower_il},\"fg\":{{\"hwnd\":{},\"app\":\"{}\",\"title\":\"{}\"}}",
+                    "\"ts\":{unix_ms},\"event_time\":{event_time},\"injected\":{injected},\"lower_il\":{lower_il},\"fg\":{{\"hwnd\":{},\"app\":\"{}\",\"title\":\"{}\",\"bounds\":{}}}",
                     fg,
                     json_escape(&app),
                     json_escape(truncate(&title, 120)),
+                    fg_bounds,
                 );
                 if kind.starts_with("key") {
                     let pw = is_password_context();

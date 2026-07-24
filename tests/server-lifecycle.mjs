@@ -96,7 +96,7 @@ function waitForChildExit() {
 try {
   const initialized = await rpc("initialize");
   assert.equal(initialized.serverInfo.name, "sky-computer-use");
-  assert.equal(initialized.serverInfo.version, "0.2.1");
+  assert.equal(initialized.serverInfo.version, "0.3.0");
 
   const listed = await rpc("tools/list");
   const names = listed.tools.map(tool => tool.name);
@@ -110,7 +110,7 @@ try {
   assert.equal(typeText.inputSchema.properties.via_clipboard, undefined);
   assert.match(typeText.description, /fails safely instead of sending global Ctrl\+A/i);
   assert.match(listed.tools.find(tool => tool.name === "list_apps").description, /running apps/i);
-  console.log("PASS MCP contract matches v0.2.1 capabilities");
+  console.log("PASS MCP contract matches v0.3.0 capabilities");
 
   const delayedConnection = await rpc("tools/call", {
     name: "js",

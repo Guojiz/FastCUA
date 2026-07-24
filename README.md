@@ -131,6 +131,16 @@ If either the Skill or MCP is missing, installation failed.
 
 Local control center: `http://127.0.0.1:8420` (loopback only).
 
+### Updates and version checks
+
+```powershell
+npx fastcua check
+npx fastcua update
+npx fastcua doctor
+```
+
+Installed releases check for updates at most once per day and only notify. Updates use one verified runtime ZIP, keep `app.previous` for rollback, and never overwrite a development checkout. Call `runtime_info` through MCP to see the exact server, daemon, native-host, version, commit, pipe, and data directory in use. See [releases and updates](docs/RELEASING.md).
+
 ## You stay in control
 
 | State | Signal | Behavior |
@@ -166,13 +176,14 @@ await sky.close(); // end this MCP turn; daemon stays up
 
 > **Status: validated preview.** Works on real Windows 11; end-to-end validated against the FastCUA test fixture (60+ real-machine checks: record -> compile -> dry-run with a new parameter value after an app restart -> fail-safe drills). A short human-input comparison session is still owed (all validation input was automation-injected and is labeled as such).
 
-`tools/skill-recorder` watches a real demonstration — yours or a synthetic one driven through FastCUA itself — and compiles it into an **auditable, non-executable** skill draft. The agent drives the whole flow; the user demonstrates, reviews, and decides:
+`tools/skill-recorder` watches a real demonstration — yours or a synthetic one driven through FastCUA itself — and compiles it into an **auditable, non-executable evidence package** before a dedicated subagent writes the Skill. The agent drives the whole flow; the user demonstrates, reviews, and decides:
 
-1. **Record** — global hooks + UI Automation anchors (numeric control-type IDs + AutomationIds, localized names as hints only), sparse JPEG keyframes (~0.7 MB/min measured), a zero-dependency **MJPEG demo video** (~4 fps, long edge ≤1568, with `video/index.jsonl` for random-access frame extraction), and a best-effort **WAV narration track** (PCM 16 kHz mono via WASAPI; no mic or a busy mic logs a note and recording continues — media never fails a session). `Ctrl+Alt+N` typed narration notes, `Ctrl+Alt+R` pause, `Ctrl+Alt+X` stop. Password fields are structurally redacted at the hook — their video frames become marked black-frame gaps, never pixels; the secure desktop is excluded; the recorder never records its own windows. Everything stays local in the session folder.
-2. **Compile** — `session.jsonl` -> `draft.json`/`draft.md` + an inert `skill-draft/<name>/SKILL.md` marked `verified: false` with a bilingual UNVERIFIED banner. Parameters (dates, filenames, text) are inferred **with provenance**; anything uncertain stays an explicit `⚠ unresolved` marker. Media appears only as session-relative review-aid references (`draft.media`) — never embedded in a draft.
-3. **Review** — the agent presents the parameter table, ⚠ markers, redactions, and recorded app scope in chat; the human decides every unresolved step. When a step is questioned, the agent can *look* at the recorded moment: `frame-extract.mjs` pulls any timestamp (or narration note) out of the video as a JPEG, and redacted moments honestly report "nothing exists here". The narration WAV is played back by the user (transcription is out of scope).
-4. **Dry-run** — replays the draft through the **normal control plane** (approvals, whitelist, F7–F10 all active). Unresolved steps pause for explicit decisions; redacted steps never execute; a workflow can never exceed its recorded app scope; an anchor that fails to re-resolve aborts instead of clicking somewhere wrong. Every step logs expected-vs-actual. Dry-run replays steps, not media.
-5. **Promote** — gated, agent-executed, user-approved. After the user explicitly approves in conversation, the agent detects the host skills directory (Kimi Work, Claude Code, opencode, or an explicit `--to`) and runs `promote.mjs`. The tool refuses without `--yes-i-reviewed`; a `verified: false` draft additionally requires `--force-unverified` and gets an extra warning appended to the promoted copy. Nothing ever installs itself silently.
+1. **Record** — capture UIA anchors, sampled pointer paths, wheel axis/delta, sparse keyframes, local MJPEG video, optional WAV narration, and typed notes. Wheel input and drag gestures remain distinct; password and secure-desktop moments are structurally redacted.
+2. **Compile evidence** — `session.jsonl` becomes canonical `evidence.json`/`evidence.md` plus deterministic `draft.json`/`draft.md`. `--skill` writes a synthesis request, not `SKILL.md`; parameters and uncertainty retain provenance.
+3. **Synthesize + lint** — the FastCUA console configures a dedicated OpenAI-compatible subagent API/model and optional transcription model. Its key is stored separately. The tool-less writer produces natural-language Skill prose; provenance lint requires citations for every step, parameter, and warning and rejects fabrication. Narration fallback is direct audio → transcription API → typed notes; `typed` mode keeps audio local.
+4. **Review** — the agent presents parameters, warnings, redactions, app scope, model, and narration path. `frame-extract.mjs` lets the agent inspect a chosen non-redacted moment instead of guessing.
+5. **Dry-run** — replay the deterministic draft through the normal control plane with a new parameter value. Unresolved steps need explicit decisions; redacted steps never execute; scope and anchor failures abort safely.
+6. **Promote** — only after explicit user approval, detect the active host Skill directory and run `promote.mjs`. Review and verification gates remain mandatory; nothing installs silently.
 
 Agent procedure lives in `skills/skill-recorder/`; format + design in [docs/skill-recorder-design.md](docs/skill-recorder-design.md).
 

@@ -1,5 +1,9 @@
 # skill-recorder Office demo (excel-expense-report)
 
+> Historical artifact: this example predates the dedicated-writer pipeline. Current
+> `compile.mjs` emits evidence + a synthesis request; `synthesize.mjs` writes and
+> provenance-lints new `SKILL.md` drafts.
+
 Recorded on real Microsoft Excel: start page → 空白工作簿 → two-column expense
 table (项目/金额 × 3 rows) → =SUM total → F12 save-as with a date-parameterized
 filename. Compiled to `draft.json` (23 steps, 10 parameters incl. the date) +

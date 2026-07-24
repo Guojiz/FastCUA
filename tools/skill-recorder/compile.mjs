@@ -3,8 +3,8 @@
 // skill-recorder draft compiler — FastCUA issue #3, stages 3-4.
 //
 // session.jsonl (fastcua-recording/1) -> human-readable, NON-executable
-// workflow draft (draft.json + draft.md) and, with --skill, an editable Skill
-// draft folder (SKILL.md) that stays inert until a human approves it.
+// evidence package (evidence.json + evidence.md) plus the deterministic replay
+// draft. --skill writes only a synthesis request; a dedicated agent writes SKILL.md.
 //
 // Principles (beating the Cowork weaknesses):
 //   * Auditable: every step keeps its semantic anchor (numeric control-type ID
@@ -93,9 +93,90 @@ function anchorSummary(a) {
   return out;
 }
 
+const DRAG_MIN_DISPLACEMENT_PX = 6;
+const DRAG_MIN_PATH_PX = 10;
+const DRAG_MAX_DURATION_MS = 30_000;
+const DRAG_PATH_POINT_LIMIT = 32;
+
+function distance(a, b) {
+  return Math.hypot(Number(b.x) - Number(a.x), Number(b.y) - Number(a.y));
+}
+
+function pointerPoint(ev) {
+  const point = {
+    screen_x: ev.x,
+    screen_y: ev.y,
+  };
+  const bounds = ev.fg?.bounds;
+  if (!Array.isArray(bounds) || bounds.length !== 4) return point;
+  const [left, top, right, bottom] = bounds.map(Number);
+  const width = right - left;
+  const height = bottom - top;
+  if (![left, top, right, bottom].every(Number.isFinite) || width <= 0 || height <= 0) return point;
+  const windowX = Number(ev.x) - left;
+  const windowY = Number(ev.y) - top;
+  return {
+    ...point,
+    window_x: windowX,
+    window_y: windowY,
+    window_width: width,
+    window_height: height,
+    x_ratio: windowX / width,
+    y_ratio: windowY / height,
+    inside_window: windowX >= 0 && windowY >= 0 && windowX < width && windowY < height,
+  };
+}
+
+function sampleGesturePath(events, startTs) {
+  if (events.length <= DRAG_PATH_POINT_LIMIT) {
+    return events.map((ev) => ({ ...pointerPoint(ev), dt_ms: Math.max(0, ev.ts - startTs) }));
+  }
+  const indexes = new Set([0, events.length - 1]);
+  for (let n = 1; n < DRAG_PATH_POINT_LIMIT - 1; n++) {
+    indexes.add(Math.round(n * (events.length - 1) / (DRAG_PATH_POINT_LIMIT - 1)));
+  }
+  return [...indexes].sort((a, b) => a - b)
+    .map((index) => ({ ...pointerPoint(events[index]), dt_ms: Math.max(0, events[index].ts - startTs) }));
+}
+
+function pointerGesture(events, downIndex) {
+  const down = events[downIndex];
+  const moves = [];
+  let up = null;
+  let upIndex = -1;
+  for (let j = downIndex + 1; j < events.length; j++) {
+    const candidate = events[j];
+    if (Number.isFinite(candidate.ts) && candidate.ts - down.ts > DRAG_MAX_DURATION_MS) break;
+    if (candidate.t === "mouse_down" && candidate.button === down.button) break;
+    if (candidate.t === "mouse_move") moves.push({ event: candidate, index: j });
+    if (candidate.t === "mouse_up" && candidate.button === down.button) {
+      up = candidate;
+      upIndex = j;
+      break;
+    }
+  }
+  const pointEvents = [down, ...moves.map((entry) => entry.event), ...(up ? [up] : [])];
+  const displacement = up ? distance(down, up) : 0;
+  const maxDisplacement = pointEvents.reduce((max, point) => Math.max(max, distance(down, point)), 0);
+  const pathLength = pointEvents.slice(1)
+    .reduce((total, point, index) => total + distance(pointEvents[index], point), 0);
+  return {
+    down,
+    moves,
+    up,
+    upIndex,
+    pointEvents,
+    displacement,
+    maxDisplacement,
+    pathLength,
+    isDrag: Boolean(up && (maxDisplacement >= DRAG_MIN_DISPLACEMENT_PX || pathLength >= DRAG_MIN_PATH_PX)),
+  };
+}
+
 function buildSteps(events) {
   const steps = [];
   const notes = [];
+  const consumedPointerEvents = new Set();
   let i = 0;
   let typeRun = null; // {events:[], anchor, tsStart, lastTs, packet, processkey}
   let redactedRun = null; // {count, tsStart, lastTs, fg}
@@ -163,6 +244,10 @@ function buildSteps(events) {
 
   while (i < events.length) {
     const ev = events[i];
+    if (consumedPointerEvents.has(i)) {
+      i++;
+      continue;
+    }
     if (ev.t === "note") {
       notes.push(ev);
       i++;
@@ -204,35 +289,86 @@ function buildSteps(events) {
     flushTypeRun(focusEvents);
 
     if (ev.t === "mouse_down") {
-      const up = events.slice(i + 1, i + 8).find((e) =>
-        e.t === "mouse_up" && e.button === ev.button && e.ts - ev.ts <= 1000);
+      const gesture = pointerGesture(events, i);
+      for (const move of gesture.moves) consumedPointerEvents.add(move.index);
+      if (gesture.upIndex >= 0) consumedPointerEvents.add(gesture.upIndex);
       const warnings = [];
-      if (ev.injected) warnings.push(`${UNRESOLVED}: input was injected, not physically demonstrated`);
+      if (gesture.pointEvents.some((event) => event.injected)) {
+        warnings.push(`${UNRESOLVED}: input was injected, not physically demonstrated`);
+      }
       if (!ev.anchor) warnings.push(`${UNRESOLVED}: no UIA anchor (ElementFromPoint failed or timed out)`);
-      steps.push({
-        n: steps.length + 1,
-        ts: ev.ts,
-        action: "click",
-        app: ev.fg?.app,
-        button: { 1: "left", 2: "right", 3: "middle" }[ev.button] || String(ev.button),
-        x: ev.x,
-        y: ev.y,
-        anchor: anchorSummary(ev.anchor),
-        double_click: Boolean(up && up._dbl),
-        warnings,
-      });
+      const button = { 1: "left", 2: "right", 3: "middle" }[ev.button] || String(ev.button);
+      if (gesture.isDrag) {
+        if (!gesture.up?.anchor) warnings.push(`${UNRESOLVED}: no UIA anchor at drag endpoint`);
+        const from = pointerPoint(ev);
+        const to = pointerPoint(gesture.up);
+        if (from.inside_window !== true || to.inside_window !== true) {
+          warnings.push(`${UNRESOLVED}: drag point cannot be safely rebased to the recorded window`);
+        }
+        if (gesture.up?.fg?.hwnd !== ev.fg?.hwnd) {
+          warnings.push(`${UNRESOLVED}: drag crossed foreground windows`);
+        }
+        const straightness = gesture.pathLength > 0 ? gesture.displacement / gesture.pathLength : 1;
+        if (straightness < 0.85) {
+          warnings.push(`${UNRESOLVED}: captured drag path is curved; current replay uses the recorded endpoints`);
+        }
+        steps.push({
+          n: steps.length + 1,
+          ts: ev.ts,
+          action: "drag",
+          app: ev.fg?.app,
+          window_title: ev.fg?.title,
+          button,
+          anchor: anchorSummary(ev.anchor),
+          end_anchor: anchorSummary(gesture.up?.anchor),
+          from,
+          to,
+          path: sampleGesturePath(gesture.pointEvents, ev.ts),
+          path_points_recorded: gesture.pointEvents.length,
+          duration_ms: Math.max(0, gesture.up.ts - ev.ts),
+          displacement_px: Math.round(gesture.displacement * 10) / 10,
+          path_length_px: Math.round(gesture.pathLength * 10) / 10,
+          warnings,
+        });
+      } else {
+        if (!gesture.up) warnings.push(`${UNRESOLVED}: mouse_up was not observed; click/drag boundary is ambiguous`);
+        steps.push({
+          n: steps.length + 1,
+          ts: ev.ts,
+          action: "click",
+          app: ev.fg?.app,
+          window_title: ev.fg?.title,
+          button,
+          x: ev.x,
+          y: ev.y,
+          point: pointerPoint(ev),
+          anchor: anchorSummary(ev.anchor),
+          double_click: Boolean(gesture.up && gesture.up._dbl),
+          warnings,
+        });
+      }
       i++;
       continue;
     }
     if (ev.t === "wheel_v" || ev.t === "wheel_h") {
+      const point = pointerPoint(ev);
+      const warnings = ev.injected ? [`${UNRESOLVED}: input was injected`] : [];
+      if (point.inside_window !== true) {
+        warnings.push(`${UNRESOLVED}: wheel point cannot be safely rebased to the recorded window`);
+      }
       steps.push({
         n: steps.length + 1,
         ts: ev.ts,
         action: "scroll",
+        input: "wheel",
         app: ev.fg?.app,
+        window_title: ev.fg?.title,
+        axis: ev.t === "wheel_v" ? "vertical" : "horizontal",
+        delta: ev.wheel,
         direction: ev.t === "wheel_v" ? (ev.wheel > 0 ? "up" : "down") : (ev.wheel > 0 ? "right" : "left"),
         amount: Math.abs(ev.wheel),
-        warnings: ev.injected ? [`${UNRESOLVED}: input was injected`] : [],
+        point,
+        warnings,
       });
       i++;
       continue;
@@ -322,7 +458,7 @@ function inferParameters(steps) {
 function sessionWarnings(steps, notes, events) {
   const warnings = [];
   if (!notes.length) warnings.push(`${UNRESOLVED}: no narration notes — intents are structural guesses, not teacher explanation`);
-  const actionable = steps.filter((s) => ["click", "type", "key", "scroll"].includes(s.action));
+  const actionable = steps.filter((s) => ["click", "drag", "type", "key", "scroll"].includes(s.action));
   const injected = actionable.filter((s) => s.warnings.some((w) => w.includes("injected")));
   if (actionable.length && injected.length / actionable.length > 0.5) {
     warnings.push(`${UNRESOLVED}: ${injected.length}/${actionable.length} steps were injected input (automation-driven span) — needs human re-demo or explicit review`);
@@ -340,13 +476,15 @@ function stepLine(s) {
   switch (s.action) {
     case "click":
       return `${s.n}. Click ${s.button} at (${s.x},${s.y}) on ${anchor}${intent}`;
+    case "drag":
+      return `${s.n}. Drag ${s.button} from (${s.from.screen_x},${s.from.screen_y}) on ${anchor} to (${s.to.screen_x},${s.to.screen_y}) on ${s.end_anchor?.role || "(no end anchor)"}; path ${s.path_points_recorded} points/${s.duration_ms} ms${intent}`;
     case "type":
       if (s.redacted) return `${s.n}. Type into password field — REDACTED (content never captured)${intent}`;
       return `${s.n}. Type \`${s.text ?? "??"}\` into ${anchor}${s.observed_text === undefined ? " (text unrecovered)" : ""}${intent}`;
     case "key":
       return `${s.n}. Press ${s.keys}${s.anchor ? ` on ${anchor}` : ""}${intent}`;
     case "scroll":
-      return `${s.n}. Scroll ${s.direction} ×${s.amount}${intent}`;
+      return `${s.n}. Wheel ${s.axis} ${s.direction} ×${s.amount} at (${s.point.screen_x},${s.point.screen_y})${intent}`;
     case "note":
       return `${s.n}. NOTE: ${s.text}`;
     default:
@@ -390,8 +528,8 @@ function compileSession(sessionPath, outDir) {
   // out-of-scope steps outright, and the daemon whitelist enforces it again
   // at execution time.
   const scopeApps = [...new Set(steps.map((s) => s.app).filter(Boolean))];
-  const draft = {
-    format: "fastcua-skill-draft/1",
+  const evidence = {
+    format: "fastcua-skill-evidence/1",
     source: path.resolve(sessionPath),
     generated_ts: Date.now(),
     executable: false,
@@ -409,158 +547,94 @@ function compileSession(sessionPath, outDir) {
       keyframes: keyframes.length,
       keyframe_bytes: keyframes.reduce((a, k) => a + (k.bytes || 0), 0),
     },
+    citation_contract: {
+      step: "[evidence:step:<n>]",
+      step_warning: "[evidence:step-warning:<n>:<index>]",
+      parameter: "[evidence:param:<name>]",
+      warning: "[evidence:warning:<index>]",
+      rules: [
+        "Cite every recorded step exactly where the Skill instructs that action.",
+        "Cite every parameter and preserve its recorded provenance.",
+        "Do not invent controls, app scope, values, success claims, or safety guarantees.",
+      ],
+    },
+  };
+  // draft.json remains the deterministic replay/acceptance artifact. The
+  // evidence package is the only input to the natural-language writer.
+  const draft = {
+    ...evidence,
+    format: "fastcua-skill-draft/1",
+    evidence_format: evidence.format,
   };
 
   fs.mkdirSync(outDir, { recursive: true });
+  const evidenceJson = path.join(outDir, "evidence.json");
+  const evidenceMd = path.join(outDir, "evidence.md");
   const draftJson = path.join(outDir, "draft.json");
   const draftMd = path.join(outDir, "draft.md");
+  fs.writeFileSync(evidenceJson, JSON.stringify(evidence, null, 2) + "\n");
   fs.writeFileSync(draftJson, JSON.stringify(draft, null, 2) + "\n");
 
   const md = [
-    `# Workflow draft (UNVERIFIED — 草稿未验证)`,
+    `# Skill evidence package (UNVERIFIED)`,
     ``,
-    `- source: \`${draft.source}\``,
-    `- generated: ${new Date(draft.generated_ts).toISOString()} · format fastcua-skill-draft/1 · **non-executable**`,
+    `- source: \`${evidence.source}\``,
+    `- generated: ${new Date(evidence.generated_ts).toISOString()} · format ${evidence.format} · **non-executable**`,
+    `- writer contract: a dedicated agent writes natural-language SKILL.md; this compiler never does`,
     ``,
     `## Warnings`,
-    ...(warnings.length ? warnings.map((w) => `- ${w}`) : ["- (none)"]),
+    ...(warnings.length ? warnings.map((w, i) => `- [evidence:warning:${i + 1}] ${w}`) : ["- (none)"]),
     ``,
     `## Steps`,
-    ...steps.map(stepLine),
+    ...steps.flatMap((step) => [
+      `${stepLine(step)} [evidence:step:${step.n}]`,
+      ...(step.warnings || []).map((warning, index) =>
+        `   - ${warning} [evidence:step-warning:${step.n}:${index + 1}]`),
+    ]),
     ``,
     `## App scope`,
     ...(scopeApps.length ? scopeApps.map((a) => `- \`${a}\``) : ["- (none recorded)"]),
-    `- a replay may never touch apps outside this list (dry-run refuses; daemon whitelist enforces again)`,
+    `- a replay may never touch apps outside this list`,
     ``,
     `## Parameters`,
     ...(parameters.length
-      ? parameters.map((p) => `- \`{{${p.name}}}\` (${p.kind}) — observed \`${p.observed}\` at step ${p.provenance.step} (${p.provenance.source})`)
+      ? parameters.map((p) => `- \`{{${p.name}}}\` (${p.kind}) — observed \`${p.observed}\` at step ${p.provenance.step} (${p.provenance.source}) [evidence:param:${p.name}]`)
       : ["- (none inferred)"]),
     ``,
-    `## Keyframes`,
-    `- ${keyframes.length} JPEG frames in \`${path.join(path.dirname(sessionPath), "keyframes")}\``,
-    ``,
-    `## Media (review aids — never embedded)`,
-    `- video: ${media.video ? `\`${media.video}\` (MJPEG AVI; per-frame index at \`${media.video_index}\`)` : "(not recorded)"}`,
-    `- audio: ${media.audio ? `\`${media.audio}\` (PCM 16kHz mono narration)` : `(none)${media.audio_note ? ` — ${media.audio_note}` : ""}`}`,
-    `- extract a frame: \`node tools/skill-recorder/frame-extract.mjs <session-dir> --note 1\``,
+    `## Media`,
+    `- keyframes: ${keyframes.length} JPEG frames in \`${path.join(path.dirname(sessionPath), "keyframes")}\``,
+    `- video: ${media.video ? `\`${media.video}\` with index \`${media.video_index}\`` : "(not recorded)"}`,
+    `- audio: ${media.audio ? `\`${media.audio}\` (PCM 16 kHz mono)` : `(none)${media.audio_note ? ` — ${media.audio_note}` : ""}`}`,
+    `- media is local review evidence and is never embedded in the package`,
     ``,
   ].join("\n");
+  fs.writeFileSync(evidenceMd, md);
   fs.writeFileSync(draftMd, md);
-  return { draft, draftJson, draftMd };
+  return { evidence, draft, evidenceJson, evidenceMd, draftJson, draftMd };
 }
 
-// ---------------------------------------------------------------- skill folder
+// ---------------------------------------------------------------- synthesis request
 
-function skillMd(name, draft, sessionPath) {
-  const description = draft.steps.find((s) => s.intent?.length)?.intent[0]
-    || "Recorded demonstration workflow (UNVERIFIED DRAFT — 草稿未验证)";
-  const paramsTable = draft.parameters.length
-    ? [
-        "| parameter | kind | observed during recording | provenance |",
-        "|---|---|---|---|",
-        ...draft.parameters.map((p) =>
-          `| \`{{${p.name}}}\` | ${p.kind} | \`${p.observed}\` | step ${p.provenance.step}, ${p.provenance.source} |`),
-      ].join("\n")
-    : "_No parameters inferred._";
-  const stepsMd = draft.steps.map((s) => {
-    const warn = s.warnings.length ? `\n   - ${s.warnings.join("\n   - ")}` : "";
-    return `${stepLine(s)}${warn}`;
-  }).join("\n");
-  return `---
-name: ${name}
-description: ${JSON.stringify(description).slice(1, -1)}
-verified: false
----
-
-> [!WARNING]
-> **草稿未验证 / UNVERIFIED DRAFT** — 本 Skill 由演示录制自动生成，从未端到端运行验证。
-> 人工审查并测试每一步之前，不要依赖它执行任何操作。
-> This skill was generated from a recorded demonstration and has NEVER been
-> tested end-to-end. Review and test every step before relying on it.
-
-# ${name}
-
-## Intent / 意图
-
-${draft.steps.filter((s) => s.intent?.length).map((s) => `- step ${s.n}: ${s.intent.join("; ")}`).join("\n") || "- ⚠ unresolved: no narration notes recorded; intent is a structural guess."}
-
-## Steps / 步骤
-
-${stepsMd}
-
-## Parameters / 参数
-
-${paramsTable}
-
-## Review aids / 审查辅助
-
-The recording session also captured **review media**, kept next to the source
-session (NOT copied into this folder, and never embedded in this file):
-
-${[
-  draft.media.video
-    ? `- video: \`${path.join(path.dirname(sessionPath), draft.media.video)}\` — MJPEG AVI of the demo (per-frame index: \`${path.join(path.dirname(sessionPath), draft.media.video_index)}\`)`
-    : null,
-  draft.media.audio
-    ? `- audio: \`${path.join(path.dirname(sessionPath), draft.media.audio)}\` — PCM 16kHz mono narration. Listen to it during review; transcription is out of scope.`
-    : draft.media.audio_note
-      ? `- audio: none (${draft.media.audio_note})`
-      : null,
-].filter(Boolean).join("\n") || "- (no media recorded)"}
-
-When a step is unclear, an agent may LOOK at the corresponding moment instead
-of guessing:
-
-\`\`\`
-node tools/skill-recorder/frame-extract.mjs ${JSON.stringify(path.dirname(sessionPath))} --note 1
-\`\`\`
-
-(Also \`--at-ms <epoch-ms>\` or \`--at <ISO-8601>\`.) Moments that were redacted
-(password focus, secure desktop) have no pixels by design — the extractor will
-say so. Media exists to help human review; a replay must never depend on it.
-
-## Semantic anchors / 语义锚点
-
-Steps locate controls by **numeric UIA control-type ID + AutomationId +
-bounds**, with localized names as display hints only (names change with
-display language; "Edit"(50004) and "Document"(50030) are both accepted for
-text editors). Steps whose anchor is missing or low-confidence are marked
-⚠ unresolved and MUST be re-anchored by a human before use.
-
-## Safety boundaries / 安全边界
-
-- Runs under the FastCUA approval policy: the app whitelist is inherited from
-  the daemon config; this skill cannot widen it or self-escalate.
-- App scope is fixed at record time (${draft.scope.apps.length} app(s): ${draft.scope.apps.map((a) => `\`${a.split("\\").pop()}\``).join(", ") || "none"}); a replay that
-  would touch anything outside it is refused before execution.
-- Password-field input was redacted at record time; no secret is present in
-  this folder and none may be reconstructed.
-- Spans recorded as injected input (another automation driving) are flagged
-  ⚠ unresolved — treat them as unverified by default.
-- Nothing here auto-installs or auto-runs: this folder is inert documentation
-  until a human reviews it and copies it into a skills directory.
-
-## Source / 来源
-
-- session: \`${path.resolve(sessionPath)}\` (format fastcua-recording/1)
-- draft: \`${path.resolve(path.join(path.dirname(sessionPath), "draft.json"))}\`
-- keyframes: \`${path.join(path.dirname(sessionPath), "keyframes")}\` (${draft.stats.keyframes} JPEG frames)
-- compiled: ${new Date(draft.generated_ts).toISOString()} by tools/skill-recorder/compile.mjs
-`;
-}
-
-function generateSkill(name, draft, sessionPath, outDir) {
+function createSynthesisRequest(name, evidence, outDir) {
   if (!/^[a-z0-9][a-z0-9-]{1,60}$/.test(name)) {
     throw new Error(`invalid skill name "${name}" (lowercase letters, digits, dashes)`);
   }
   const dir = path.join(outDir, "skill-draft", name);
   fs.mkdirSync(dir, { recursive: true });
-  const file = path.join(dir, "SKILL.md");
-  fs.writeFileSync(file, skillMd(name, draft, sessionPath));
+  const file = path.join(dir, "synthesis-request.json");
+  const request = {
+    format: "fastcua-skill-synthesis-request/1",
+    skill_name: name,
+    evidence: path.resolve(outDir, "evidence.json"),
+    output: path.resolve(dir, "SKILL.md"),
+    writer: "dedicated-subagent",
+    lint: "tools/skill-recorder/lint-skill.mjs",
+    verified: false,
+    stats: evidence.stats,
+  };
+  fs.writeFileSync(file, JSON.stringify(request, null, 2) + "\n");
   return { dir, file };
 }
-
 // ---------------------------------------------------------------- cli
 
 function main() {
@@ -575,15 +649,18 @@ function main() {
     return i >= 0 ? args[i + 1] : undefined;
   };
   const outDir = path.resolve(opt("--out") || path.dirname(sessionPath));
-  const { draft, draftJson, draftMd } = compileSession(sessionPath, outDir);
+  const { evidence, draft, evidenceJson, evidenceMd, draftJson, draftMd } = compileSession(sessionPath, outDir);
   console.log(`[compile] steps=${draft.stats.steps} params=${draft.parameters.length} warnings=${draft.warnings.length}`);
-  console.log(`[compile] draft: ${draftJson}`);
-  console.log(`[compile] draft: ${draftMd}`);
+  console.log(`[compile] evidence: ${evidenceJson}`);
+  console.log(`[compile] evidence: ${evidenceMd}`);
+  console.log(`[compile] replay draft: ${draftJson}`);
+  console.log(`[compile] replay draft: ${draftMd}`);
   const skillName = opt("--skill");
   if (skillName) {
-    const { dir, file } = generateSkill(skillName, draft, sessionPath, outDir);
-    console.log(`[compile] skill draft folder (inert, verified:false): ${dir}`);
-    console.log(`[compile] SKILL.md: ${file}`);
+    const { dir, file } = createSynthesisRequest(skillName, evidence, outDir);
+    console.log(`[compile] synthesis request folder (inert, verified:false): ${dir}`);
+    console.log(`[compile] request: ${file}`);
+    console.log(`[compile] next: node tools/skill-recorder/synthesize.mjs ${JSON.stringify(evidenceJson)} --skill ${skillName}`);
   }
 }
 

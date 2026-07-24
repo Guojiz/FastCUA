@@ -42,7 +42,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 const UNRESOLVED = "⚠ unresolved";
-const ACTIONABLE = new Set(["click", "type", "key", "scroll"]);
+const ACTIONABLE = new Set(["click", "drag", "type", "key", "scroll"]);
 
 // ---------------------------------------------------------------- cli
 
@@ -228,6 +228,27 @@ function mapChord(keys) {
   return { key: out.join("+") };
 }
 
+function pointCanRebase(point) {
+  return point?.inside_window === true
+    && Number.isFinite(point.x_ratio)
+    && Number.isFinite(point.y_ratio)
+    && point.x_ratio >= 0 && point.x_ratio < 1
+    && point.y_ratio >= 0 && point.y_ratio < 1;
+}
+
+function rebasePoint(point, viewport) {
+  if (!pointCanRebase(point)) throw new Error("recorded pointer point has no safe window-relative coordinates");
+  const width = Number(viewport?.width);
+  const height = Number(viewport?.height);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width < 2 || height < 2) {
+    throw new Error("current window has no valid viewport for pointer replay");
+  }
+  return {
+    x: Math.max(0, Math.min(width - 1, Math.round(point.x_ratio * width))),
+    y: Math.max(0, Math.min(height - 1, Math.round(point.y_ratio * height))),
+  };
+}
+
 // ---------------------------------------------------------------- runner
 
 function canonApp(app) {
@@ -286,10 +307,29 @@ async function run(args) {
 
     const stepDecision = decisions.steps?.[String(step.n)] ?? decisions.default;
     if (step.action === "scroll") {
-      if (stepDecision === "skip") { plan.push({ step, decision: "skip" }); continue; }
-      needs.push({ scope: "step", n: step.n, reason: "scroll replay is not implemented in dry-run v1 (decide skip)" });
-      plan.push({ step, decision: "pending" });
-      continue;
+      const reason = step.input !== "wheel"
+        ? "legacy scroll step does not prove wheel input"
+        : !pointCanRebase(step.point)
+          ? "wheel point has no safe window-relative coordinates"
+          : null;
+      if (reason) {
+        if (stepDecision === "skip") { plan.push({ step, decision: "skip" }); continue; }
+        needs.push({ scope: "step", n: step.n, reason: `${reason} (decide skip)` });
+        plan.push({ step, decision: "pending" });
+        continue;
+      }
+    }
+    if (step.action === "drag") {
+      let reason = null;
+      if ((step.button || "left") !== "left") reason = `the normal drag primitive supports left-button drag, not ${step.button}`;
+      else if (!pointCanRebase(step.from) || !pointCanRebase(step.to)) reason = "drag endpoints have no safe window-relative coordinates";
+      else if (!step.anchor || !step.end_anchor) reason = "drag requires both start and endpoint UIA anchors";
+      if (reason) {
+        if (stepDecision === "skip") { plan.push({ step, decision: "skip" }); continue; }
+        needs.push({ scope: "step", n: step.n, reason: `${reason} (decide skip)` });
+        plan.push({ step, decision: "pending" });
+        continue;
+      }
     }
     if (step.action === "key") {
       const mapped = mapChord(step.keys || "");
@@ -386,6 +426,16 @@ async function run(args) {
     }
     return found;
   };
+  const coordinateWindowFor = async (step) => {
+    const candidates = await windowsForApp(step.app);
+    const exactTitle = step.window_title
+      ? candidates.find((window) => window.title === step.window_title)
+      : null;
+    if (exactTitle) return exactTitle;
+    if (lastWindow && candidates.some((window) => window.id === lastWindow.id)) return lastWindow;
+    if (candidates.length === 1) return candidates[0];
+    throw new Error(`multiple windows match ${step.app}; wheel replay has no UIA anchor — use --window-title to select one`);
+  };
   const freshState = async (window, uiaProbeMs) => {
     const params = { window, include_screenshot: false, include_text: true };
     // A cold-started app (Excel) can need many seconds to materialize its UIA
@@ -412,6 +462,27 @@ async function run(args) {
       const expected = step.anchor
         ? { role: step.anchor.role, control_type: step.anchor.control_type, automation_id: step.anchor.automation_id, name: step.anchor.name }
         : null;
+      if (step.action === "scroll") {
+        const window = await coordinateWindowFor(step);
+        const state = await call("get_window_state", { window, include_screenshot: false, include_text: false });
+        const point = rebasePoint(step.point, state.viewport);
+        const scrollX = step.axis === "horizontal" ? Number(step.delta) : 0;
+        const scrollY = step.axis === "vertical" ? -Number(step.delta) : 0;
+        if (!Number.isFinite(scrollX) || !Number.isFinite(scrollY) || (scrollX === 0 && scrollY === 0)) {
+          throw new Error("wheel step has an invalid or zero delta");
+        }
+        await call("scroll", { window, x: point.x, y: point.y, scrollX, scrollY });
+        lastWindow = window;
+        record({
+          ...base,
+          status: "ok",
+          detail: `wheel ${step.axis} ${step.direction} by ${step.amount} at window (${point.x},${point.y})`,
+          expected: { input: "wheel", axis: step.axis, direction: step.direction, amount: step.amount, point: step.point },
+          actual: { window: window.title, point, scrollX, scrollY },
+          decision: "proceed",
+        });
+        continue;
+      }
       if (step.action === "key") {
         // Keys go to the window that served the previous step (Office:
         // workbook -> save-as dialog), falling back to the app's first.
@@ -429,6 +500,7 @@ async function run(args) {
       // Then keep retrying for ~11s. Fail-safe abort unchanged.
       let window = null;
       let resolved = null;
+      let resolvedState = null;
       let lastFailure = null;
       const resolveDiag = [];
       let lastTree = "";
@@ -445,7 +517,7 @@ async function run(args) {
           resolveDiag.push(`attempt${attempt} "${String(cand.title || "").slice(0, 30)}": lines=${lineCount}${acc.error ? ` err=${String(acc.error).slice(0, 80)}` : ""}`);
           if (lineCount) lastTree = `[${cand.title || ""}]\n${acc.tree}`;
           const r = resolveAnchor(step.anchor, parseTree(acc.tree));
-          if (r.status === "ok") { window = cand; resolved = r; break; }
+          if (r.status === "ok") { window = cand; resolved = r; resolvedState = state; break; }
           if (!lastFailure) lastFailure = r;
         }
       }
@@ -467,6 +539,54 @@ async function run(args) {
         matched_by: resolved.matched_by,
         name_drift: resolved.name_drift || undefined,
       };
+
+      if (step.action === "drag") {
+        const endExpected = {
+          role: step.end_anchor.role,
+          control_type: step.end_anchor.control_type,
+          automation_id: step.end_anchor.automation_id,
+          name: step.end_anchor.name,
+        };
+        const endResolved = resolveAnchor(step.end_anchor, parseTree(resolvedState?.accessibility?.tree));
+        if (endResolved.status !== "ok") {
+          record({
+            ...base,
+            status: endResolved.status,
+            detail: `${endResolved.detail} — FAIL SAFE: drag endpoint did not resolve; nothing dragged`,
+            expected: { start: expected, end: endExpected },
+            candidates: endResolved.candidates,
+          });
+          report.outcome = "aborted";
+          return finish(report, args, 4);
+        }
+        const from = rebasePoint(step.from, resolvedState.viewport);
+        const to = rebasePoint(step.to, resolvedState.viewport);
+        await call("drag", {
+          window,
+          from_x: from.x,
+          from_y: from.y,
+          to_x: to.x,
+          to_y: to.y,
+        });
+        const endActual = {
+          index: endResolved.element.index,
+          role: endResolved.element.role,
+          name: endResolved.element.name,
+          automation_id: endResolved.element.automation_id,
+          matched_by: endResolved.matched_by,
+          name_drift: endResolved.name_drift || undefined,
+        };
+        record({
+          ...base,
+          status: "ok",
+          detail: `dragged from (${from.x},${from.y}) to (${to.x},${to.y}); recorded path retained ${step.path?.length || 0}/${step.path_points_recorded || 0} points`,
+          expected: { start: expected, end: endExpected, from: step.from, to: step.to },
+          actual: { start: actual, end: endActual, from, to },
+          decision: "proceed",
+        });
+        await sleep(250);
+        continue;
+      }
 
       if (step.action === "click") {
         await call("click", {
