@@ -24,13 +24,20 @@ jobs:
       - name: Static checks and unit tests
         shell: pwsh
         run: |
+          $PSNativeCommandUseErrorActionPreference = $true
           cargo fmt --manifest-path native-host/Cargo.toml -- --check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo fmt --manifest-path tools/skill-recorder/Cargo.toml -- --check
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo test --manifest-path native-host/Cargo.toml --locked
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node --check daemon.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node --check server.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --check lib/runtime.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --check lib/update-check.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node --check tests/protocol-regression.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -48,9 +55,15 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node tests/installer-contract.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node tests/runtime-release-contract.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node tests/runtime-identity-integration.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node tests/server-lifecycle.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           [scriptblock]::Create((Get-Content install.ps1 -Raw)) | Out-Null
+          [scriptblock]::Create((Get-Content scripts/manage.ps1 -Raw)) | Out-Null
+          [scriptblock]::Create((Get-Content scripts/build-release.ps1 -Raw)) | Out-Null
           [scriptblock]::Create((Get-Content uninstall.ps1 -Raw)) | Out-Null
           [scriptblock]::Create((Get-Content overlay.ps1 -Raw)) | Out-Null
           [scriptblock]::Create((Get-Content tests/run-control-plane.ps1 -Raw)) | Out-Null
@@ -58,6 +71,7 @@ jobs:
       - name: Build native artifacts
         shell: pwsh
         run: |
+          $PSNativeCommandUseErrorActionPreference = $true
           ./tests/build-fixture.ps1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo build --release --manifest-path native-host/Cargo.toml --locked

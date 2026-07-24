@@ -10,7 +10,7 @@ checksum = "b454d911ac55068f53495488d8ccd0646eaa540c033a28ee15b07838afafb01f"
 
 [[package]]
 name = "skill-recorder"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "jpeg-encoder",
 ]

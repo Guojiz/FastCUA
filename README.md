@@ -131,6 +131,16 @@ If either the Skill or MCP is missing, installation failed.
 
 Local control center: `http://127.0.0.1:8420` (loopback only).
 
+### Updates and version checks
+
+```powershell
+npx fastcua check
+npx fastcua update
+npx fastcua doctor
+```
+
+Installed releases check for updates at most once per day and only notify. Updates use one verified runtime ZIP, keep `app.previous` for rollback, and never overwrite a development checkout. Call `runtime_info` through MCP to see the exact server, daemon, native-host, version, commit, pipe, and data directory in use. See [releases and updates](docs/RELEASING.md).
+
 ## You stay in control
 
 | State | Signal | Behavior |

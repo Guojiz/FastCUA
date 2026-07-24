@@ -131,6 +131,16 @@ irm https://raw.githubusercontent.com/Guojiz/FastCUA/main/install.ps1 | iex
 
 本机控制中心：`http://127.0.0.1:8420`（仅回环）。
 
+### 更新与版本检查
+
+```powershell
+npx fastcua check
+npx fastcua update
+npx fastcua doctor
+```
+
+正式安装版每天最多检查一次更新，只通知、不静默安装。更新使用一个经过校验的运行时 ZIP，保留 `app.previous` 供回滚，绝不会覆盖开发仓库。通过 MCP 调用 `runtime_info` 可以查看实际使用的 server、daemon、native-host、版本、Git 提交、管道和数据目录。参阅[发行与更新](docs/RELEASING_zh.md)。
+
 ## 你始终掌控
 
 | 状态 | 信号 | 行为 |

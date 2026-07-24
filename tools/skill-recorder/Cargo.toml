@@ -1,6 +1,6 @@
 [package]
 name = "skill-recorder"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 license = "MIT"
 description = "FastCUA issue #3 stages 2-4: demonstration recorder v2 (aligned anchors, JPEG keyframes, narration notes)"

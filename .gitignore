@@ -17,6 +17,7 @@ native-host/.rustup-home/
 tests/*.exe
 
 # Release artifacts generated locally (CI / gh release upload)
+/dist/
 /cua-native-host.exe
 /SHA256SUMS.txt
 

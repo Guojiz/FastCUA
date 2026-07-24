@@ -14,7 +14,7 @@
 </head>
 <body>
 <main class="shell">
-  <header class="topbar"><div class="brand"><div class="mark">F</div><div><h1>FastCUA</h1><small data-i18n="brandSub">Desktop automation control plane</small></div></div><div class="top-actions"><span class="pill"><span id="dot" class="dot"></span><span id="connection" data-i18n="connecting">Connecting</span></span><button id="locale" class="icon-btn" aria-label="Switch language">EN</button></div></header>
+  <header class="topbar"><div class="brand"><div class="mark">F</div><div><h1>FastCUA</h1><small data-i18n="brandSub">Desktop automation control plane</small></div></div><div class="top-actions"><span id="version-pill" class="pill">v—</span><span class="pill"><span id="dot" class="dot"></span><span id="connection" data-i18n="connecting">Connecting</span></span><button id="locale" class="icon-btn" aria-label="Switch language">EN</button></div></header>
   <nav class="nav" aria-label="Primary"><button class="active" data-view="console" data-i18n="navConsole">Control center</button><button data-view="deploy" data-i18n="navDeploy">Self-host</button></nav>
   <section id="console" class="view active">
     <div class="hero"><div class="hero-main"><div class="eyebrow" data-i18n="eyebrow">A persistent desktop control plane</div><h2 data-i18n="heroTitle">One warm helper. Every action stays in rhythm.</h2><p data-i18n="heroBody">FastCUA keeps a single native host alive for faster, safer desktop automation across every connected client.</p><div class="hero-kpis"><div><b>1×</b><span data-i18n="kpiWarm">shared warm helper</span></div><div><b>NDJSON</b><span data-i18n="kpiProtocol">transparent local protocol</span></div><div><b>Stop</b><span data-i18n="kpiStop">instant turn recovery</span></div></div></div><aside class="hero-main status-card"><div><h3 data-i18n="statusTitle">System pulse</h3><div id="big-status" class="big-status">—</div><div id="status-copy" class="muted" data-i18n="statusWaiting">Waiting for daemon</div><div id="approval-callout" class="approval-callout" role="alert" hidden><strong id="pending-app">—</strong><div class="actions"><button id="approve-once" class="button primary" data-i18n="allowOnce">1 · Allow once</button><button id="approve-trust" class="button" data-i18n="trustApp">2 · Always approve</button><button id="approve-full" class="button" data-i18n="fullAccess">3 · Full access</button><button id="approve-deny" class="button danger" data-i18n="deny">4 · Deny</button></div></div></div><div class="status-row"><span data-i18n="portLabel">Local endpoint</span><strong id="endpoint">127.0.0.1:8420</strong></div></aside></div>
@@ -295,6 +295,13 @@ async function refresh() {
     ]);
     events = feed.events || [];
     $('connection').textContent = t('online');
+    const version = state.runtime?.version || '—';
+    $('version-pill').textContent = state.update?.status === 'available'
+      ? `v${version} → v${state.update.latestVersion}`
+      : `v${version}`;
+    $('version-pill').title = state.update?.status === 'available'
+      ? 'Update available — run npx fastcua update'
+      : (state.runtime?.root || '');
     $('endpoint').textContent = '127.0.0.1:' + (cfg.port || 8420);
     $('s-clients').textContent = state.clients;
     $('s-binary').textContent = state.binaryPid ? (lang === 'zh' ? '运行' : 'Live') : (lang === 'zh' ? '空闲' : 'Idle');

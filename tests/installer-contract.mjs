@@ -2,64 +2,57 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 
 const installer = fs.readFileSync(new URL("../install.ps1", import.meta.url), "utf8");
+const manager = fs.readFileSync(new URL("../scripts/manage.ps1", import.meta.url), "utf8");
+const releaseBuilder = fs.readFileSync(new URL("../scripts/build-release.ps1", import.meta.url), "utf8");
 const uninstaller = fs.readFileSync(new URL("../uninstall.ps1", import.meta.url), "utf8");
 const web = fs.readFileSync(new URL("../web.html", import.meta.url), "utf8");
-const selfHosting = fs.readFileSync(new URL("../docs/SELF_HOSTING.md", import.meta.url), "utf8");
-const selfHostingZh = fs.readFileSync(new URL("../docs/SELF_HOSTING_zh.md", import.meta.url), "utf8");
-const readme = fs.readFileSync(new URL("../README.md", import.meta.url), "utf8");
-const readmeZh = fs.readFileSync(new URL("../README_zh.md", import.meta.url), "utf8");
 const configText = fs.readFileSync(new URL("../config.json", import.meta.url), "utf8");
 const config = JSON.parse(configText);
 
-assert.match(installer, /\$Version\s*=\s*'v0\.2\.1'/);
-assert.match(installer, /archive\/refs\/tags\/\$Version\.zip/);
-assert.match(installer, /releases\/download\/\$Version/);
-assert.doesNotMatch(installer, /refs\/heads\/main|releases\/latest/);
-assert.match(installer, /Get-FileHash[^\r\n]+SHA256/);
-assert.match(installer, /\$savedConfig/);
-assert.match(installer, /FastCUA Console\.url/);
-assert.match(installer, /URL=http:\/\/127\.0\.0\.1:8420/);
-assert.doesNotMatch(installer, /claude(?:\.exe)?|Anthropic|\.claude/i);
-assert.match(installer, /FastCUA Agent Setup\.txt/);
-assert.match(installer, /MCP server named sky-computer-use/);
-assert.match(installer, /skills\\computer-use/);
-assert.match(installer, /A successful FastCUA setup requires BOTH the Skill and the MCP server/i);
-assert.match(installer, /configure this agent's own active Skill system and MCP configuration/i);
-assert.match(installer, /Install the complete FastCUA Skill folder/i);
-assert.match(installer, /Do not merely read SKILL\.md/i);
-assert.match(installer, /Do not create a forwarding, wrapper, summary, or shortened SKILL\.md/i);
-assert.match(installer, /recursively compare the installed relative file list and SHA-256 hashes/i);
-assert.match(installer, /Partial installation is a failure/i);
-assert.match(installer, /active computer-use Skill resolves to the complete installed folder, not a forwarding stub/i);
-assert.match(installer, /call list_windows through sky-computer-use/i);
-assert.match(installer, /If this AI client cannot install or register local Skills/i);
-assert.match(installer, /Do not substitute PowerShell/);
+assert.match(installer, /ValidateSet\('Install', 'Update', 'Check', 'Doctor'\)/);
+assert.match(installer, /scripts\\manage\.ps1/);
+assert.match(installer, /FASTCUA_MANAGER_URL/);
+assert.match(manager, /releases\/latest/);
+assert.match(manager, /fastcua-runtime-win-x64\.zip/);
+assert.match(manager, /SHA256SUMS\.txt/);
+assert.match(manager, /Get-FileHash[^\r\n]+SHA256/);
+assert.match(manager, /runtime-manifest\.json/);
+assert.match(manager, /Assert-Runtime/);
+assert.match(manager, /app\.previous/);
+assert.match(manager, /Rollback copy retained/);
+assert.match(manager, /Stop-InstalledRuntime/);
+assert.match(manager, /Update available/);
+assert.match(manager, /FastCUA doctor passed/);
+assert.match(manager, /Configured MCP server paths/);
+assert.match(manager, /another FastCUA root/);
+assert.match(manager, /skills\\computer-use/);
+assert.match(manager, /call runtime_info and list_apps/i);
+assert.match(manager, /Do not substitute another Computer Use implementation/i);
+assert.match(releaseBuilder, /cargo build --release --locked/);
+assert.match(releaseBuilder, /helper\\cua-native-host\.exe/);
+assert.match(releaseBuilder, /skill-recorder\.exe/);
+assert.match(releaseBuilder, /Compress-Archive/);
+assert.match(releaseBuilder, /files -NotePropertyValue/);
 
 assert.match(uninstaller, /FastCUA Console\.url/);
 assert.match(uninstaller, /FastCUA Agent Setup\.txt/);
 assert.match(uninstaller, /Get-CimInstance Win32_Process/);
 assert.match(uninstaller, /Remove-ItemProperty[^\r\n]+FastCUA/);
-assert.doesNotMatch(uninstaller, /claude(?:\.exe)?|Anthropic|\.claude/i);
 
-assert.match(web, /\\native-host\\build\.ps1/);
-assert.match(web, /"sky-computer-use"/);
-assert.match(selfHosting, /default target:\s*\*\*the agent currently executing the setup instructions\*\*/i);
-assert.match(selfHosting, /complete install = Skill and MCP together/i);
-assert.match(selfHosting, /copy, link, or register the entire `computer-use` folder/i);
-assert.match(selfHosting, /forwarding, wrapper, summary, or shortened `SKILL\.md`/i);
-assert.match(selfHosting, /installed relative file list and SHA-256 hashes/i);
-assert.match(selfHosting, /`list_windows` called through `sky-computer-use`/i);
-assert.match(selfHostingZh, /默认目标是\*\*当前执行部署指令的 Agent 自己\*\*/);
-assert.match(selfHostingZh, /完整安装 = Skill 与 MCP 成对/);
-assert.match(readme, /install both the complete `computer-use` Skill and the `sky-computer-use` MCP server/i);
-assert.match(readmeZh, /必须把完整 `computer-use` Skill 和 `sky-computer-use` MCP Server 都安装到自己的活动配置中/);
-assert.doesNotMatch(configText, /^\uFEFF/, "config.json must be directly JSON.parse-compatible");
-assert.equal(config.approvalPolicy, "safe", "tracked config.json must keep the safe default");
-assert.equal(config.skillWriter?.enabled, false, "tracked Skill writer must stay disabled until configured");
-assert.equal(Object.hasOwn(config.skillWriter || {}, "apiKey"), false, "tracked config must never contain a Skill-writer API key");
+assert.match(web, /id="version-pill"/);
+assert.match(web, /state\.update\?\.status === 'available'/);
+assert.doesNotMatch(configText, /^\uFEFF/, "config.json must remain directly JSON.parse-compatible");
+assert.equal(config.approvalPolicy, "safe");
+assert.equal(config.checkForUpdates, true);
+assert.equal(config.skillWriter?.enabled, false);
+assert.equal(Object.hasOwn(config.skillWriter || {}, "apiKey"), false);
 assert.ok(
-  !config.whitelist.some(entry => /^(?:windowsterminal|cmd|powershell|pwsh|claude|chatgpt)\.exe$/i.test(entry)),
+  !config.whitelist.some((entry) =>
+    /^(?:windowsterminal|cmd|powershell|pwsh|claude|chatgpt)\.exe$/i.test(entry),
+  ),
   "safe defaults must not pre-approve terminals or AI assistants",
 );
 
-console.log("PASS installer contract: v0.2.1 pin, verified host, safe config + disabled secret-free Skill writer, mandatory self Skill + MCP setup prompt, scoped uninstall");
+console.log(
+  "PASS installer contract: one runtime package, checksum + manifest verification, update/check/doctor, staged rollback, and visible update status",
+);

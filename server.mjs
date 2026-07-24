@@ -12,15 +12,22 @@ import os from "node:os";
 import crypto from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { fileURLToPath } from "node:url";
+import {
+  readRuntimeManifest,
+  runtimeConfigPath,
+  runtimePipe,
+} from "./lib/runtime.mjs";
 
 const log = (...a) => process.stderr.write("[fastcua] " + a.join(" ") + "\n");
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const NODE = process.execPath;
 const DAEMON = path.join(HERE, "daemon.mjs");
-const PIPE = process.env.FASTCUA_PIPE || "\\\\.\\pipe\\fastcua";
+const RUNTIME_MANIFEST = readRuntimeManifest(HERE);
+const CONFIG_PATH = runtimeConfigPath(HERE, RUNTIME_MANIFEST);
+const PIPE = runtimePipe(HERE);
 const CLIENT_GROUP = crypto.randomUUID();
 // read co-start config: "manual" means don't auto-spawn the daemon (user runs it themselves)
-function readCostart() { if (process.env.FASTCUA_COSTART_MODE) return process.env.FASTCUA_COSTART_MODE; try { return JSON.parse(fs.readFileSync(path.join(HERE, "config.json"), "utf8")).costartMode || "claude"; } catch { return "claude"; } }
+function readCostart() { if (process.env.FASTCUA_COSTART_MODE) return process.env.FASTCUA_COSTART_MODE; try { return JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8")).costartMode || "claude"; } catch { return "claude"; } }
 
 // ---- daemon client (named pipe, newline JSON) ----
 class DaemonClient {
@@ -352,6 +359,7 @@ function viewportFromState(state) {
 
 // thin sky-like wrapper; sky.* forwards to the daemon
 const sky = {
+  runtime_info: () => daemonForCall().request("runtime_info", {}),
   list_apps: () => daemonForCall().request("list_apps", {}),
   list_windows: () => daemonForCall().request("list_windows", {}),
   get_window: (i) => daemonForCall().request("get_window", i),
@@ -629,6 +637,7 @@ function queueJs(code) {
 // ---- tool definitions (window2 + close + js) ----
 const W = { type: "object", properties: { app: { type: "string" }, id: { type: "number" } }, required: ["app", "id"] };
 const TOOLS = [
+  { name: "runtime_info", desc: "Report the exact FastCUA server, daemon, native-host, version, build, data directory, and path-scoped pipe in use. Use this to diagnose mixed installations.", inputSchema: { type: "object", properties: {} } },
   { name: "list_apps", desc: "List running apps that currently have visible targetable windows. Each app has windows[]. Choose the task-specific app+window before acting.", inputSchema: { type: "object", properties: {} } },
   { name: "list_windows", desc: "List open windows that can be targeted by the window2 API.", inputSchema: { type: "object", properties: {} } },
   { name: "get_window", desc: "Rehydrate a window by id. If that id is stale and app identifies exactly one current window, returns the unique replacement; otherwise fails and requires list_windows.", inputSchema: { type: "object", properties: { app: { type: "string" }, id: { type: "number" } }, required: ["id"] } },
@@ -650,6 +659,7 @@ function win(a) { return a && typeof a === "object" ? { app: a.app, id: a.id } :
 async function callTool(name, args) {
   const w = args.window ? win(args.window) : undefined;
   switch (name) {
+    case "runtime_info": return await sky.runtime_info();
     case "list_apps": return await sky.list_apps();
     case "list_windows": return await sky.list_windows();
     case "get_window": return await sky.get_window({ app: args.app, id: args.id });
@@ -760,7 +770,7 @@ async function handle(line) {
     let result;
     let closeAfterResponse = false;
     if (method === "initialize") {
-      result = { protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "sky-computer-use", version: "0.2.1" } };
+      result = { protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "sky-computer-use", version: RUNTIME_MANIFEST.version } };
     } else if (method === "initialized" || method === "notifications/initialized") {
       return;
     } else if (method === "tools/list") {

@@ -118,21 +118,29 @@ async function waitForWindow(client, predicate, label, timeoutMs = 10_000) {
   throw new Error(`window not found: ${label}`);
 }
 
-function buildRecorder() {
-  if (fs.existsSync(RECORDER)) return;
-  log("building skill-recorder (cargo build --release --offline)...");
+function buildCargoRelease(label, cwd) {
+  log(`building ${label} from the authoritative repo source (cargo build --release --offline)...`);
   const cargo = path.join(os.homedir(), ".cargo", "bin", "cargo.exe");
   execFileSync(cargo, ["build", "--release", "--offline"], {
-    cwd: path.join(ROOT, "tools", "skill-recorder"),
+    cwd,
     stdio: "inherit",
     env: { ...process.env, PATH: path.join(os.homedir(), ".cargo", "bin") + ";" + process.env.PATH },
   });
 }
 
+function buildRecorder() {
+  buildCargoRelease("skill-recorder", path.join(ROOT, "tools", "skill-recorder"));
+}
+
+function buildNativeHost() {
+  buildCargoRelease("native host", path.join(ROOT, "native-host"));
+}
+
 async function main() {
-  if (!fs.existsSync(CUA_BIN)) throw new Error("native host not built: " + CUA_BIN);
   if (!fs.existsSync(FIXTURE)) throw new Error("fixture not built: " + FIXTURE);
+  buildNativeHost();
   buildRecorder();
+  if (!fs.existsSync(CUA_BIN)) throw new Error("native host not built: " + CUA_BIN);
   taskkillImage("FastCuaFixture.exe");
   taskkillImage("skill-recorder.exe");
 
