@@ -17,6 +17,14 @@ import fs from "node:fs";
 import os from "node:os";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
+import {
+  DEFAULT_SKILL_WRITER,
+  normalizeSkillWriter,
+  readSkillWriterAuth,
+  skillWriterPublicView,
+  validateSkillWriter,
+  writeSkillWriterAuth,
+} from "./tools/skill-recorder/writer-config.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const log = (...a) => { const s = "[fastcua] " + a.join(" "); process.stderr.write(s + "\n"); recentLogs.push(s); if (recentLogs.length > 100) recentLogs.shift(); };
@@ -116,7 +124,19 @@ const DEFAULT_WHITELIST = [
   "write.exe",
   "Code.exe",
 ];
-const DEFAULT_CONFIG = { costartMode: "claude", idleTimeoutMin: 5, approvalPolicy: "safe", whitelist: [...DEFAULT_WHITELIST], port: 8420, bannerEnabled: false, overlayEnabled: true, overlayTitle: "FastCUA is using your computer", overlayLanguage: "auto", cuaBinPath: "" };
+const DEFAULT_CONFIG = {
+  costartMode: "claude",
+  idleTimeoutMin: 5,
+  approvalPolicy: "safe",
+  whitelist: [...DEFAULT_WHITELIST],
+  port: 8420,
+  bannerEnabled: false,
+  overlayEnabled: true,
+  overlayTitle: "FastCUA is using your computer",
+  overlayLanguage: "auto",
+  cuaBinPath: "",
+  skillWriter: { ...DEFAULT_SKILL_WRITER },
+};
 const APPROVAL_WAIT_MS = 60_000;
 const pendingApprovals = new Map();
 let isUserPaused = false;
@@ -193,6 +213,7 @@ function normalizeConfig(value = {}) {
     overlayTitle: typeof source.overlayTitle === "string" ? source.overlayTitle.slice(0, 100) : DEFAULT_CONFIG.overlayTitle,
     overlayLanguage: ["auto", "en", "zh"].includes(source.overlayLanguage) ? source.overlayLanguage : DEFAULT_CONFIG.overlayLanguage,
     cuaBinPath: typeof source.cuaBinPath === "string" ? source.cuaBinPath.slice(0, 4096) : "",
+    skillWriter: normalizeSkillWriter(source.skillWriter),
   };
 }
 function loadConfig() { try { return normalizeConfig({ ...DEFAULT_CONFIG, ...JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8")) }); } catch { return { ...DEFAULT_CONFIG }; } }
@@ -752,6 +773,39 @@ const httpServer = http.createServer((req, res) => {
           res.writeHead(200, { "Content-Type": "application/json" }); res.end(JSON.stringify(config));
         } catch (error) {
           res.writeHead(400, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error: error.message }));
+        }
+      });
+      return;
+    }
+    if (u.pathname === "/api/skill-writer/config" && req.method === "GET") {
+      res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+      res.end(JSON.stringify(skillWriterPublicView(config.skillWriter)));
+      return;
+    }
+    if (u.pathname === "/api/skill-writer/config" && req.method === "POST") {
+      let body = "";
+      req.on("data", d => body += d);
+      req.on("end", () => {
+        try {
+          if (Buffer.byteLength(body) > 64 * 1024) throw new Error("Skill writer config payload too large");
+          const payload = JSON.parse(body);
+          const next = validateSkillWriter({ ...config.skillWriter, ...payload });
+          const requestedKey = typeof payload.apiKey === "string" ? payload.apiKey.trim() : "";
+          const hasKeyAfterSave = payload.clearApiKey === true
+            ? false
+            : Boolean(requestedKey || readSkillWriterAuth().apiKey);
+          if (next.enabled && !hasKeyAfterSave) {
+            throw new Error("Skill writer API key is required when the subagent is enabled");
+          }
+          if (payload.clearApiKey === true) writeSkillWriterAuth("");
+          else if (requestedKey) writeSkillWriterAuth(requestedKey);
+          config = { ...config, skillWriter: next };
+          saveConfig(config);
+          res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+          res.end(JSON.stringify(skillWriterPublicView(config.skillWriter)));
+        } catch (error) {
+          res.writeHead(400, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+          res.end(JSON.stringify({ error: error.message }));
         }
       });
       return;

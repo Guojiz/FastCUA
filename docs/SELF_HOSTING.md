@@ -154,6 +154,7 @@ There is no unrestricted approval option in the public console.
 | Software action budget | **30s** per helper / MCP / JS cell | Runtime timeout. Not human approval wait. |
 | `approvalPolicy` | `safe` | Unknown apps need human approval. |
 | `whitelist` | Exact basenames / AUMIDs for common local tools | Skips approval only; does not lift Skill safety bans. |
+| `skillWriter` | disabled | Configure the dedicated API/model in the local console. The API key is stored separately in `~/.fastcua/skill-writer-auth.json`, never in `config.json`. |
 | Existing `config.json` | Preserved on reinstall | Not auto-merged when code defaults grow. |
 
 `state.uia.prefer_vision` is a runtime signal. **What the agent does next is only in the Skill**, not by reconfiguring the daemon.
@@ -194,6 +195,7 @@ After building the native host, run the protocol, fallback-index, and control-pl
 - **Island not visible:** confirm `overlayEnabled` is true and inspect `overlay.log`.
 - **Shortcut does nothing:** another application may own the same global shortcut. Close it and restart FastCUA.
 - **Unknown app is waiting:** choose Allow once, Add to trusted apps, or Deny in the expanded island.
+- **Skill synthesis is disabled or missing a key:** open the local console, configure **Skill synthesis subagent**, and save. Do not put the key in `config.json`.
 - **Port already in use:** choose a port from 1024 through 65535 in `config.json`, then restart the daemon.
 
 Keep the HTTP server on `127.0.0.1`. Do not expose it through a proxy or public interface.

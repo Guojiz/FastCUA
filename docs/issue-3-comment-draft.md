@@ -210,3 +210,65 @@ each now covered by a regression check:
 Validation: office-demo-e2e 26/26 ×3, skill-recorder-validation 112/112,
 protocol-regression 24/24 (incl. the new probe-echo contract), server-lifecycle
 and control-plane integration green. Fresh logs under `tests/_*.log`.
+
+---
+
+**Dedicated Skill-writer subagent: evidence → natural language → provenance lint (DRAFT)**
+
+The compiler/writer boundary is now explicit: the deterministic compiler no
+longer emits templated Skill prose. It writes `fastcua-skill-evidence/1`, the
+replay draft, and a `fastcua-skill-synthesis-request/1` handoff. A separately
+configured, tool-less subagent owns natural-language `SKILL.md`.
+
+- [x] Control-console configuration for an OpenAI-compatible endpoint, writer
+  model, optional transcription model, audio mode, and timeout.
+- [x] Credential separation: the API key lives in
+  `~/.fastcua/skill-writer-auth.json`; config GET returns only `hasApiKey`, a
+  last-four hint, and the credential source. Cross-origin writes are rejected.
+- [x] Narration cascade: writer reads WAV directly → configured transcription
+  API → typed narration/recorded notes. `typed` mode keeps audio local, and the
+  result records which tier/fallback was used.
+- [x] Evidence-aware lint: frontmatter, `verified:false`, ≤200 lines, app scope,
+  safety boundary, every step/parameter/warning citation, no unknown citation
+  or invented parameter, and no embedded media. Failed candidates are not
+  accepted as `SKILL.md`.
+- [x] Agent playbook now requires telling the customer before configuration,
+  helping complete the console setup without asking for the key in chat,
+  handing evidence to the dedicated subagent, and switching to a suitable
+  model (with the user's knowledge) when needed.
+- [x] OpenCode was used as a design reference for separate subagent role/model
+  selection and provider/credential configuration; FastCUA has no OpenCode
+  runtime dependency.
+
+Validation: `tests/skill-writer-contract.mjs` 6/6 (compiler handoff, secret
+isolation, direct-audio failure → transcription → writer, provenance rejection,
+console contract, live daemon config/CSRF/clear-key); installer contract and
+MCP server lifecycle green. The full recorder suite reached the existing
+real-desktop fixture launch but Windows refused foreground activation three times;
+that run stopped before compilation and did not implicate this pipeline.
+
+---
+
+**Wheel and drag semantics are now independent (DRAFT)**
+
+The recorder already emitted separate low-level wheel and pointer events, but
+the compiler incorrectly collapsed every mouse-down into a click. That boundary
+is now explicit end to end:
+
+- [x] `mouse_down → sampled mouse_move → mouse_up` is paired as one gesture.
+  Significant displacement/path length becomes `action:"drag"`; tiny pointer
+  jitter remains `action:"click"`.
+- [x] A drag retains start/end UIA anchors, exact screen endpoints, recorded
+  window-relative coordinates, duration, displacement, path length, and a
+  bounded sampled path (up to 32 points).
+- [x] Wheel events remain `action:"scroll", input:"wheel"` with vertical or
+  horizontal axis, signed raw delta, direction, amount, and window-relative
+  point. They are never synthesized from pointer movement.
+- [x] Dry-run uses the normal FastCUA control plane: wheel calls `scroll`;
+  left-button drag resolves both anchors and calls `drag`. Legacy records
+  without rebaseable window coordinates, missing endpoint anchors,
+  right/middle drags, and curved endpoint-only replay pause safely.
+
+Regression coverage feeds one real drag, one wheel event, and one jitter click
+through the compiler and asserts three distinct evidence steps plus dry-run
+pre-flight compatibility.

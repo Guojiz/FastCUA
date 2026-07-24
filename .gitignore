@@ -25,3 +25,7 @@ tools/record-feasibility/target/
 
 # Skill recorder build output
 tools/skill-recorder/target/
+
+# Local Skill-writer credentials
+skill-writer-auth.json
+.fastcua/

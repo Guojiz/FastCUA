@@ -10,7 +10,7 @@
 // LABEL it injected, the compiler must flag it ⚠ unresolved, and the narration
 // notes (also injected, into the recorder's own dialog) must still be accepted
 // while the dialog's own keystrokes stay OUT of the demo stream.
-// Then compiles the session and asserts the draft + Skill folder contract,
+// Then compiles the session and asserts evidence + dedicated-writer contracts,
 // the media tracks (MJPEG AVI + frame index + best-effort WAV), the
 // frame-extract review aid (including the redaction gate), and the gated
 // promotion tool (refusals, forced unverified copy, overwrite).
@@ -423,7 +423,7 @@ async function main() {
     }
 
     // ---------------- compile (stage 3) ----------------
-    log("--- compiling session to draft + skill folder ---");
+    log("--- compiling session to evidence + synthesis request ---");
     const compileOut = execFileSync(process.execPath, [COMPILE, sessionPath, "--skill", "fixture-report"], { encoding: "utf8" });
     log(compileOut.trim().split("\n").join(" | "));
     const draft = JSON.parse(fs.readFileSync(path.join(recDir, "draft.json"), "utf8"));
@@ -457,21 +457,70 @@ async function main() {
       draft.steps.some((s) => (s.intent || []).some((t) => t.includes("report date")) || (s.text || "").includes("report date")),
       "");
 
-    // ---------------- skill folder (stage 4) ----------------
+    // ---------------- evidence -> dedicated writer contract (stage 4) ----------------
+    const evidencePath = path.join(recDir, "evidence.json");
+    const evidence = JSON.parse(fs.readFileSync(evidencePath, "utf8"));
+    check("canonical evidence package generated",
+      evidence.format === "fastcua-skill-evidence/1" && evidence.executable === false, evidence.format);
+    const requestFile = path.join(recDir, "skill-draft", "fixture-report", "synthesis-request.json");
+    check("--skill writes a dedicated-subagent synthesis request", fs.existsSync(requestFile), requestFile);
+    const request = JSON.parse(fs.readFileSync(requestFile, "utf8"));
+    check("synthesis request points to evidence and future SKILL.md",
+      request.writer === "dedicated-subagent" && /evidence\.json$/i.test(request.evidence)
+        && /SKILL\.md$/i.test(request.output), JSON.stringify(request));
     const skillFile = path.join(recDir, "skill-draft", "fixture-report", "SKILL.md");
-    check("SKILL.md generated", fs.existsSync(skillFile), skillFile);
-    const skill = fs.readFileSync(skillFile, "utf8");
-    check("frontmatter: name + description + verified:false",
-      /^---\nname: fixture-report\ndescription: .+\nverified: false\n---/.test(skill), "");
-    check("prominent unverified banner (EN+ZH)", skill.includes("草稿未验证") && skill.includes("UNVERIFIED DRAFT"), "");
-    check("safety boundaries section present", skill.includes("Safety boundaries") && skill.includes("whitelist"), "");
-    check("raw session reference preserved", skill.includes("fastcua-recording/1") && skill.includes("session.jsonl"), "");
-    check("parameters table includes the date param", skill.includes(`{{${dateParam?.name}}}`), "");
-    check("skill file contains no secret", !skill.includes("s3cret"), "");
-    check("skill draft folder is inert (no runnable code files)",
-      fs.readdirSync(path.dirname(skillFile)).every((f) => f === "SKILL.md"),
-      fs.readdirSync(path.dirname(skillFile)).join(","));
+    check("mechanical compiler does not write SKILL.md", !fs.existsSync(skillFile), skillFile);
 
+    // A deterministic local candidate exercises the same lint/promotion gates;
+    // tests/skill-writer-contract.mjs separately mocks the real subagent API.
+    const skillLines = [
+      "---",
+      "name: fixture-report",
+      "description: Use when the user wants to repeat the recorded Fixture report workflow.",
+      "verified: false",
+      "---",
+      "",
+      "# Fixture report",
+      "",
+      "## Procedure",
+      "",
+      ...evidence.steps.flatMap((step) => [
+        `${step.n}. Follow the recorded ${step.action} step. [evidence:step:${step.n}]`,
+        ...(step.warnings || []).map((warning, index) =>
+          `   - ${warning} [evidence:step-warning:${step.n}:${index + 1}]`),
+      ]),
+      "",
+      "## Parameters",
+      "",
+      ...(evidence.parameters.length
+        ? evidence.parameters.map((param) => `- Use {{${param.name}}} from its recorded provenance. [evidence:param:${param.name}]`)
+        : ["- No parameters were inferred."]),
+      "",
+      "## Warnings",
+      "",
+      ...(evidence.warnings.length
+        ? evidence.warnings.map((warning, index) => `- ${warning} [evidence:warning:${index + 1}]`)
+        : ["- No session warnings were recorded."]),
+      "",
+      "## App scope",
+      "",
+      ...evidence.scope.apps.map((app) => `- ${app}`),
+      "",
+      "## Safety",
+      "",
+      "Require explicit user approval before promotion. Never widen app scope or reconstruct redacted input.",
+      "",
+    ];
+    fs.writeFileSync(skillFile, skillLines.join("\n"));
+    const LINT = path.join(ROOT, "tools", "skill-recorder", "lint-skill.mjs");
+    const lint = spawnSync(process.execPath, [LINT, skillFile, "--evidence", evidencePath], { encoding: "utf8" });
+    check("dedicated-writer Skill passes evidence provenance lint", lint.status === 0, lint.stderr || lint.stdout);
+    const skill = fs.readFileSync(skillFile, "utf8");
+    check("frontmatter: name + trigger description + verified:false",
+      /^---\nname: fixture-report\ndescription: .+\nverified: false\n---/.test(skill), "");
+    check("parameters retain evidence citations",
+      skill.includes(`{{${dateParam?.name}}}`) && skill.includes(`[evidence:param:${dateParam?.name}]`), "");
+    check("skill file contains no secret", !skill.includes("s3cret"), "");
     // ---------------- compile: media references (stage 5) ----------------
     check("draft.media carries session-relative paths",
       draft.media?.video === "video/video.avi" && draft.media?.video_index === "video/index.jsonl"
@@ -484,11 +533,11 @@ async function main() {
     check("draft references media but never embeds it",
       !draftText.includes("base64") && !draftText.includes("RIFF") && draftText.length < 200_000,
       `draft.json ${(draftText.length / 1000).toFixed(0)} KB`);
-    const draftMd = fs.readFileSync(path.join(recDir, "draft.md"), "utf8");
-    check("draft.md documents the media section", /## Media/.test(draftMd) && draftMd.includes("video/video.avi"), "");
-    check("SKILL draft carries a Review aids section with extraction command",
-      /Review aids/.test(skill) && skill.includes("frame-extract.mjs") && !skill.includes("base64"), "");
-
+    const evidenceMd = fs.readFileSync(path.join(recDir, "evidence.md"), "utf8");
+    check("evidence.md documents media and citations",
+      /## Media/.test(evidenceMd) && evidenceMd.includes("video/video.avi") && /evidence:step:/.test(evidenceMd), "");
+    check("natural-language Skill carries provenance citations without embedded media",
+      /evidence:step:/.test(skill) && !skill.includes("base64"), "");
     // ---------------- dry-run (stage 5) ----------------
     log("--- stage 5: dry-run through the normal control plane ---");
     const DRYRUN = path.join(ROOT, "tools", "skill-recorder", "dryrun.mjs");

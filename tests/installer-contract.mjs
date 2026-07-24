@@ -55,9 +55,11 @@ assert.match(readme, /install both the complete `computer-use` Skill and the `sk
 assert.match(readmeZh, /必须把完整 `computer-use` Skill 和 `sky-computer-use` MCP Server 都安装到自己的活动配置中/);
 assert.doesNotMatch(configText, /^\uFEFF/, "config.json must be directly JSON.parse-compatible");
 assert.equal(config.approvalPolicy, "safe", "tracked config.json must keep the safe default");
+assert.equal(config.skillWriter?.enabled, false, "tracked Skill writer must stay disabled until configured");
+assert.equal(Object.hasOwn(config.skillWriter || {}, "apiKey"), false, "tracked config must never contain a Skill-writer API key");
 assert.ok(
   !config.whitelist.some(entry => /^(?:windowsterminal|cmd|powershell|pwsh|claude|chatgpt)\.exe$/i.test(entry)),
   "safe defaults must not pre-approve terminals or AI assistants",
 );
 
-console.log("PASS installer contract: v0.2.1 pin, verified host, safe config, mandatory self Skill + MCP setup prompt, scoped uninstall");
+console.log("PASS installer contract: v0.2.1 pin, verified host, safe config + disabled secret-free Skill writer, mandatory self Skill + MCP setup prompt, scoped uninstall");

@@ -1,6 +1,6 @@
 # skill-recorder CLI reference
 
-Five tools, one pipeline: `record → compile → dry-run → (review aids) → promote`.
+Seven tools, one pipeline: `record → compile evidence → synthesize → lint → dry-run → review aids → promote`.
 Session format spec: repo `docs/skill-recorder-design.md` (`fastcua-recording/1`).
 
 ## 1. Recorder — `tools/skill-recorder/target/release/skill-recorder.exe`
@@ -48,27 +48,61 @@ The demo's real pixels for those moments do not exist anywhere.
 header; final stats add `video_frames`, `video_bytes`, `video_gaps`,
 `audio_bytes`.
 
-## 2. Compiler — `tools/skill-recorder/compile.mjs`
+## 2. Evidence compiler — `tools/skill-recorder/compile.mjs`
 
 ```
 node compile.mjs <session.jsonl> [--out DIR] [--skill NAME]
 ```
 
-Always writes `draft.json` + `draft.md` (non-executable, `verified:false`).
-With `--skill NAME`, also writes `<out>/skill-draft/<NAME>/SKILL.md`
-(name: lowercase letters/digits/dashes).
+Always writes `evidence.json` + `evidence.md` (canonical, non-executable) and
+`draft.json` + `draft.md` (deterministic replay/acceptance artifacts). With
+`--skill NAME`, writes only
+`<out>/skill-draft/<NAME>/synthesis-request.json`. The mechanical compiler
+never writes prose `SKILL.md`.
 
-What it does: click pairing, type-run merging (text recovered only from UIA
-value snapshots — never from vk codes), named command chords, redacted-step
-preservation, narration→intent attachment (15 s window), parameter inference
-(date / filename / text with provenance), app-scope extraction, ⚠ unresolved
-marking, and media bookkeeping (`draft.media` — session-relative paths to
-video / index / audio / keyframes; an unavailable audio track becomes
-`null` plus the recorder's reason). The SKILL draft gains a "Review aids"
-section that references these paths; media bytes are never embedded in any
-draft.
+It pairs pointer-down/move/up gestures, classifies small movement as click and
+significant movement as drag, keeps wheel input as a separate scroll step,
+merges type runs from UIA values, preserves redactions, attaches notes to
+intent, infers parameters with provenance, extracts app scope, marks unresolved
+evidence, and accounts for media. Evidence
+citations use `[evidence:step:N]`, `[evidence:step-warning:N:I]`,
+`[evidence:param:name]`, and `[evidence:warning:N]`.
 
-## 3. Dry-run — `tools/skill-recorder/dryrun.mjs`
+## 3. Dedicated synthesis — `tools/skill-recorder/synthesize.mjs`
+
+Configure **Skill synthesis subagent** in the FastCUA console first. Public
+provider/model settings live in `config.json`; the API key lives separately in
+`~/.fastcua/skill-writer-auth.json` and is never returned by the config API.
+
+```
+node synthesize.mjs <evidence.json> --skill NAME [--out DIR]
+                    [--typed-narration FILE] [--config FILE] [--overwrite]
+```
+
+The configured OpenAI-compatible model receives only the evidence package and
+optional narration; it has no desktop tools. `audioMode:auto` tries direct WAV
+input, then the configured `/audio/transcriptions` model, then typed
+narration/recorded notes. `direct`, `transcribe`, and `typed` pin one path.
+The result reports the model, narration path, fallbacks, and lint result but
+never credentials.
+
+Environment overrides: `FASTCUA_SKILL_WRITER_BASE_URL`,
+`FASTCUA_SKILL_WRITER_MODEL`, `FASTCUA_SKILL_WRITER_TRANSCRIPTION_MODEL`,
+`FASTCUA_SKILL_WRITER_AUDIO_MODE`, `FASTCUA_SKILL_WRITER_API_KEY`, and
+`FASTCUA_SKILL_WRITER_AUTH_PATH`.
+
+## 4. Evidence lint — `tools/skill-recorder/lint-skill.mjs`
+
+```
+node lint-skill.mjs <SKILL.md> --evidence <evidence.json> [--name NAME]
+```
+
+Exit `0` means the natural-language Skill has valid frontmatter, stays within
+200 lines, contains App scope and Safety sections, cites every recorded step,
+parameter, and warning, invents no citation/parameter, and embeds no media.
+Exit `4` is an evidence-contract failure; exit `2` is usage or I/O failure.
+
+## 5. Dry-run — `tools/skill-recorder/dryrun.mjs`
 
 Replays a draft through the normal FastCUA daemon (approval, whitelist,
 pause/interjection fully active).
@@ -117,16 +151,20 @@ value assertion) and `value_before`.
 
 - `click` → resolve anchor against the live UIA tree (automation id first,
   then localized name) → `click element_index`.
+- `drag` → resolve both endpoint anchors, rebase recorded window-relative
+  endpoints to the current viewport, then call the normal left-button `drag`
+  primitive. Curved paths are retained as evidence but require explicit
+  review because replay currently uses the two endpoints.
 - `type` → focus the element, read `focused_value`, `type_text replace:true`
   with the parameter-substituted committed value, then assert the end value.
 - `key` → `press_key` with the named chord (Win-modifier chords and opaque vk
   tokens are not replayable — decide `skip`).
-- `scroll` → not replayable in v1 (decide `skip`).
+- wheel `scroll` → select the recorded window unambiguously, rebase the recorded point, and replay its axis and delta through the normal `scroll` primitive. Legacy scroll records without window-relative evidence require `skip`.
 - `note` → reported, not executed. `redacted` → never executed.
 
 The dry-run replays **steps**, not media — `draft.media` is ignored.
 
-## 4. Frame extraction — `tools/skill-recorder/frame-extract.mjs`
+## 6. Frame extraction — `tools/skill-recorder/frame-extract.mjs`
 
 Review aid: lets an agent (or the user) LOOK at one chosen moment of the
 demo video without playing the whole file.
@@ -145,7 +183,7 @@ uses the Nth (1-based) narration note's timestamp. Default output:
 redaction gap (`password-focus` / `secure-desktop`) — nothing exists to
 extract, by design.
 
-## 5. Promotion — `tools/skill-recorder/promote.mjs`
+## 7. Promotion — `tools/skill-recorder/promote.mjs`
 
 Gated copy of a reviewed draft folder into a host's skills directory. Run by
 the agent **only after explicit user approval in conversation** — never

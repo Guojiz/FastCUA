@@ -21,6 +21,7 @@
     <div class="grid"><article class="card metric"><div class="label" data-i18n="metricClients">Connected clients</div><div id="s-clients" class="value">—</div><div class="hint" data-i18n="metricClientsHint">shared session count</div></article><article class="card metric"><div class="label" data-i18n="metricHelper">Native helper</div><div id="s-binary" class="value">—</div><div class="hint" data-i18n="metricHelperHint">one cursor, one state</div></article><article class="card metric"><div class="label" data-i18n="metricApproved">Approved apps</div><div id="s-approved" class="value">—</div><div class="hint" data-i18n="metricApprovedHint">cached across clients</div></article><article class="card metric"><div class="label" data-i18n="metricUptime">Uptime</div><div id="s-uptime" class="value">—</div><div class="hint" data-i18n="metricUptimeHint">daemon lifetime</div></article></div>
     <div class="two"><section class="card"><div class="card-head"><div><h3 data-i18n="activityTitle">Action timeline</h3><p data-i18n="activityBody">Recent requests across connected clients.</p></div><button id="clear-events" class="icon-btn" data-i18n="refresh">Refresh</button></div><div id="activity" class="activity"></div></section><section class="card"><div class="card-head"><div><h3 data-i18n="approvedTitle">Approval memory</h3><p data-i18n="approvedBody">Apps approved for the shared helper.</p></div><button id="act-clear" class="icon-btn" data-i18n="clear">Clear</button></div><div id="approved" class="chips"></div></section></div>
     <section class="card" style="margin-top:16px"><div class="card-head"><div><h3 data-i18n="runtimeTitle">Runtime & safety</h3><p data-i18n="runtimeBody">Local-first settings. Changes are saved immediately; port and helper changes need a daemon restart.</p></div><div class="actions"><button id="act-pause" class="button danger" data-i18n="pause">Pause control</button><button id="act-resume" class="button primary" data-i18n="resume" hidden>Resume control</button><button id="act-killbin" class="button danger" data-i18n="killHelper">Stop helper</button><button id="act-shutdown" class="button danger" data-i18n="shutdown">Exit FastCUA</button><button id="act-restart" class="button" data-i18n="restart">Restart daemon</button></div></div><div class="form-grid"><div class="field"><label data-i18n="costartLabel">Start policy</label><div id="costart" class="segment"><button data-v="claude" data-i18n="costartClaude">On demand</button><button data-v="login" data-i18n="costartLogin">At sign-in</button><button data-v="manual" data-i18n="costartManual">Manual</button></div><div id="costart-desc" class="help"></div></div><div class="field"><label data-i18n="approvalLabel">Approval policy</label><div id="approval" class="segment"><button data-v="safe" data-i18n="approvalSafe">Safe access</button><button data-v="full" data-i18n="approvalFull">Full access</button></div><div class="help" data-i18n="approvalHelp">Whitelist mode is the safest default. Prompt mode expands the island only for unknown apps.</div></div><div class="field"><label for="idle" data-i18n="idleLabel">Idle shutdown (minutes)</label><input id="idle" type="number" min="0" max="120"><div class="help" data-i18n="idleHelp">Use 0 to keep the daemon alive.</div></div><div class="field"><label for="port" data-i18n="portLabel">HTTP port</label><input id="port" type="number" min="1024" max="65535"><div class="help" data-i18n="portHelp">Restart daemon after changing this value.</div></div><div class="field full"><label for="cuabin" data-i18n="helperLabel">Native helper path</label><input id="cuabin" type="text" spellcheck="false"><div class="help" data-i18n="helperHelp">Leave empty to auto-discover. CUA_BIN overrides this field.</div></div><div class="field"><label class="toggle"><input id="overlay-en" type="checkbox"><span data-i18n="overlayLabel">Enable FastCUA status overlay</span></label><div class="help" data-i18n="overlayHelp">Shows a compact status island and a click-through screen-edge border.</div></div><div class="field"><label for="overlay-title" data-i18n="overlayTitleLabel">Overlay title</label><input id="overlay-title" type="text"></div><div class="field full"><label for="whitelist" data-i18n="whitelistLabel">Whitelist</label><textarea id="whitelist" spellcheck="false"></textarea><div class="help" data-i18n="whitelistHelp">One exact executable name or absolute path per line.</div></div></div></section>
+    <section class="card" style="margin-top:16px"><div class="card-head"><div><h3 data-i18n="writerTitle">Skill synthesis subagent</h3><p data-i18n="writerBody">A dedicated model turns recorder evidence into a natural-language Skill. It has no desktop tools and cannot widen app scope.</p></div></div><div class="form-grid"><div class="field"><label class="toggle"><input id="writer-enabled" type="checkbox"><span data-i18n="writerEnabled">Enable the dedicated subagent</span></label><div class="help" data-i18n="writerEnabledHelp">The recording agent must tell the user before configuration and hand the evidence package to this subagent.</div></div><div class="field"><label for="writer-provider" data-i18n="writerProvider">Provider</label><select id="writer-provider"><option value="openai-compatible">OpenAI-compatible API</option></select></div><div class="field full"><label for="writer-base-url" data-i18n="writerBaseUrl">API base URL</label><input id="writer-base-url" type="url" spellcheck="false" placeholder="https://api.example.com/v1"></div><div class="field"><label for="writer-model" data-i18n="writerModel">Skill writer model</label><input id="writer-model" type="text" spellcheck="false" placeholder="provider/model-id"><div class="help" data-i18n="writerModelHelp">Choose a model that writes and follows evidence citations well. The main agent may switch to a more suitable model before using this feature.</div></div><div class="field"><label for="writer-transcription-model" data-i18n="writerTranscriptionModel">Transcription model (optional)</label><input id="writer-transcription-model" type="text" spellcheck="false"><div class="help" data-i18n="writerTranscriptionHelp">Used after direct audio understanding fails.</div></div><div class="field"><label for="writer-audio-mode" data-i18n="writerAudioMode">Narration mode</label><select id="writer-audio-mode"><option value="auto">Auto: direct audio → transcription API → typed notes</option><option value="direct">Direct audio only</option><option value="transcribe">Transcription API</option><option value="typed">Typed notes only</option></select></div><div class="field"><label for="writer-timeout" data-i18n="writerTimeout">API timeout (ms)</label><input id="writer-timeout" type="number" min="10000" max="600000" step="1000"></div><div class="field"><label for="writer-api-key" data-i18n="writerApiKey">API key</label><input id="writer-api-key" type="password" autocomplete="new-password" spellcheck="false" placeholder="Leave blank to keep the saved key"><div class="help"><span id="writer-key-status">No key saved</span>. <span data-i18n="writerSecretHelp">The key is stored in a separate local secret file and is never returned by the API.</span></div></div><div class="field"><label class="toggle"><input id="writer-clear-key" type="checkbox"><span data-i18n="writerClearKey">Remove the saved API key</span></label></div></div></section>
     <div class="savebar"><button id="save" class="button primary" data-i18n="save">Save settings</button><span id="saved" class="saved" data-i18n="saved">Saved</span><span class="spacer"></span><span class="muted" data-i18n="localOnly">Runs locally on your Windows desktop</span></div>
   </section>
   <section id="deploy" class="view"><div class="hero-main deploy-hero"><div class="eyebrow" data-i18n="deployEyebrow">Repeatable self-hosting</div><h2 data-i18n="deployTitle">From clone to first desktop action in four clear steps.</h2><p data-i18n="deployBody">A local daemon, a compatible native helper, and one MCP entry point. No cloud control plane required.</p></div><div class="deploy-grid"><article class="card step"><div class="step-no">01 · PREREQUISITES</div><h3 data-i18n="step1Title">Prepare Windows</h3><p data-i18n="step1Body">Install Node.js 18+ and place a compatible helper on the machine.</p></article><article class="card step"><div class="step-no">02 · INSTALL</div><h3 data-i18n="step2Title">Clone and configure</h3><p data-i18n="step2Body">Set the helper path in config.json or use CUA_BIN for a machine-local override.</p></article><article class="card step"><div class="step-no">03 · RUN</div><h3 data-i18n="step3Title">Start the control plane</h3><p data-i18n="step3Body">Run the daemon, then verify the local health endpoint before connecting a client.</p></article></div><div class="two"><section class="card"><div class="card-head"><div><h3 data-i18n="quickStartTitle">Quick start</h3><p data-i18n="quickStartBody">Designed for copy, paste, verify.</p></div></div><pre class="code"><button class="copy" data-copy="clone" data-i18n="copy">Copy</button><code id="clone">git clone https://github.com/Guojiz/FastCUA.git
@@ -134,6 +135,7 @@ const I18N = {
 
 const $ = (id) => document.getElementById(id);
 let cfg = {};
+let writerCfg = {};
 let lang = localStorage.getItem('fastcua-lang') || ((navigator.language || '').startsWith('zh') ? 'zh' : 'en');
 let events = [];
 let pendingApproval = null;
@@ -263,7 +265,7 @@ function setPulse(state) {
 }
 
 async function load() {
-  cfg = await api('/api/config');
+  [cfg, writerCfg] = await Promise.all([api('/api/config'), api('/api/skill-writer/config')]);
   selectSegment('costart', cfg.costartMode || 'claude');
   selectSegment('approval', cfg.approvalPolicy === 'full' ? 'full' : 'safe');
   $('idle').value = cfg.idleTimeoutMin;
@@ -272,6 +274,16 @@ async function load() {
   $('overlay-en').checked = cfg.overlayEnabled !== false;
   $('overlay-title').value = cfg.overlayTitle || '';
   $('cuabin').value = cfg.cuaBinPath || '';
+  $('writer-enabled').checked = writerCfg.enabled === true;
+  $('writer-provider').value = writerCfg.provider || 'openai-compatible';
+  $('writer-base-url').value = writerCfg.baseUrl || '';
+  $('writer-model').value = writerCfg.model || '';
+  $('writer-transcription-model').value = writerCfg.transcriptionModel || '';
+  $('writer-audio-mode').value = writerCfg.audioMode || 'auto';
+  $('writer-timeout').value = writerCfg.timeoutMs || 120000;
+  $('writer-api-key').value = '';
+  $('writer-clear-key').checked = false;
+  $('writer-key-status').textContent = writerCfg.hasApiKey ? `Key saved (${writerCfg.apiKeyHint})` : 'No key saved';
   applyLanguage();
 }
 
@@ -317,6 +329,20 @@ async function save() {
     overlayLanguage: cfg.overlayLanguage || 'auto',
     cuaBinPath: $('cuabin').value.trim(),
   });
+  writerCfg = await api('/api/skill-writer/config', {
+    enabled: $('writer-enabled').checked,
+    provider: $('writer-provider').value,
+    baseUrl: $('writer-base-url').value.trim(),
+    model: $('writer-model').value.trim(),
+    transcriptionModel: $('writer-transcription-model').value.trim(),
+    audioMode: $('writer-audio-mode').value,
+    timeoutMs: +$('writer-timeout').value,
+    apiKey: $('writer-api-key').value,
+    clearApiKey: $('writer-clear-key').checked,
+  });
+  $('writer-api-key').value = '';
+  $('writer-clear-key').checked = false;
+  $('writer-key-status').textContent = writerCfg.hasApiKey ? `Key saved (${writerCfg.apiKeyHint})` : 'No key saved';
   $('saved').classList.add('show');
   setTimeout(() => $('saved').classList.remove('show'), 1500);
   applyLanguage();
