@@ -193,14 +193,21 @@ function Set-StateStyle([string]$state) {
 }
 
 function Open-Settings {
-  # Pause if daemon is up; still open the console URL so the user can diagnose offline state.
+  # Pause if daemon is up; still open the console so the user can diagnose offline state.
   # Keep strings ASCII-only so PowerShell parsing stays encoding-safe.
   try {
     Invoke-RestMethod -Uri "$base/api/action" -Method Post -ContentType "application/json" -Body (@{ action = "pause" } | ConvertTo-Json -Compress) -TimeoutSec 2 | Out-Null
   } catch {
-    try { $action.Text = "Console offline - opening page" } catch {}
+    try { $action.Text = "Console offline - opening console" } catch {}
   }
-  Start-Process "$base/" | Out-Null
+  # Open the control center as a standalone window (Edge --app mode),
+  # not a browser tab. Falls back to the default browser if Edge is absent.
+  $consoleScript = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "scripts\console.ps1"
+  if (Test-Path $consoleScript) {
+    Start-Process powershell.exe -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "`"$consoleScript`"", "-Port", $Port) -WindowStyle Hidden | Out-Null
+  } else {
+    Start-Process "$base/" | Out-Null
+  }
 }
 
 function Post-Action([string]$name, [string]$token = "") {

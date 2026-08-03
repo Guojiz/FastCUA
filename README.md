@@ -129,7 +129,12 @@ Give that prompt to **the agent that will actually use FastCUA**. It must:
 
 If either the Skill or MCP is missing, installation failed.
 
-Local control center: `http://127.0.0.1:8420` (loopback only).
+Local control center: `http://127.0.0.1:8420` (loopback only). Press `F7` to
+open it in a standalone window (Edge `--app` mode, no browser chrome), or run:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\console.ps1
+```
 
 ### Updates and version checks
 

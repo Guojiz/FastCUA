@@ -129,7 +129,11 @@ irm https://raw.githubusercontent.com/Guojiz/FastCUA/main/install.ps1 | iex
 
 缺 Skill 或 MCP 任一即安装失败。
 
-本机控制中心：`http://127.0.0.1:8420`（仅回环）。
+本机控制中心：`http://127.0.0.1:8420`（仅回环）。也可以按 `F7` 用独立窗口打开（Edge `--app` 模式，无浏览器外壳）；或手动运行：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\console.ps1
+```
 
 ### 更新与版本检查
 
