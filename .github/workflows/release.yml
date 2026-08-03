@@ -1,4 +1,4 @@
-name: Release native host
+name: Release FastCUA runtime
 
 on:
   push:
@@ -11,65 +11,66 @@ permissions:
 jobs:
   windows-release:
     runs-on: windows-latest
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Static checks and unit tests
+          registry-url: 'https://registry.npmjs.org'
+      - name: Confirm every component matches the tag
         shell: pwsh
         run: |
+          $expected = '${{ github.ref_name }}'.TrimStart('v')
+          $manifest = (Get-Content runtime-manifest.json -Raw | ConvertFrom-Json).version
+          $package = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $host = (Select-String -Path native-host/Cargo.toml -Pattern '^version = "([^"]+)"$').Matches[0].Groups[1].Value
+          $recorder = (Select-String -Path tools/skill-recorder/Cargo.toml -Pattern '^version = "([^"]+)"$').Matches[0].Groups[1].Value
+          foreach ($entry in @{ manifest=$manifest; package=$package; nativeHost=$host; recorder=$recorder }.GetEnumerator()) {
+            if ($entry.Value -ne $expected) { throw "$($entry.Key) version $($entry.Value) does not match tag $expected" }
+          }
+      - name: Static checks and contracts
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
           cargo fmt --manifest-path native-host/Cargo.toml -- --check
+          cargo fmt --manifest-path tools/skill-recorder/Cargo.toml -- --check
           cargo test --manifest-path native-host/Cargo.toml --locked
           node --check daemon.mjs
           node --check server.mjs
-          node --check tests/protocol-regression.mjs
-          node --check tests/fallback-regression.mjs
-          node --check tests/control-plane-integration.mjs
-          node --check tests/approval-lifecycle.mjs
-          node --check tests/installer-contract.mjs
-          node --check tests/server-lifecycle.mjs
+          node --check lib/runtime.mjs
+          node --check lib/update-check.mjs
           node tests/installer-contract.mjs
+          node tests/runtime-release-contract.mjs
+          node tests/runtime-identity-integration.mjs
           node tests/server-lifecycle.mjs
+          node tests/skill-writer-contract.mjs
           [scriptblock]::Create((Get-Content install.ps1 -Raw)) | Out-Null
-          [scriptblock]::Create((Get-Content uninstall.ps1 -Raw)) | Out-Null
-          [scriptblock]::Create((Get-Content overlay.ps1 -Raw)) | Out-Null
-          [scriptblock]::Create((Get-Content tests/run-control-plane.ps1 -Raw)) | Out-Null
+          [scriptblock]::Create((Get-Content scripts/manage.ps1 -Raw)) | Out-Null
+          [scriptblock]::Create((Get-Content scripts/build-release.ps1 -Raw)) | Out-Null
           [xml](Get-Content card.xaml -Raw) | Out-Null
-      - name: Build fixture and native host
+      - name: Build verified runtime package
         shell: pwsh
         run: |
-          ./tests/build-fixture.ps1
-          cargo build --release --manifest-path native-host/Cargo.toml --locked
-      # UIA / interactive regressions often fail on headless GitHub runners (no real desktop).
-      # Keep them visible but do not block publishing the verified native host.
-      - name: Native and control-plane regressions (best effort)
-        continue-on-error: true
-        shell: pwsh
-        run: |
-          node tests/protocol-regression.mjs
-          node tests/fallback-regression.mjs
-          node tests/approval-lifecycle.mjs
-          ./tests/run-control-plane.ps1
-      - name: Confirm release version matches tag
-        shell: pwsh
-        run: |
-          $version = (Select-String -Path native-host/Cargo.toml -Pattern '^version = "([^"]+)"$').Matches[0].Groups[1].Value
-          if ("v$version" -ne '${{ github.ref_name }}') { throw "Cargo version v$version does not match tag ${{ github.ref_name }}" }
-      - name: Generate checksum
-        shell: pwsh
-        run: |
-          Copy-Item native-host/target/release/cua-native-host.exe .
-          $hash = (Get-FileHash cua-native-host.exe -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  cua-native-host.exe" | Set-Content SHA256SUMS.txt -Encoding ascii
-          Get-Content SHA256SUMS.txt
-      - name: Publish release assets
+          $PSNativeCommandUseErrorActionPreference = $true
+          ./scripts/build-release.ps1 -Version '${{ github.ref_name }}' -Commit '${{ github.sha }}'
+          Copy-Item install.ps1 dist/install.ps1
+      - name: Publish GitHub release assets
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
           name: FastCUA ${{ github.ref_name }}
           generate_release_notes: true
           files: |
-            cua-native-host.exe
-            SHA256SUMS.txt
+            dist/fastcua-runtime-win-x64.zip
+            dist/SHA256SUMS.txt
+            dist/runtime-manifest.json
+            dist/install.ps1
+      - name: Publish npm CLI when NPM_TOKEN is configured
+        if: ${{ env.NODE_AUTH_TOKEN != '' }}
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          npm publish --access public

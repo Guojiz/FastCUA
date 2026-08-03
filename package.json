@@ -1,6 +1,6 @@
 {
   "name": "fastcua",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Windows Computer Use runtime for AI agents — UIA-first, Skill + MCP, local-first. One-line install: npx fastcua",
   "type": "module",
   "bin": {
@@ -8,6 +8,8 @@
   },
   "files": [
     "bin/fastcua.mjs",
+    "scripts/manage.ps1",
+    "runtime-manifest.json",
     "LICENSE",
     "README.md"
   ],

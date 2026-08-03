@@ -14,21 +14,37 @@ import net from "node:net";
 import http from "node:http";
 import path from "node:path";
 import fs from "node:fs";
-import os from "node:os";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
+import {
+  readRuntimeManifest,
+  runtimeConfigPath,
+  runtimeDataDir,
+  runtimeDefaultPort,
+  runtimeInfo,
+  runtimePipe,
+  runtimeRootHash,
+} from "./lib/runtime.mjs";
+import { checkForUpdates } from "./lib/update-check.mjs";
+import {
+  DEFAULT_SKILL_WRITER,
+  normalizeSkillWriter,
+  readSkillWriterAuth,
+  skillWriterPublicView,
+  validateSkillWriter,
+  writeSkillWriterAuth,
+} from "./tools/skill-recorder/writer-config.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
+const RUNTIME_MANIFEST = readRuntimeManifest(HERE);
+const RUNTIME_ROOT_HASH = runtimeRootHash(HERE);
 const log = (...a) => { const s = "[fastcua] " + a.join(" "); process.stderr.write(s + "\n"); recentLogs.push(s); if (recentLogs.length > 100) recentLogs.shift(); };
 
 // Data directory for the helper subprocess (passed via env to the native binary).
-// Prefer FastCUA home; accept CODEX_HOME only as legacy compat.
-const CUA_CACHE_DIR =
-  process.env.FASTCUA_HOME ||
-  process.env.FASTCUA_CACHE_DIR ||
-  process.env.CODEX_HOME ||
-  path.join(os.homedir(), ".fastcua");
-const PIPE = process.env.FASTCUA_PIPE || "\\\\.\\pipe\\fastcua";
+// Keep mutable data outside the runtime and independent from any AI client's home.
+const CUA_CACHE_DIR = runtimeDataDir(HERE, RUNTIME_MANIFEST);
+const PIPE = runtimePipe(HERE);
+fs.mkdirSync(CUA_CACHE_DIR, { recursive: true });
 // Meta keys spoken to the helper over its own stdio protocol.
 // Prefer FastCUA names; host still accepts legacy x-oai-* aliases.
 const APPROVED_KEY = "x-fastcua-approved-app";
@@ -39,13 +55,10 @@ const BUDGET_KEY_LEGACY = "x-oai-cua-request-budget-ms";
 // Resolve the helper binary (NOT bundled). Precedence: config.cuaBinPath > env
 // CUA_BIN > FastCUA install / repo paths. No third-party product binary fallback.
 function discoverCuaBin() {
-  const localAppData = process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
   const localCandidates = [
     path.join(HERE, "native-host", "target", "release", "cua-native-host.exe"),
     path.join(HERE, "helper", "cua-native-host.exe"),
-    path.join(localAppData, "FastCUA", "app", "native-host", "target", "release", "cua-native-host.exe"),
-    path.join(localAppData, "FastCUA", "app", "helper", "cua-native-host.exe"),
-    path.join(localAppData, "FastCUA", "app", "cua-native-host.exe"),
+    path.join(HERE, "cua-native-host.exe"),
   ];
   for (const candidate of localCandidates) if (fs.existsSync(candidate)) return candidate;
   return null;
@@ -104,7 +117,7 @@ function actionSummary(method, params) {
 }
 
 // ---- config (web UI editable) ----
-const CONFIG_PATH = process.env.FASTCUA_CONFIG_PATH || path.join(HERE, "config.json");
+const CONFIG_PATH = runtimeConfigPath(HERE, RUNTIME_MANIFEST);
 // Default whitelist: exact basenames / AUMIDs only (no substring match). Common local tools; not browsers/password managers.
 const DEFAULT_WHITELIST = [
   "mspaint.exe",
@@ -116,7 +129,20 @@ const DEFAULT_WHITELIST = [
   "write.exe",
   "Code.exe",
 ];
-const DEFAULT_CONFIG = { costartMode: "claude", idleTimeoutMin: 5, approvalPolicy: "safe", whitelist: [...DEFAULT_WHITELIST], port: 8420, bannerEnabled: false, overlayEnabled: true, overlayTitle: "FastCUA is using your computer", overlayLanguage: "auto", cuaBinPath: "" };
+const DEFAULT_CONFIG = {
+  costartMode: "claude",
+  idleTimeoutMin: 5,
+  approvalPolicy: "safe",
+  whitelist: [...DEFAULT_WHITELIST],
+  port: runtimeDefaultPort(HERE, RUNTIME_MANIFEST),
+  checkForUpdates: true,
+  bannerEnabled: false,
+  overlayEnabled: true,
+  overlayTitle: "FastCUA is using your computer",
+  overlayLanguage: "auto",
+  cuaBinPath: "",
+  skillWriter: { ...DEFAULT_SKILL_WRITER },
+};
 const APPROVAL_WAIT_MS = 60_000;
 const pendingApprovals = new Map();
 let isUserPaused = false;
@@ -188,16 +214,37 @@ function normalizeConfig(value = {}) {
     approvalPolicy,
     whitelist,
     port: Number.isInteger(port) && port >= 1024 && port <= 65535 ? port : DEFAULT_CONFIG.port,
+    checkForUpdates: source.checkForUpdates !== false,
     bannerEnabled: source.bannerEnabled === true,
     overlayEnabled: source.overlayEnabled !== false,
     overlayTitle: typeof source.overlayTitle === "string" ? source.overlayTitle.slice(0, 100) : DEFAULT_CONFIG.overlayTitle,
     overlayLanguage: ["auto", "en", "zh"].includes(source.overlayLanguage) ? source.overlayLanguage : DEFAULT_CONFIG.overlayLanguage,
     cuaBinPath: typeof source.cuaBinPath === "string" ? source.cuaBinPath.slice(0, 4096) : "",
+    skillWriter: normalizeSkillWriter(source.skillWriter),
   };
 }
-function loadConfig() { try { return normalizeConfig({ ...DEFAULT_CONFIG, ...JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8")) }); } catch { return { ...DEFAULT_CONFIG }; } }
-function saveConfig(c) { fs.writeFileSync(CONFIG_PATH, JSON.stringify(normalizeConfig(c), null, 2) + "\n"); }
+function loadConfig() {
+  for (const candidate of [CONFIG_PATH, path.join(HERE, "config.json")]) {
+    try {
+      const loaded = JSON.parse(fs.readFileSync(candidate, "utf8"));
+      if (candidate !== CONFIG_PATH && RUNTIME_MANIFEST.buildType === "development") {
+        delete loaded.port;
+      }
+      return normalizeConfig({ ...DEFAULT_CONFIG, ...loaded });
+    } catch {}
+  }
+  return { ...DEFAULT_CONFIG };
+}
+function saveConfig(c) {
+  fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
+  fs.writeFileSync(CONFIG_PATH, JSON.stringify(normalizeConfig(c), null, 2) + "\n");
+}
 let config = loadConfig();
+let updateStatus = {
+  status: RUNTIME_MANIFEST.buildType === "development" ? "development" : "pending",
+  checkedAt: null,
+  currentVersion: RUNTIME_MANIFEST.version,
+};
 
 // ---- per-app UIA quality profile (PRIOR, not verdict) ----
 // Known-bad apps still get a live probe on their first request of a session --
@@ -615,6 +662,19 @@ async function handleClientReq(c, req) {
     closeClientAfterReply(c, id, { result: { ok: true } });
     return;
   }
+  if (method === "runtime_info") {
+    reply(c, id, {
+      result: runtimeInfo(HERE, {
+        component: "daemon",
+        serverPath: path.join(HERE, "server.mjs"),
+        daemonPath: path.join(HERE, "daemon.mjs"),
+        nativeHostPath: resolveCuaBin(),
+        httpPort: config.port,
+        update: updateStatus,
+      }),
+    });
+    return;
+  }
   // Order matters for agent messaging:
   // 1) Deliver latched interrupt FIRST (interjection one-shot or stop).
   //    Interjection must not be masked by isUserPaused (user was paused while typing).
@@ -681,7 +741,9 @@ function closeClientAfterReply(c, id, obj) {
 
 // ---- co-start (Windows login auto-start via HKCU Run key) ----
 const RUN_KEY = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run";
-const RUN_VAL = "FastCUA";
+const RUN_VAL = RUNTIME_MANIFEST.buildType === "development"
+  ? `FastCUA-dev-${RUNTIME_ROOT_HASH}`
+  : "FastCUA";
 function applyCostart(mode) {
   const cmd = `"${process.execPath}" "${path.join(HERE, "daemon.mjs")}"`;
   try {
@@ -732,7 +794,7 @@ const httpServer = http.createServer((req, res) => {
     }
     if (u.pathname === "/api/state") {
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ clients: clients.size, binaryPid: proc?.pid || null, approvedApps: [...approvedApps], pendingApprovals: [...pendingApprovals.entries()].map(([token, approval]) => approvalView(token, approval)), approvalPolicy: config.approvalPolicy, controlState: isUserPaused ? "paused_by_user" : pendingApprovals.size ? "awaiting_approval" : "running", uptime: fmtUptime(), recentLogs }));
+      res.end(JSON.stringify({ clients: clients.size, binaryPid: proc?.pid || null, approvedApps: [...approvedApps], pendingApprovals: [...pendingApprovals.entries()].map(([token, approval]) => approvalView(token, approval)), approvalPolicy: config.approvalPolicy, controlState: isUserPaused ? "paused_by_user" : pendingApprovals.size ? "awaiting_approval" : "running", uptime: fmtUptime(), runtime: runtimeInfo(HERE, { component: "daemon", nativeHostPath: resolveCuaBin(), httpPort: config.port }), update: updateStatus, recentLogs }));
       return;
     }
     if (u.pathname === "/api/config" && req.method === "GET") {
@@ -752,6 +814,39 @@ const httpServer = http.createServer((req, res) => {
           res.writeHead(200, { "Content-Type": "application/json" }); res.end(JSON.stringify(config));
         } catch (error) {
           res.writeHead(400, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error: error.message }));
+        }
+      });
+      return;
+    }
+    if (u.pathname === "/api/skill-writer/config" && req.method === "GET") {
+      res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+      res.end(JSON.stringify(skillWriterPublicView(config.skillWriter)));
+      return;
+    }
+    if (u.pathname === "/api/skill-writer/config" && req.method === "POST") {
+      let body = "";
+      req.on("data", d => body += d);
+      req.on("end", () => {
+        try {
+          if (Buffer.byteLength(body) > 64 * 1024) throw new Error("Skill writer config payload too large");
+          const payload = JSON.parse(body);
+          const next = validateSkillWriter({ ...config.skillWriter, ...payload });
+          const requestedKey = typeof payload.apiKey === "string" ? payload.apiKey.trim() : "";
+          const hasKeyAfterSave = payload.clearApiKey === true
+            ? false
+            : Boolean(requestedKey || readSkillWriterAuth().apiKey);
+          if (next.enabled && !hasKeyAfterSave) {
+            throw new Error("Skill writer API key is required when the subagent is enabled");
+          }
+          if (payload.clearApiKey === true) writeSkillWriterAuth("");
+          else if (requestedKey) writeSkillWriterAuth(requestedKey);
+          config = { ...config, skillWriter: next };
+          saveConfig(config);
+          res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+          res.end(JSON.stringify(skillWriterPublicView(config.skillWriter)));
+        } catch (error) {
+          res.writeHead(400, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+          res.end(JSON.stringify({ error: error.message }));
         }
       });
       return;
@@ -846,7 +941,23 @@ const httpServer = http.createServer((req, res) => {
   } catch (e) { res.writeHead(500); res.end("error: " + e.message); }
 });
 httpServer.on("error", (e) => log("http server error:", e.message));
-httpServer.listen(config.port, "127.0.0.1", () => log("config UI: http://127.0.0.1:" + config.port));
+httpServer.listen(config.port, "127.0.0.1", () => {
+  log("config UI: http://127.0.0.1:" + config.port);
+  checkForUpdates(HERE, { enabled: config.checkForUpdates }).then((result) => {
+    updateStatus = result;
+    if (result.status === "available") {
+      log(`update available: ${result.currentVersion} -> ${result.latestVersion}`);
+    }
+  }).catch((error) => {
+    updateStatus = { status: "error", currentVersion: RUNTIME_MANIFEST.version, error: error.message };
+  });
+});
+const updateTimer = setInterval(() => {
+  checkForUpdates(HERE, { enabled: config.checkForUpdates }).then((result) => {
+    updateStatus = result;
+  }).catch(() => {});
+}, 6 * 60 * 60 * 1000);
+updateTimer.unref();
 
 // ---- overlay (PowerShell WPF floating banner) ----
 let overlayProc = null;
@@ -854,7 +965,7 @@ function launchOverlay() {
   if (!config.overlayEnabled || process.env.FASTCUA_DISABLE_OVERLAY === "1") return;
   const overlayPath = path.join(HERE, "overlay.ps1");
   if (!fs.existsSync(overlayPath)) { log("overlay.ps1 not found, skipping launch"); return; }
-  const logPath = path.join(HERE, "overlay.log");
+  const logPath = path.join(CUA_CACHE_DIR, "overlay.log");
   try {
     const errFd = fs.openSync(logPath, "w");
     overlayProc = spawn("powershell.exe", [

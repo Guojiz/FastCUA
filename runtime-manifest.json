@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "name": "FastCUA",
+  "version": "0.3.0",
+  "channel": "development",
+  "buildType": "development",
+  "commit": "working-tree",
+  "buildTime": null,
+  "platform": "win32-x64",
+  "releaseApi": "https://api.github.com/repos/Guojiz/FastCUA/releases/latest"
+}

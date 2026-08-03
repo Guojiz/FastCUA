@@ -13,9 +13,19 @@
     "Code.exe"
   ],
   "port": 8420,
+  "checkForUpdates": true,
   "bannerEnabled": false,
   "overlayEnabled": true,
   "overlayTitle": "FastCUA is using your computer",
   "overlayLanguage": "auto",
-  "cuaBinPath": ""
+  "cuaBinPath": "",
+  "skillWriter": {
+    "enabled": false,
+    "provider": "openai-compatible",
+    "baseUrl": "",
+    "model": "",
+    "transcriptionModel": "",
+    "audioMode": "auto",
+    "timeoutMs": 120000
+  }
 }

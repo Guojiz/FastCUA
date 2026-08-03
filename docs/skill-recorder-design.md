@@ -2,24 +2,28 @@
 
 A standalone "record a skill" tool, modeled on Claude Cowork's *Record a
 skill*: the user demonstrates a workflow on the real desktop while narrating
-intent; the tool produces a **non-executable, explicitly unverified** SKILL.md
-draft for human review.
+intent; the tool produces a **non-executable, explicitly unverified**
+evidence package. A separately configured, tool-less subagent writes natural-language
+`SKILL.md`; provenance lint rejects unsupported prose before review.
 
-Five parts:
+Seven parts:
 
-| piece | path | stage |
+| piece | path | responsibility |
 |---|---|---|
-| recorder (native, Windows) | `tools/skill-recorder/` | 2 |
-| session → draft compiler | `tools/skill-recorder/compile.mjs` | 3 |
-| draft → SKILL.md generator | `compile.mjs --skill NAME` | 4 |
-| video frame extractor (review aid) | `tools/skill-recorder/frame-extract.mjs` | 5 |
-| gated promotion into a skills dir | `tools/skill-recorder/promote.mjs` | 5 |
+| recorder (native, Windows) | `tools/skill-recorder/` | capture |
+| evidence compiler | `tools/skill-recorder/compile.mjs` | deterministic evidence + replay draft |
+| dedicated writer | `tools/skill-recorder/synthesize.mjs` | natural-language Skill prose |
+| provenance lint | `tools/skill-recorder/lint-skill.mjs` | reject missing/fabricated evidence |
+| dry-run | `tools/skill-recorder/dryrun.mjs` | replay acceptance evidence |
+| video frame extractor | `tools/skill-recorder/frame-extract.mjs` | visual review aid |
+| gated promotion | `tools/skill-recorder/promote.mjs` | owner-approved installation |
 
 End-to-end validation on the live machine: `tests/skill-recorder-validation.mjs`
-(112 checks; drives the FastCuaFixture app through the real daemon, records,
+(real-machine suite; drives the FastCuaFixture app through the daemon, records,
 compiles, dry-runs, and asserts on every stage including the AVI/index/WAV
 media tracks, frame extraction with its redaction gate, and the promotion
-gates).
+gates). `tests/skill-writer-contract.mjs` separately verifies the API handoff,
+credential isolation, narration fallback, console contract, and provenance lint.
 
 ## Session format: `fastcua-recording/1`
 
@@ -28,9 +32,11 @@ version, machine context, redaction policy, hotkey map). Every later line is
 one JSON record, flushed line-by-line so a killed recorder still leaves a
 readable partial session:
 
-- `key_down` / `key_up` / `mouse_down` / `mouse_up` / `wheel_*` — raw input
-  with `injected` / `lower_il` provenance flags, foreground window, and an
-  **anchor** (see below). Mouse moves are coalesced and counted, not logged.
+- `key_down` / `key_up` / `mouse_down` / `mouse_up` / `mouse_move` /
+  `wheel_*` — raw input with `injected` / `lower_il` provenance flags and
+  foreground window bounds. Pointer down/up records carry an **anchor** (see
+  below); moves are sampled at most once per ~40 ms and suppressed moves are
+  counted. Wheel events remain wheel events and are never inferred as drags.
 - `focus_change` / `heartbeat` — UIA snapshot of the focused element
   (role, numeric control type, automation id, name + `name_localized`,
   `is_password`, bounds, value class).
@@ -54,7 +60,7 @@ when a track was disabled).
 Every input event tries to name *what* it hit, so the compiler can attach
 steps to UI elements instead of bare coordinates:
 
-- clicks: `ElementFromPoint` at the click point (300 ms bounded worker).
+- pointer down/up: `ElementFromPoint` at both gesture endpoints (300 ms bounded worker).
 - keystrokes: most recent focus snapshot, ≤ 800 ms old → `confidence:"high"`,
   ≤ 2000 ms → `"low"`, otherwise no anchor.
 - anchors carry `value_class` (`text` / `action` / `secret` / `none`) and, for
@@ -106,20 +112,18 @@ marker **black frame** and the index logs `kind:"gap"` with the reason —
 the moment provably has no pixels. The recorder's own windows never appear.
 
 **Audio** — `audio/narration.wav`: PCM 16 kHz mono 16-bit, captured with
-WASAPI shared-mode (`AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM | SRC_DEFAULT_QUALITY`)
-from the default microphone. Strictly **best-effort**: no device, busy
-device, or denied access produces a `t:media` `unavailable` record with the
-reason and the session continues unaffected (`--no-audio` skips the track
-entirely). Silence-flagged packets are written as zeros so the timeline stays
-aligned. Transcription is deliberately out of scope — the WAV is for the
-reviewing human to listen to.
-
+WASAPI shared-mode from the default microphone. Capture is best-effort and
+never fails the recording. At synthesis time, the console-selected policy is:
+writer model reads WAV directly; optional transcription model converts it to
+text; typed narration/recorded notes are the final fallback. `typed` mode
+keeps audio local. Narration is untrusted evidence, never an instruction.
 **Review aids** — `frame-extract.mjs <session-dir> (--at-ms N | --at ISO |
 --note N)` resolves the index entry with largest `ts <= T` and writes its
 JPEG (SOI/EOI-validated); a gap entry exits 4 with an explanation instead of
 inventing pixels. `compile.mjs` surfaces media as session-relative paths in
-`draft.media` and in the SKILL draft's "Review aids" section. `dryrun.mjs`
-ignores media entirely.
+`evidence.media`, `evidence.md`, and the compatible replay draft. The writer may
+describe review commands but lint forbids embedded media; `dryrun.mjs` ignores
+media entirely.
 
 **Promotion** — `promote.mjs` is the only path from `skill-draft/` into a
 live skills directory, and it is gated: the agent runs it, but only after
@@ -133,32 +137,47 @@ extra WARNING appended); exit 5 on an existing target without `--overwrite`.
 A successful run verifies the promoted `SKILL.md` exists and prints a reload
 hint (Kimi Work indexes skills at session start).
 
-## Compiler + generator (`compile.mjs`)
+## Dedicated-agent configuration reference
 
-`node compile.mjs <session.jsonl> [--skill NAME]`
+The role separation follows the same useful pattern documented by OpenCode:
+a subagent has its own role/prompt and can select a model independently, while
+provider/model configuration and credentials are managed separately. FastCUA
+adapts that pattern to a local control console and an OpenAI-compatible API;
+it does not depend on OpenCode at runtime.
 
-Always emits `draft.json` + `draft.md` (both inert). With `--skill`, also
-emits `<out>/skill-draft/<name>/SKILL.md`.
+- https://opencode.ai/docs/agents/
+- https://opencode.ai/docs/config/
+- https://opencode.ai/docs/providers/
 
-Step building:
+## Evidence compiler, dedicated writer, and lint
 
-- mouse down/up pairing → `click` step with the point anchor.
-- printable/IME key runs → `type` step; text is recovered from UIA value
-  snapshots only. VK_PACKET (0xE7) marks injected unicode; 0xE5 marks opaque
-  IME batches; unrecoverable runs get a ⚠ marker instead of guessed text.
-- ctrl/alt + letter chords → named shortcuts (Ctrl+S etc.).
-- redacted key runs → contentless `type` step preserving the redaction.
-- a `note` within 15 s before a step becomes that step's `intent`, otherwise
-  a standalone `note` step.
+`compile.mjs` converts `fastcua-recording/1` into
+`fastcua-skill-evidence/1` plus `fastcua-skill-draft/1`. The evidence package
+retains raw provenance, anchors, app scope, parameters, warnings, redactions,
+and local media references. `--skill NAME` writes a synthesis request only;
+the mechanical compiler never composes Skill prose.
 
-Parameter inference: dates, file names, and generic typed text become
-`{{param}}` placeholders with provenance (step, source, anchor). The SKILL.md
-carries frontmatter (`name`, `description`, `verified: false`), a bilingual
-"unverified draft" banner, a parameters table, anchor explanations, safety
-boundaries, and a reference back to the raw session. Anything the compiler
-could not resolve (injected input spans, missing anchors, low confidence,
-unrecoverable text, steps without narration, > 50 % injected sessions) is
-surfaced as an explicit ⚠ marker — never silently smoothed over.
+The FastCUA console configures a dedicated OpenAI-compatible writer endpoint,
+writer model, optional transcription model, and narration policy. Public
+settings live under `config.skillWriter`; the API key is stored in a separate
+local secret file. GET responses expose only `hasApiKey` and a last-four hint.
+This follows the same separation-of-role idea as a configurable subagent: the
+writer receives evidence but no desktop tools and cannot expand recorded
+scope.
+
+`synthesize.mjs` performs the handoff. In auto mode it attempts direct audio,
+then the configured transcription API, then typed narration/recorded notes.
+It writes `SKILL.md` only after `lint-skill.mjs` accepts the candidate. Lint
+requires trigger-oriented frontmatter, `verified:false`, App scope and Safety
+sections, at most 200 lines, and complete/known citations for every step,
+parameter, and warning. Unknown citations and invented parameters fail.
+
+Step construction remains deterministic: paired pointer gestures (small
+movement → click; significant down/move/up displacement → drag), independent
+wheel scroll steps with axis/delta/point, UIA-value-derived type runs, named
+command chords, contentless redacted steps, 15-second
+note-to-intent attachment, parameter inference with provenance, and explicit
+unresolved markers. `draft.json` remains the only dry-run input.
 
 ## Dry-run runner (`dryrun.mjs`, stage 5)
 
@@ -170,7 +189,7 @@ pipe) — approvals, whitelist, F7–F10 pause/interjection all stay active, and
 rules:
 
 - pre-flight lists every needed decision (session ⚠ warnings, unresolved
-  steps, missing parameters, unreplayable scroll/Win-chord steps) BEFORE
+  steps, missing parameters, legacy pointer evidence/Win-chord steps) BEFORE
   anything executes (exit 3);
 - redacted steps never execute and out-of-scope steps are refused outright —
   decisions cannot unlock either;
@@ -178,6 +197,9 @@ rules:
   host now exposes it per tree line — restart-stable and language-independent),
   localized name second, unique-role last with `name_drift` reported;
 - an unresolvable/ambiguous anchor fails safe (exit 4) — nothing is clicked;
+- `drag` resolves both endpoint anchors and replays window-relative endpoints
+  through the normal left-button drag primitive; wheel scroll replays its
+  independent axis/delta at the recorded window-relative point;
 - `type` steps replay as "achieve the recorded committed value": focus, read
   `focused_value`, `type_text replace:true` with the parameter-substituted
   text, then assert the end value;
@@ -189,15 +211,14 @@ rules:
 |---|---|---|
 | capture | screen video + narration audio | UIA event stream + sparse JPEG keyframes + typed notes + local MJPEG video + local WAV narration |
 | anchors | inferred from video by the model | direct UIA element identity at input time |
-| output | skill draft, model-written | deterministic compiler draft, every inference marked |
+| output | skill draft, model-written | deterministic evidence → dedicated writer → provenance lint |
 | secrets | relies on model discretion | structural: vk/value dropped, keyframes suppressed, video gaps |
 | verification | n/a | `verified:false` + ⚠ markers; nothing is executable |
 | promotion | n/a | gated `promote.mjs`; user approval required, never silent |
 
 ## Known gaps / honest limits
 
-- Audio narration is captured as a local WAV for human listening;
-  **transcription is out of scope** (no speech-to-text, no dependency).
+- Audio understanding depends on the configured provider/model. `auto` reports each failed tier and falls back safely; `typed` avoids remote audio upload.
   Video is MJPEG (every frame a keyframe) — simple and seekable, but larger
   than an inter-frame codec would be; size is bounded by the 4 fps / 1568 px
   defaults.
@@ -206,8 +227,10 @@ rules:
 - Type-step text is the control's whole value snapshot (e.g.
   `initial-value` + typed text), not a per-keystroke diff; the dry-run
   therefore replays type steps with `replace:true` + a value assertion.
-- Scroll steps and Win-modifier chords are not replayable in dry-run v1
-  (they pause for an explicit skip decision).
+- Win-modifier chords, legacy scroll records without window bounds, and
+  right/middle-button drags are not replayable (explicit skip required).
+  Curved drag paths are retained in evidence, but the current replay primitive
+  uses the recorded endpoints and therefore requires explicit review.
 - Grid/pixel replay deliberately absent: an anchor the UIA tree cannot
   re-resolve pauses instead of falling back to coordinates.
 - Windows only; UIA vtable slots are the stage-1-verified mapping.

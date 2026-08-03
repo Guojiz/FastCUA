@@ -12,7 +12,7 @@ const codexHome = fs.mkdtempSync(path.join(os.tmpdir(), "fastcua-fallback-"));
 const child = spawn(binary, ["--parent-pid", String(process.pid)], {
   stdio: ["pipe", "pipe", "pipe"],
   windowsHide: true,
-  env: { ...process.env, CODEX_HOME: codexHome, FASTCUA_TEST_FORCE_UIA_FALLBACK: "1" },
+  env: { ...process.env, FASTCUA_HOME: codexHome, FASTCUA_TEST_FORCE_UIA_FALLBACK: "1" },
 });
 
 let buffer = "";

@@ -154,6 +154,7 @@ Invoke-RestMethod http://127.0.0.1:8420/api/state
 | 软件动作预算 | 每次 helper / MCP / JS 单元 **30s** | 运行时超时。不含人类审批等待。 |
 | `approvalPolicy` | `safe` | 未知应用需人工审批。 |
 | `whitelist` | 常见本地工具的精确 basename / AUMID | 只跳过审批；不解除 Skill 安全禁令。 |
+| `skillWriter` | 关闭 | 在本地控制台配置专用 API/模型。API 密钥单独保存在 `~/.fastcua/skill-writer-auth.json`，绝不写入 `config.json`。 |
 | 已有 `config.json` | 重装时保留 | 代码默认扩展时不会自动合并。 |
 
 `state.uia.prefer_vision` 是运行时信号。**Agent 下一步怎么做只在 Skill 里**，不是靠改 daemon 配置。
@@ -194,6 +195,7 @@ node tests/installer-contract.mjs
 - **岛没有出现：** 确认 `overlayEnabled` 为 true，并检查 `overlay.log`。
 - **快捷键无反应：** 其他程序可能占用了同一全局快捷键，关闭冲突程序后重启 FastCUA。
 - **未知应用等待处理：** 在展开的状态岛中选择仅允许一次、加入可信名单或拒绝。
+- **Skill 合成未启用或缺少密钥：** 打开本地控制台，完成 **Skill synthesis subagent** 配置并保存；不要把密钥写进 `config.json`。
 - **端口被占用：** 在 `config.json` 中选择 1024 到 65535 的端口，再重启 daemon。
 
 HTTP 服务必须保持在 `127.0.0.1`，不要通过代理暴露到公网。

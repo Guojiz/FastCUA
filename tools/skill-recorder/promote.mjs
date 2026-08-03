@@ -86,7 +86,7 @@ if (!draftDir || !toDir) {
 
 const skillFile = path.join(draftDir, 'SKILL.md');
 if (!fs.existsSync(skillFile)) {
-  fail(`no SKILL.md in ${draftDir} — is this a skill draft folder produced by compile.mjs --skill?`, 2);
+  fail(`no SKILL.md in ${draftDir} — run synthesize.mjs and evidence lint before promotion`, 2);
 }
 const skillName = path.basename(draftDir);
 

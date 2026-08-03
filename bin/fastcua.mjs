@@ -1,64 +1,65 @@
 #!/usr/bin/env node
-// FastCUA one-line installer entry (npx fastcua).
-// Delegates to install.ps1 on Windows — does not reimplement runtime install.
 
 import { spawn } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 
-const INSTALL_URL =
-  process.env.FASTCUA_INSTALL_URL ||
-  "https://raw.githubusercontent.com/Guojiz/FastCUA/main/install.ps1";
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const manager = path.join(root, "scripts", "manage.ps1");
+const packageJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
 
 function usage() {
-  console.log(`FastCUA — Windows Computer Use runtime for AI agents
+  console.log(`FastCUA ${packageJson.version} — Windows Computer Use runtime
 
 Usage:
-  npx fastcua              Install runtime (Windows)
-  npx fastcua install      Same as above
+  npx fastcua              Install the latest stable runtime
+  npx fastcua install      Install or repair the latest stable runtime
+  npx fastcua update       Update with checksum verification and rollback
+  npx fastcua check        Check whether a newer stable release exists
+  npx fastcua doctor       Detect mixed paths, versions, and damaged files
+  npx fastcua version      Print the CLI version
   npx fastcua help         Show this help
 
-After install, give Desktop "FastCUA Agent Setup.txt" to your agent so it
-installs both the computer-use Skill and sky-computer-use MCP.
-
-PowerShell equivalent:
-  irm ${INSTALL_URL} | iex
-
-Docs: https://github.com/Guojiz/FastCUA
+The installed runtime checks for updates automatically at most once per day.
+It only notifies; installation remains an explicit user action.
 `);
 }
 
-function main() {
-  const cmd = (process.argv[2] || "install").toLowerCase();
-  if (cmd === "help" || cmd === "-h" || cmd === "--help") {
-    usage();
-    process.exit(0);
-  }
-  if (cmd !== "install") {
-    console.error(`Unknown command: ${cmd}`);
-    usage();
-    process.exit(1);
-  }
-  if (process.platform !== "win32") {
-    console.error("FastCUA currently supports Windows only (win32).");
-    process.exit(1);
-  }
-
-  // Same one-liner as README; -ExecutionPolicy Bypass for typical user shells.
-  const ps = `irm '${INSTALL_URL.replace(/'/g, "''")}' | iex`;
-  console.log("FastCUA: running Windows installer via PowerShell…");
-  const child = spawn(
-    "powershell.exe",
-    ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps],
-    { stdio: "inherit", windowsHide: false },
-  );
-  child.on("error", (err) => {
-    console.error("Failed to start PowerShell:", err.message);
-    process.exit(1);
-  });
-  child.on("exit", (code, signal) => {
-    if (signal) process.exit(1);
-    process.exit(code ?? 1);
-  });
+const command = (process.argv[2] || "install").toLowerCase();
+if (command === "help" || command === "-h" || command === "--help") {
+  usage();
+  process.exit(0);
+}
+if (command === "version" || command === "-v" || command === "--version") {
+  console.log(packageJson.version);
+  process.exit(0);
+}
+if (!["install", "update", "check", "doctor"].includes(command)) {
+  console.error(`Unknown command: ${command}`);
+  usage();
+  process.exit(1);
+}
+if (process.platform !== "win32") {
+  console.error("FastCUA currently supports Windows only (win32).");
+  process.exit(1);
+}
+if (!fs.existsSync(manager)) {
+  console.error(`FastCUA management script is missing: ${manager}`);
+  process.exit(1);
 }
 
-main();
+const action = command[0].toUpperCase() + command.slice(1);
+const child = spawn(
+  "powershell.exe",
+  ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", manager, "-Action", action],
+  { stdio: "inherit", windowsHide: false },
+);
+child.on("error", (error) => {
+  console.error("Failed to start the FastCUA manager:", error.message);
+  process.exit(1);
+});
+child.on("exit", (code, signal) => {
+  process.exit(signal ? 1 : (code ?? 1));
+});
