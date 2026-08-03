@@ -5,8 +5,9 @@ description: Record a Windows GUI demonstration, compile an auditable evidence p
 
 # Skill Recorder
 
-Operate the entire flow: prepare, record, compile evidence, configure and hand
-off to the dedicated writer, review, dry-run, and optionally promote.
+This is the agent playbook: operate the entire flow — prepare, record, compile
+evidence, configure and hand off to the dedicated writer, review, dry-run, and
+optionally promote.
 
 Read and follow the `computer-use` skill first. Use the normal
 `sky-computer-use` control plane; never substitute SendKeys, pyautogui, or an
@@ -147,8 +148,9 @@ or clearly label the draft `verified: false`.
 
 ## Promote only after approval
 
-Ask: “Promote `<skill-name>` into your skills directory?” Wait for an
-unambiguous yes, then detect the active host and promote:
+Never promote silently: promotion always requires this explicit approval
+gate — ask first, wait for an unambiguous yes, then detect the active host
+and promote:
 
 ```powershell
 node tools/skill-recorder/promote.mjs --detect-host

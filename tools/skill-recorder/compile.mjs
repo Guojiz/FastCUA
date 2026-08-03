@@ -206,11 +206,22 @@ function buildSteps(events) {
       // re-read after focus left, i.e. after the control committed. Burst
       // typing (one SendInput span) ends the run instantly while the commit
       // lands seconds later, so allow a generous post-run window.
-      const departed = [...focusEvents].reverse().find((f) =>
-        f.trigger === "departed" && sameElement(f) && f.ts >= run.lastTs && f.ts <= run.lastTs + 8000);
       // Stage 2 (legacy): latest snapshot of any trigger near the run.
-      const snap = departed || [...focusEvents].reverse().find((f) =>
-        sameElement(f) && f.ts >= run.tsStart - 1000 && f.ts <= run.lastTs + 3000);
+      const candidates = [...focusEvents].filter((f) =>
+        sameElement(f) && f.ts >= run.tsStart - 1000 && f.ts <= run.lastTs + 8000);
+      const departed = [...candidates].reverse().find((f) => f.trigger === "departed");
+      const inflight = [...candidates].reverse().find((f) => f.trigger !== "departed");
+      // comdlg filename boxes (save-as) strip the directory path into the
+      // address bar once focus leaves, so the departed value can be a
+      // shortened prefix of the text that was actually typed. Prefer the
+      // fuller in-flight snapshot so the compiled draft replays the complete
+      // path instead of a bare filename.
+      let snap = departed || inflight;
+      if (departed && inflight
+          && inflight.uia.value.length > departed.uia.value.length
+          && inflight.uia.value.includes(departed.uia.value)) {
+        snap = inflight;
+      }
       if (snap) observed = snap.uia.value;
     }
     if (observed === undefined) warnings.push(`${UNRESOLVED}: typed text not recoverable from UIA value snapshots`);
