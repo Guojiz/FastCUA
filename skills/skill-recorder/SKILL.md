@@ -1,13 +1,13 @@
 ---
 name: skill-recorder
-description: Record a Windows GUI demonstration, compile an auditable evidence package, delegate natural-language Skill writing to a separately configured subagent, validate provenance, dry-run, and promote only with explicit approval. Use when the user asks to “record a skill”, “watch me do this”, or teach a repeatable desktop workflow.
+description: Record a Windows GUI demonstration, compile an auditable evidence package, write a natural-language Skill with the current full-capability agent, validate provenance, dry-run, and promote only with explicit approval. Use when the user asks to “record a skill”, “watch me do this”, or teach a repeatable desktop workflow.
 ---
 
 # Skill Recorder
 
-This is the agent playbook: operate the entire flow — prepare, record, compile
-evidence, configure and hand off to the dedicated writer, review, dry-run, and
-optionally promote.
+This is the agent playbook: the current primary agent operates the entire flow
+— prepare, record, compile evidence, write the Skill, review, dry-run, and
+optionally promote. Do not configure or hand off to another model.
 
 Read and follow the `computer-use` skill first. Use the normal
 `sky-computer-use` control plane; never substitute SendKeys, pyautogui, or an
@@ -21,40 +21,22 @@ Tell the user:
   optional microphone audio under `recordings/<name>/`;
 - password fields and the Windows secure desktop are structurally redacted;
 - compilation creates evidence and a replay draft, not a finished Skill;
-- a dedicated subagent writes `SKILL.md` from that evidence and may send the
-  evidence/audio to the API endpoint the user configures;
+- the same current agent writes `SKILL.md` from the local evidence and only
+  inspects non-redacted media needed to resolve uncertainty;
 - promotion is never automatic and always needs explicit approval.
 
-Do not ask the user to paste an API key into chat. Have them enter it in the
-FastCUA control console. The key is stored in a separate local secret file and
-is not returned by the config API.
+## Confirm the primary model
 
-## Configure the dedicated writer
+Before recording, confirm that the **current active model** can reason over
+text and images, use Skills and MCP, and retain the task context through
+evidence review. Native audio understanding is preferred when narration is
+enabled. If the current model is unsuitable, stop and ask the user to switch
+the main model before recording. Do not configure a writer, transcription,
+fallback, or text-only model.
 
-Before synthesis, open the FastCUA control console and help the user complete
-**Skill synthesis subagent**:
-
-1. Enable the subagent.
-2. Set the OpenAI-compatible API base URL and Skill-writer model.
-3. Enter the API key in the password field.
-4. Choose narration mode:
-   - `auto`: direct audio understanding, then transcription API, then typed
-     narration/recorded notes;
-   - `direct`: require the writer model to accept WAV input;
-   - `transcribe`: require a transcription model;
-   - `typed`: never upload audio.
-5. Set a transcription model when `auto` should have a second audio path.
-
-Confirm the endpoint, model, audio-upload choice, and whether a key is saved;
-never expose the key itself. If the current agent/model is unsuitable for
-reviewing multimodal evidence or coordinating the handoff, tell the user and,
-when the host supports it, switch to an appropriate model before using this
-feature. Do not silently change providers or models.
-
-The writer is a narrow subagent: it receives the evidence package and optional
-narration, has no desktop tools, cannot expand app scope, and owns the prose
-for the Skill. The main agent owns user communication, configuration help,
-evidence handoff, lint review, dry-run, and promotion.
+Keep evidence local to the active agent workflow. When narration audio cannot
+be understood by the current model, use the recorder's typed notes or ask the
+user for a corrected text note. Do not route audio to a transcription API.
 
 ## Safety invariants
 
@@ -99,39 +81,36 @@ The compiler writes:
 - `evidence.json` and `evidence.md`: canonical, non-executable evidence,
   with click, wheel scroll, and drag represented as distinct step types;
 - `draft.json` and `draft.md`: deterministic replay/acceptance artifacts;
-- `skill-draft/<skill-name>/synthesis-request.json`: handoff manifest.
+- `skill-draft/<skill-name>/synthesis-request.json`: evidence-writing manifest.
 
 It deliberately does not write `SKILL.md`. Inspect warnings, redactions, app
 scope, inferred parameters, and media paths with the user. Use
 `frame-extract.mjs` when a visual step is unclear; never guess through a
 redaction gap.
 
-## Hand off to the writer subagent
+## Write the Skill in the current agent
 
-After configuration and user acknowledgement of remote data use, run:
+Read `evidence.json`, `evidence.md`, `draft.md`, and
+`skill-draft/<skill-name>/synthesis-request.json`. Inspect only the selected
+non-redacted frames or narration moments needed to resolve uncertainty. Never
+guess through a redaction gap.
 
-```powershell
-node tools/skill-recorder/synthesize.mjs recordings/<name>/evidence.json --skill <skill-name>
-```
+Write `skill-draft/<skill-name>/SKILL.md` directly. Use natural, imperative
+instructions rather than a macro. The frontmatter must declare
+`verified: false` until dry-run succeeds. Every step, step warning, parameter,
+and session warning must retain its evidence citation. Do not invoke
+`synthesize.mjs`; it belongs to the retired separate-model design.
 
-Use `--typed-narration <file>` when the user supplies a corrected transcript.
-In `auto`, synthesis falls back in this order: writer reads WAV directly,
-configured transcription model returns text, typed narration/recorded notes.
-The command reports which path was used without exposing credentials.
-
-The subagent must write natural, imperative instructions rather than a macro.
-Every step, step warning, parameter, and session warning must retain its evidence citation. The tool
-runs provenance lint before it commits `SKILL.md`; a failed lint leaves no
-accepted Skill.
-
-Re-run lint after any human edit:
+Run provenance lint before accepting the draft:
 
 ```powershell
 node tools/skill-recorder/lint-skill.mjs recordings/<name>/skill-draft/<skill-name>/SKILL.md --evidence recordings/<name>/evidence.json
 ```
 
+Re-run lint after any human edit.
+
 Present a concise review: step count, parameters with provenance, warnings,
-redactions, app scope, narration path used, model, and lint result.
+redactions, app scope, media inspected, and lint result.
 
 ## Dry-run
 

@@ -8,7 +8,7 @@
 
 Computer-use agents often treat a desktop as a sequence of screenshots and isolated pointer actions. That design is general, but it spends model context on pixels that may already be available as structured accessibility data, repeats process startup and state discovery, and makes human interruption an integration-specific afterthought. FastCUA explores a different systems design for Windows: an accessibility-first observation path, an optional visual targeting path, a resident local control plane, and a Model Context Protocol (MCP) interface that can execute several related native actions within one model turn.
 
-The implementation combines a per-client Node.js MCP server, one path-scoped resident daemon, a Rust native host, Windows UI Automation (UIA), bounded screenshot capture, numbered square-grid targeting, and USER input-stream injection. Safety is enforced at several layers: exact application identity, approval policy, foreground and cursor revalidation, time budgets, local-only control surfaces, visible status, global pause/interjection/exit controls, and agent-side operating rules distributed as a Skill. A separate recorder turns demonstrations into evidence packages before any reusable Skill is synthesized or promoted.
+The implementation combines a per-client Node.js MCP server, one path-scoped resident daemon, a Rust native host, Windows UI Automation (UIA), bounded screenshot capture, numbered square-grid targeting, and USER input-stream injection. Safety is enforced at several layers: exact application identity, approval policy, foreground and cursor revalidation, time budgets, local-only control surfaces, visible status, global pause/interjection/exit controls, and agent-side operating rules distributed as a Skill. A separate recorder turns demonstrations into evidence packages; the same full-capability primary agent that performed the task reviews that evidence and writes any reusable Skill.
 
 This report makes three bounded claims. First, the architecture reduces unnecessary visual observation without removing visual fallback. Second, the resident control plane creates a single place for lifecycle, approval, interruption, and runtime identity. Third, the implementation converts several common desktop failures—stale elements, unresponsive accessibility providers, moved cursors, changed foreground windows, and ambiguous demonstrations—into explicit failure states. It does **not** claim hardware-equivalent input, universal application compatibility, security against a malicious same-user process, or complete correctness of the current legacy key-chord path. Those limitations are part of the result, not omitted edge cases.
 
@@ -37,7 +37,7 @@ The repository contributes:
 - detect-and-abort input sequencing based on foreground and cursor re-observation;
 - a human control plane with approval, pause, interjection, shutdown, visible state, and stable machine-readable interruption tags;
 - path-scoped runtime identity, verified release artifacts, rollback, and development/release isolation;
-- an evidence-first demonstration recorder whose compiler, writer, linter, dry-run, and promotion stages remain separately auditable.
+- an evidence-first demonstration recorder whose compiler, primary-agent synthesis, linter, dry-run, and promotion stages remain separately auditable.
 
 ### 1.3 Non-goals
 
@@ -50,7 +50,7 @@ FastCUA is not a browser DOM replacement, remote desktop protocol, kernel input 
 The system has four actors:
 
 - **Human operator:** authorizes the task and can interrupt it through global controls.
-- **Agent host:** loads the `computer-use` Skill and connects to the MCP server.
+- **Agent host:** runs one full-capability primary model, loads the `computer-use` Skill, and connects to the MCP server.
 - **FastCUA runtime:** MCP server, resident daemon, console, overlay, and native host running as the current Windows user.
 - **Target application:** a visible desktop process with an HWND, accessibility provider, and/or capturable surface.
 
@@ -245,9 +245,9 @@ In safe mode, an action targeting an unknown application produces an approval re
 
 The daemon maps these states to stable `[control_plane:*]` tags. Pause, stop, shutdown, approval wait, and interjection are semantically distinct. Only interjection carries new task text; the other states instruct the agent to stop calling desktop tools rather than retrying around human control.
 
-### 7.3 Local console and credential handling
+### 7.3 Local console
 
-The control center binds to `127.0.0.1`. Mutating browser requests must have no `Origin` header or an exact loopback same-port origin; body sizes are capped, responses use restrictive content headers, and the skill-writer API key is stored separately from public configuration. The standalone console is an Edge `--app` wrapper around the same local page, not a remote service.
+The control center binds to `127.0.0.1`. Mutating browser requests must have no `Origin` header or an exact loopback same-port origin; body sizes are capped and responses use restrictive content headers. The standalone console is an Edge `--app` wrapper around the same local page, not a remote service. The recommended single-model architecture requires no separate writer credential in this console. The repository still contains an older writer-key interface; it is legacy code scheduled for removal in [Next design](NEXT_DESIGN.md).
 
 ### 7.4 Residual local risk
 
@@ -259,20 +259,22 @@ The MCP server exposes runtime identity, application/window discovery, observati
 
 The `computer-use` Skill is part of the safety mechanism. It specifies bootstrap, stale-state handling, UIA-to-vision switching, text-field observation before mutation, sensitive-action confirmation, control-plane tag behavior, verification, and turn closure. Installing only the MCP server gives an agent capability without the required operating policy; installing only the Skill gives instructions without an executor. FastCUA therefore defines a complete installation as **Skill + MCP in the same active agent host**.
 
+That host should use one full-capability primary model: text and image understanding, reliable reasoning, local Skill support, MCP tool use, and sufficient context for multi-step desktop work. Native audio understanding is preferred for demonstration narration. FastCUA does not recommend a separate writer, transcription model, or fallback model. If the primary model cannot consume an audio track, the recorder's typed notes or a user-corrected text note are used instead.
+
 The persistent `js` tool is a latency and state-management feature, not an escape hatch. Its `sky` object exposes only bounded FastCUA operations. Cells are serialized, timed, and tracked with `AsyncLocalStorage`; delayed callbacks and detached desktop promises are cancelled when a cell ends so a timed-out action cannot land later.
 
 ## 9. Evidence-first Skill recording
 
 ### 9.1 Why recording is separated from synthesis
 
-A demonstration contains observable events, but a reusable Skill also contains inferred intent, parameters, warnings, and generalization. Writing prose directly from raw input would collapse evidence and inference. FastCUA instead produces a non-executable evidence package before a dedicated, tool-less writer creates natural-language instructions.
+A demonstration contains observable events, but a reusable Skill also contains inferred intent, parameters, warnings, and generalization. Writing prose directly from raw input would collapse evidence and inference. FastCUA therefore produces a non-executable evidence package before the current primary agent writes natural-language instructions. This keeps one model responsible for the original task context, visual evidence, user corrections, and final Skill instead of transferring meaning to separately configured models.
 
 ### 9.2 Pipeline
 
 ```mermaid
 flowchart TB
   A["Record hooks + UIA + sparse media"] --> B["Compile canonical evidence"]
-  B --> C["Dedicated writer synthesizes prose"]
+  B --> C["Current primary agent writes Skill"]
   C --> D["Provenance lint"]
   D --> E["Dry-run with new parameters"]
   E --> F["Human-reviewed promotion"]
@@ -280,7 +282,7 @@ flowchart TB
 
 The recorder captures low-level keyboard/mouse events, foreground identity, focus snapshots, point anchors, sparse keyframes, optional local video/audio, and typed notes. Password focus removes key content and suppresses visual frames; secure desktop is not recorded. The compiler deterministically creates evidence and draft artifacts, preserves unresolved steps, infers parameters with provenance, and never writes `SKILL.md` itself.
 
-The writer receives the evidence package without desktop tools. Lint requires citations for steps, parameters, and warnings and rejects missing or fabricated evidence. Dry-run re-resolves anchors in a restarted application, substitutes new parameter values, refuses out-of-scope applications, skips redacted steps, and stops on unresolved anchors or control-plane interruption. Promotion requires an explicit review attestation; unverified Skills require an additional override.
+The active agent reads `evidence.json`/`evidence.md`, inspects only the non-redacted frames or audio it needs, and writes `SKILL.md` inside the draft directory. Every step, parameter, and warning must retain its evidence citation. Provenance lint rejects missing or fabricated evidence. Dry-run re-resolves anchors in a restarted application, substitutes new parameter values, refuses out-of-scope applications, skips redacted steps, and stops on unresolved anchors or control-plane interruption. Promotion requires an explicit review attestation; unverified Skills require an additional override. The older `synthesize.mjs`, writer API, transcription model, and secret configuration are not part of this recommended path and are tracked for deletion in [Next design](NEXT_DESIGN.md).
 
 ### 9.3 Recorder limits
 
@@ -307,7 +309,7 @@ This report uses four evidence classes:
 | `control-plane-integration.mjs` | origin rejection, pause/resume, approvals, disconnect cleanup, interjection |
 | `protocol-regression.mjs` | live native observation/actions and failure responses |
 | `real-machine-validation.mjs` | Notepad/fixture UIA, capture/grid, hung providers, scale inversion, click snapping, UIA profile recovery |
-| `skill-writer-contract.mjs` | credential isolation, transcription fallback, synthesis/lint contracts |
+| `skill-writer-contract.mjs` | regression coverage for the legacy separate-writer subsystem pending removal |
 | `skill-recorder-validation.mjs` | redaction, media containers, evidence compilation, replay, scope refusal, promotion gates |
 | `office-demo-e2e.mjs` | recorded Office workflow replayed with new values and output verification |
 
@@ -337,7 +339,7 @@ The project does not yet provide:
 - an independent usability study for approval and interruption controls;
 - peer review or third-party reproduction artifacts.
 
-## 11. Limitations and engineering roadmap
+## 11. Limitations and design gaps
 
 ### 11.1 Input correctness
 
@@ -357,7 +359,13 @@ Detached bounded workers prevent one UIA read from wedging the shared helper, bu
 
 Future releases should apply an explicit current-user access control list to the named pipe, add a per-installation console token or equivalent authenticated channel, and document behavior when Windows exposes local pipes remotely. These changes would strengthen the runtime against other same-user or network-reachable processes but still would not create a multi-tenant sandbox.
 
-### 11.5 Empirical evaluation
+### 11.5 Distribution and model architecture
+
+The intended user path is the PowerShell bootstrapper plus verified GitHub Release artifacts. npm is not a supported or recommended installation path. The current repository still carries `package.json`, `bin/fastcua.mjs`, npm-oriented strings, and an optional npm publication step; these are implementation residue, not a second supported distribution.
+
+Likewise, the intended agent path is one full-capability primary model. The current daemon and console still expose separate writer/provider/transcription settings and the release still ships those tools. The documentation does not present those settings as architecture. The exact removal plan and acceptance criteria for both mismatches are in [Next design](NEXT_DESIGN.md).
+
+### 11.6 Empirical evaluation
 
 A useful comparative study should pre-register tasks and measure success rate, model turns, image bytes/tokens, median/p95 action latency, human interventions, and unsafe-action near misses across three modes: vision-only, accessibility-only, and FastCUA hybrid. Until that experiment exists, efficiency and reliability claims remain architectural hypotheses supported by targeted tests, not benchmark conclusions.
 
@@ -372,17 +380,21 @@ A useful comparative study should pre-register tasks and measure success rate, m
 
 ### 12.2 Install a release
 
-```powershell
-npx fastcua
-```
-
-Or use the PowerShell bootstrapper:
+Use the PowerShell bootstrapper. It installs Node.js through WinGet when necessary, downloads the runtime from GitHub Releases, and verifies the published checksum:
 
 ```powershell
 irm https://raw.githubusercontent.com/Guojiz/FastCUA/main/install.ps1 | iex
 ```
 
 The installer downloads the versioned Windows runtime, verifies its SHA-256 digest, and writes `FastCUA Agent Setup.txt`. Give that file to the agent host that will use FastCUA. Installation is complete only after that host installs the full `skills\computer-use` directory, configures `server.mjs` as the `sky-computer-use` stdio MCP server, reloads, and successfully calls `list_windows`.
+
+Installed maintenance commands use the same PowerShell entry point:
+
+```powershell
+& "$env:LOCALAPPDATA\FastCUA\app\install.ps1" -Action Doctor
+& "$env:LOCALAPPDATA\FastCUA\app\install.ps1" -Action Check
+& "$env:LOCALAPPDATA\FastCUA\app\install.ps1" -Action Update
+```
 
 ### 12.3 Build from source
 
@@ -403,7 +415,6 @@ node --check server.mjs
 node --check daemon.mjs
 node tests\server-lifecycle.mjs
 node tests\control-plane-integration.mjs
-node tests\skill-writer-contract.mjs
 ```
 
 Native and real-machine checks:
@@ -420,7 +431,7 @@ Tests that move the pointer or type into applications require an interactive des
 
 ### 12.5 Release and rollback
 
-The version must match in `runtime-manifest.json`, `package.json`, `native-host/Cargo.toml`, and `tools/skill-recorder/Cargo.toml`. A `v*` tag triggers the Windows release workflow, which validates versions, runs static/contract checks, builds the native artifacts, creates the verified runtime ZIP, publishes checksums and manifest, and publishes the npm bootstrap package when `NPM_TOKEN` is configured.
+The canonical release is a versioned Windows runtime ZIP, checksum file, manifest, and PowerShell installer published through GitHub Releases. A `v*` tag triggers the Windows workflow that runs checks and builds those artifacts. The current workflow also validates `package.json` and can publish an npm bootstrap package; that is a known mismatch, not part of the target release contract, and is scheduled for removal in [Next design](NEXT_DESIGN.md).
 
 Installed updates use a staging directory, verify file hashes from the manifest, atomically replace the application directory, and keep `app.previous` for rollback. Development checkouts are never overwritten by the release updater.
 
@@ -441,3 +452,4 @@ The implementation is strongest where its contracts are narrow: scoped windows, 
 7. Microsoft, [Named Pipes](https://learn.microsoft.com/en-us/windows/win32/ipc/named-pipes).
 8. Model Context Protocol, [Specification](https://modelcontextprotocol.io/specification/2025-11-25).
 9. FastCUA source and tests, repository version 0.3.0: [`server.mjs`](../server.mjs), [`daemon.mjs`](../daemon.mjs), [`native-host/src`](../native-host/src), and [`tests`](../tests).
+10. FastCUA, [Next design: close implementation gaps](NEXT_DESIGN.md).

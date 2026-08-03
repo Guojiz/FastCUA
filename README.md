@@ -2,7 +2,7 @@
 
 **A local, accessibility-first Windows control plane for AI agents.**
 
-[Website](https://guojiz.github.io/FastCUA/) · [中文](README_zh.md) · [Technical paper](docs/TECHNICAL_PAPER.md)
+[Website](https://guojiz.github.io/FastCUA/) · [中文](README_zh.md) · [Technical paper](docs/TECHNICAL_PAPER.md) · [Next design](docs/NEXT_DESIGN.md)
 
 > [!WARNING]
 > FastCUA is an experimental project under active development. Use it for testing, not important or unattended work.
@@ -15,6 +15,10 @@ FastCUA is agent-neutral, but a complete installation always has two parts in th
 2. the `sky-computer-use` stdio MCP server.
 
 MCP alone is capability without the required procedure. The Skill alone has no executor.
+
+## Model requirement
+
+Use **one full-capability primary model** that can reason over text and images, call Skills and MCP tools, and keep enough context for a multi-step desktop task. Native audio understanding is preferred for recorded narration. Do not configure a separate writer, transcription model, or fallback model for FastCUA; the same active agent observes, acts, reviews evidence, and writes reusable Skills. If it cannot understand an audio track, use the recorded notes or a user-corrected text note instead of adding another model.
 
 ## Why FastCUA
 
@@ -54,15 +58,7 @@ For the complete design, formal coordinate model, input state machines, evidence
 
 ## Install
 
-### Fastest path
-
-Windows 11 with Node.js 18 or newer:
-
-```powershell
-npx fastcua
-```
-
-Or let the bootstrapper install Node.js through WinGet when needed:
+Use the PowerShell installer. It installs Node.js through WinGet when needed, downloads the GitHub Release runtime, and verifies its checksum:
 
 ```powershell
 irm https://raw.githubusercontent.com/Guojiz/FastCUA/main/install.ps1 | iex
@@ -80,9 +76,9 @@ If either the Skill or MCP is missing, installation is incomplete.
 ### Verify and update
 
 ```powershell
-npx fastcua doctor
-npx fastcua check
-npx fastcua update
+& "$env:LOCALAPPDATA\FastCUA\app\install.ps1" -Action Doctor
+& "$env:LOCALAPPDATA\FastCUA\app\install.ps1" -Action Check
+& "$env:LOCALAPPDATA\FastCUA\app\install.ps1" -Action Update
 ```
 
 Inside MCP, call `runtime_info` to confirm the exact server, daemon, native host, version, commit, pipe, and data directory in use.
@@ -134,11 +130,11 @@ Element indexes belong to the latest UIA snapshot. Refresh after layout changes.
 The optional recorder turns a demonstration into an auditable evidence package before any Skill is written:
 
 ```text
-record → compile evidence → dedicated writer → provenance lint
+record → compile evidence → current primary agent writes → provenance lint
        → dry-run with new values → human-reviewed promotion
 ```
 
-Password fields and secure-desktop moments are structurally redacted. Compiled drafts are non-executable and unverified. Out-of-scope applications, unresolved anchors, control-plane interruption, and promotion without explicit review all fail closed. The agent procedure is in `skills/skill-recorder/`; the design and evidence model are in the [technical paper](docs/TECHNICAL_PAPER.md#9-evidence-first-skill-recording).
+Password fields and secure-desktop moments are structurally redacted. Compiled drafts are non-executable and unverified. The same active full-capability agent reads the evidence and available media, writes the Skill, then runs provenance lint; no writer or transcription model is configured. Out-of-scope applications, unresolved anchors, control-plane interruption, and promotion without explicit review all fail closed. The agent procedure is in `skills/skill-recorder/`; the design and evidence model are in the [technical paper](docs/TECHNICAL_PAPER.md#9-evidence-first-skill-recording).
 
 ## Develop from source
 
@@ -152,7 +148,7 @@ Then copy the complete `skills\computer-use` directory into the active agent's S
 
 ## Boundaries
 
-FastCUA currently targets Windows 11 x64. UAC, Secure Desktop, authentication dialogs, password managers, Windows Security, higher-integrity processes, protected surfaces, and applications with unusual capture/accessibility behavior are outside the normal path. Synthetic input is not hardware input, and the current key-chord implementation still uses the superseded `keybd_event` API. See the paper's [limitations and roadmap](docs/TECHNICAL_PAPER.md#11-limitations-and-engineering-roadmap) before relying on a specific application.
+FastCUA currently targets Windows 11 x64. UAC, Secure Desktop, authentication dialogs, password managers, Windows Security, higher-integrity processes, protected surfaces, and applications with unusual capture/accessibility behavior are outside the normal path. Synthetic input is not hardware input, and the current key-chord implementation still uses the superseded `keybd_event` API. The repository also retains legacy npm and separate-model code that is no longer the recommended design; its removal and the other implementation gaps are tracked in [Next design](docs/NEXT_DESIGN.md).
 
 ## Uninstall
 

@@ -1,6 +1,6 @@
 # skill-recorder CLI reference
 
-Seven tools, one pipeline: `record → compile evidence → synthesize → lint → dry-run → review aids → promote`.
+One evidence-gated pipeline: `record → compile evidence → current primary agent writes → lint → dry-run → review aids → promote`.
 The evidence model and trust boundaries are documented in repo
 `docs/TECHNICAL_PAPER.md`, section 9. Session format: `fastcua-recording/1`.
 
@@ -69,28 +69,29 @@ evidence, and accounts for media. Evidence
 citations use `[evidence:step:N]`, `[evidence:step-warning:N:I]`,
 `[evidence:param:name]`, and `[evidence:warning:N]`.
 
-## 3. Dedicated synthesis — `tools/skill-recorder/synthesize.mjs`
+## 3. Skill writing — current primary agent
 
-Configure **Skill synthesis subagent** in the FastCUA console first. Public
-provider/model settings live in `config.json`; the API key lives separately in
-`~/.fastcua/skill-writer-auth.json` and is never returned by the config API.
+There is no synthesis command or second-model configuration in the recommended
+workflow. The current full-capability primary agent reads `evidence.json`,
+`evidence.md`, `draft.md`, and
+`skill-draft/<NAME>/synthesis-request.json`, inspects only the non-redacted
+media needed to resolve uncertainty, and writes
+`skill-draft/<NAME>/SKILL.md` directly.
 
-```
-node synthesize.mjs <evidence.json> --skill NAME [--out DIR]
-                    [--typed-narration FILE] [--config FILE] [--overwrite]
-```
+The primary model must reason over text and images, use Skills and MCP, and
+retain the recording context. Native audio understanding is preferred. If it
+cannot understand narration audio, use recorded typed notes or ask the user
+for corrected text; do not configure or call a transcription, writer,
+fallback, or text-only model.
 
-The configured OpenAI-compatible model receives only the evidence package and
-optional narration; it has no desktop tools. `audioMode:auto` tries direct WAV
-input, then the configured `/audio/transcriptions` model, then typed
-narration/recorded notes. `direct`, `transcribe`, and `typed` pin one path.
-The result reports the model, narration path, fallbacks, and lint result but
-never credentials.
+The generated Skill must begin as `verified: false`, use imperative workflow
+instructions rather than a macro, and retain every evidence citation. Run the
+lint command below before accepting it.
 
-Environment overrides: `FASTCUA_SKILL_WRITER_BASE_URL`,
-`FASTCUA_SKILL_WRITER_MODEL`, `FASTCUA_SKILL_WRITER_TRANSCRIPTION_MODEL`,
-`FASTCUA_SKILL_WRITER_AUDIO_MODE`, `FASTCUA_SKILL_WRITER_API_KEY`, and
-`FASTCUA_SKILL_WRITER_AUTH_PATH`.
+`synthesize.mjs`, `writer-config.mjs`, the writer API, and their model/auth
+settings are remnants of the retired separate-model design. They are not part
+of this workflow and are scheduled for removal in
+`docs/NEXT_DESIGN.md` (Gap B).
 
 ## 4. Evidence lint — `tools/skill-recorder/lint-skill.mjs`
 

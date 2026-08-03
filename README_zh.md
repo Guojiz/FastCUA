@@ -2,7 +2,7 @@
 
 **面向 AI Agent 的本地、元素优先 Windows 控制平面。**
 
-[网站](https://guojiz.github.io/FastCUA/) · [English](README.md) · [技术论文](docs/TECHNICAL_PAPER.md)
+[网站](https://guojiz.github.io/FastCUA/) · [English](README.md) · [技术论文](docs/TECHNICAL_PAPER.md) · [下一步设计](docs/NEXT_DESIGN.md)
 
 > [!WARNING]
 > FastCUA 仍是快速开发中的实验项目。请只用于测试，不要用于重要或无人值守的工作。
@@ -15,6 +15,10 @@ FastCUA 不绑定某一家 Agent，但完整安装必须在**同一个 Agent 宿
 2. `sky-computer-use` stdio MCP Server。
 
 只装 MCP 等于有能力却缺少必要操作规范；只装 Skill 则没有执行器。
+
+## 模型要求
+
+只使用**一个五官齐全的主模型**：能够理解文本和图像、调用 Skill 与 MCP 工具，并保留足够上下文完成多步桌面任务；若要使用录制旁白，最好还能原生理解音频。FastCUA 不再要求配置独立 writer、转写模型或备用模型。同一个当前 Agent 负责观察、操作、审查证据并写出可复用 Skill。如果它无法理解音频，就使用录制时的文字笔记或用户修正的文本，不再额外接入另一个模型。
 
 ## 为什么使用 FastCUA
 
@@ -54,15 +58,7 @@ flowchart TB
 
 ## 安装
 
-### 最快方式
-
-Windows 11，已有 Node.js 18 或更高版本：
-
-```powershell
-npx fastcua
-```
-
-也可以让引导脚本在需要时通过 WinGet 安装 Node.js：
+统一使用 PowerShell 安装器。它会在需要时通过 WinGet 安装 Node.js，从 GitHub Release 下载运行时并校验哈希：
 
 ```powershell
 irm https://raw.githubusercontent.com/Guojiz/FastCUA/main/install.ps1 | iex
@@ -80,9 +76,9 @@ Skill 或 MCP 缺少任何一个，安装都不完整。
 ### 验证与更新
 
 ```powershell
-npx fastcua doctor
-npx fastcua check
-npx fastcua update
+& "$env:LOCALAPPDATA\FastCUA\app\install.ps1" -Action Doctor
+& "$env:LOCALAPPDATA\FastCUA\app\install.ps1" -Action Check
+& "$env:LOCALAPPDATA\FastCUA\app\install.ps1" -Action Update
 ```
 
 在 MCP 内调用 `runtime_info`，确认实际使用的 server、daemon、原生 host、版本、提交、管道和数据目录。
@@ -134,11 +130,11 @@ await sky.close();
 可选录制器会先把演示变成可审计证据包，再允许写出 Skill：
 
 ```text
-录制 → 编译证据 → 独立 writer → 来源校验
+录制 → 编译证据 → 当前主 Agent 写 Skill → 来源校验
      → 用新参数 dry-run → 人工审阅后安装
 ```
 
-密码框和安全桌面时刻会被结构化遮蔽。编译出的草稿不可执行且未验证。应用越界、无法解析的锚点、控制平面中断，以及未经明确审阅的安装都会安全失败。Agent 操作流程位于 `skills/skill-recorder/`；设计和证据模型位于[技术论文](docs/TECHNICAL_PAPER.md#9-evidence-first-skill-recording)。
+密码框和安全桌面时刻会被结构化遮蔽。编译出的草稿不可执行且未验证。同一个五官齐全的当前 Agent 读取证据与可用媒体、写出 Skill，再运行来源校验；不配置 writer 或转写模型。应用越界、无法解析的锚点、控制平面中断，以及未经明确审阅的安装都会安全失败。Agent 操作流程位于 `skills/skill-recorder/`；设计和证据模型位于[技术论文](docs/TECHNICAL_PAPER.md#9-evidence-first-skill-recording)。
 
 ## 从源码开发
 
@@ -152,7 +148,7 @@ cd FastCUA
 
 ## 使用边界
 
-FastCUA 当前面向 Windows 11 x64。UAC、安全桌面、认证对话框、密码管理器、Windows 安全中心、更高完整性进程、受保护画面，以及具有特殊截图/无障碍行为的应用，不属于正常工作路径。合成输入不等同于硬件输入，当前组合键实现仍使用已被取代的 `keybd_event` API。依赖具体应用前，请先阅读论文中的[限制与路线图](docs/TECHNICAL_PAPER.md#11-limitations-and-engineering-roadmap)。
+FastCUA 当前面向 Windows 11 x64。UAC、安全桌面、认证对话框、密码管理器、Windows 安全中心、更高完整性进程、受保护画面，以及具有特殊截图/无障碍行为的应用，不属于正常工作路径。合成输入不等同于硬件输入，当前组合键实现仍使用已被取代的 `keybd_event` API。仓库里也仍残留已经不再推荐的 npm 与独立模型代码；它们的删除方案和其它实现缺口统一记录在[下一步设计](docs/NEXT_DESIGN.md)中。
 
 ## 卸载
 
