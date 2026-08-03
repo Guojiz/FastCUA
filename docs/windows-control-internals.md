@@ -24,16 +24,19 @@ Every request travels
 The host is a single shared process (one cursor). Three design constraints
 shape everything below:
 
-1. **Every cross-process call is bounded.** UIA snapshot 1.5 s, activation
-   1.5 s, capture 3 s, WM_GETTEXT 300 ms, point-hit 800 ms — a wedged app may
-   degrade but never hang the host.
+1. **Most provider and message calls have explicit budgets.** UIA snapshot
+   1.5 s, activation 1.5 s, capture 3 s, WM_GETTEXT 300 ms, point-hit 800 ms.
+   One deliberate exception is synchronous UIA `ValuePattern.SetValue`: it
+   avoids a detached worker performing a late destructive write, but retains
+   a provider-liveness risk documented in the input-injection paper.
 2. **Coordinates are physical pixels of the target window's screenshot.**
    DPI awareness is declared up front so `GetWindowRect`, UIA bounds,
    `PrintWindow` bitmaps, and click coordinates all live in one space.
-3. **Input is injected through the same APIs a human uses**
-   (`SendInput`/`keybd_event`/`SetCursorPos`), never synthetic window
-   messages — dialogs and DirectUI controls ignore synthesized `BM_CLICK`
-   but accept real input.
+3. **Pointer and keyboard actions enter the Windows input stream** through
+   `SendInput`/`keybd_event`, with `SetCursorPos` for positioning, rather than
+   synthesizing target-window click messages. Validated dialogs and DirectUI
+   controls accepted these paths where synthesized `BM_CLICK` did not; this is
+   empirical compatibility, not hardware equivalence.
 
 ## 2. UI Automation
 
@@ -172,8 +175,9 @@ activate_window → resolve (x,y) → optional snap → invalidate_capture_dedup
   background itself" and ignored (anti-hijack).
 - **Move vs click split**: movement uses `SetCursorPos` (fast, absolute);
   the click itself uses `SendInput` (`INPUT` with MOUSEEVENTF_LEFTDOWN/UP)
-  because real input is accepted where synthesized `BM_CLICK` is ignored.
-  Down → Sleep 20 ms → up; the release has up to 3 retries (Sleep 5 ms).
+  because validated targets accepted input-stream events where synthesized
+  `BM_CLICK` was ignored. Down → Sleep 20 ms → up; the release has up to 3
+  retries (Sleep 5 ms).
 - **Pre-flight checks**: `ensure_cursor_position` re-reads `GetCursorPos` and
   aborts ("cursor moved; action cancelled") if the cursor is not where we put
   it — a human grabbing the mouse cancels the action instead of misclicking.
@@ -192,8 +196,10 @@ activate_window → resolve (x,y) → optional snap → invalidate_capture_dedup
   `VK_MENU`; single chars via `VkKeyScanW`; `F1`-`F20` by prefix; `KP_*`/`NUMPAD_*`
   numpad constants). Keys are **pressed in order** via `keybd_event`
   (`MapVirtualKeyW` → scan code, Sleep 8 ms each), then **released in reverse**
-  (Sleep 4 ms each). Rationale: keybd_event for chorded VK keys, SendInput for
-  Unicode text — each API is used where it is most reliable.
+  (Sleep 4 ms each). This is the current implementation, not the recommended
+  endpoint: Microsoft marks `keybd_event` as superseded, it has no inserted
+  count, and this path does not preserve left/right modifiers or E0 metadata.
+  See the dedicated input-injection analysis below.
 - **Value writes** go through UIA `ValuePattern.SetValue` (see 2.3), not
   keystrokes, when the control is writable — this is what `type_text
   {replace:true}` uses.
@@ -212,6 +218,12 @@ Drag release failures are merged into the reported error.
 `(−vertical)` (sign flip: positive delta = up), horizontal →
 `MOUSEEVENTF_HWHEEL`. `scroll_element` is the same function; elements are only
 used to derive coordinates.
+
+> **Paper-level input analysis:** coordinate equations, action state machines,
+> safety invariants, partial-insertion assumptions, UIPI limits, test evidence,
+> and the chord migration plan are developed in
+> [`input-injection-internals.md`](input-injection-internals.md) (EN) /
+> [`input-injection-internals_zh.md`](input-injection-internals_zh.md) (ZH).
 
 ## 4. Window management
 
@@ -399,10 +411,11 @@ mid ring at radius 12, solid white 4 px center dot. This is the visual
    RGB buffer because the pipeline is already BGRA→RGB and downscaled;
    adding a GDI surface would couple capture to the DC and complicate the
    worker-thread ownership story. Cost: trivial at grid resolutions.
-3. **Three input APIs by purpose**: `SetCursorPos` for absolute fast movement,
-   `SendInput` for clicks and Unicode text (real input beats synthetic
-   messages), `keybd_event` for chorded VK keys. Each is chosen where it is
-   most reliable, not for uniformity.
+3. **Three input APIs by current purpose**: `SetCursorPos` for absolute
+   movement, `SendInput` for clicks and Unicode text, `keybd_event` for
+   chorded VK keys. This describes deployed behavior, not equal endorsement:
+   the chord path should migrate to one balanced, observable `SendInput[]`
+   transaction.
 4. **Detached timeout workers**: the host never waits unbounded on a provider;
    workers that time out are simply orphaned. Combined with the bad-app set
    this converts "a hung app" from a blocker into a per-session degradation.

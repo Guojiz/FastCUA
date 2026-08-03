@@ -192,10 +192,11 @@ inside the host without blocking the shared helper.
   app's UIA is disabled for the session and calls fall back to the HWND tree
   with `uia.prefer_vision: true`.
 - **Input**: `SendInput` (`INPUT`/`KEYBDINPUT`, Unicode text via
-  `KEYEVENTF_UNICODE`), `SetCursorPos` + `SendInput` clicks, `keybd_event`
-  chords. Every input is preceded by `MOVE_SETTLE_MS = 50` and
-  `ensure_foreground_window` / `ensure_cursor_position` checks against
-  drift-induced misclicks.
+  `KEYEVENTF_UNICODE`), `SetCursorPos` + `SendInput` clicks, and a legacy
+  `keybd_event` chord path. Pointer actions use settle/foreground/cursor checks;
+  text batches re-check foreground. These are sampled detect-and-abort guards,
+  not exclusive device ownership. `keybd_event` is superseded and should move
+  to a balanced, count-checked `SendInput[]` transaction.
 - **Window activation**: `ShowWindow` + `AttachThreadInput` +
   `BringWindowToTop` + `SetForegroundWindow`, retried 10 × 10 ms within a 1.5 s
   budget.
@@ -222,6 +223,12 @@ inside the host without blocking the shared helper.
 > concurrency model — see
 > [`windows-control-internals.md`](windows-control-internals.md) (EN) /
 > [`windows-control-internals_zh.md`](windows-control-internals_zh.md) (ZH).
+>
+> Paper-level treatment of the Windows input path — formal coordinate mapping,
+> state machines, invariants, partial-insertion recovery assumptions, UIPI,
+> evidence limits, and the chord redesign — is in
+> [`input-injection-internals.md`](input-injection-internals.md) (EN) /
+> [`input-injection-internals_zh.md`](input-injection-internals_zh.md) (ZH).
 
 ### 3.4 Overlay island — `overlay.ps1` + `card.xaml`
 

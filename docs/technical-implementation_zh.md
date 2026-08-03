@@ -107,7 +107,7 @@ daemon.mjs 同时负责：
 
 - **依赖**：仅 `base64`、`jpeg-encoder`、`serde`、`serde_json`——无 `windows`/`winapi` crate，全部 FFI 手写（COM 通过 vtable 槽号 transmute 调用）。release profile：`codegen-units=1, lto=true, opt-level="z", panic="abort", strip=true`，体积最小化。
 - **UIA**：`CoInitializeEx(MULTITHREADED)`；快照在独立线程跑并 `recv_timeout(1500ms)`，僵死 provider 永不阻塞 host；该应用的 UIA 在本会话内禁用，调用回退 HWND 树并标记 `uia.prefer_vision: true`。
-- **输入**：`SendInput`（`INPUT`/`KEYBDINPUT`，Unicode 文本走 `KEYEVENTF_UNICODE`）、`SetCursorPos` + `SendInput` 点击、`keybd_event` 组合键。所有输入前有 `MOVE_SETTLE_MS = 50` 和 `ensure_foreground_window` / `ensure_cursor_position` 校验，防止焦点/光标漂移后误操作。
+- **输入**：`SendInput`（`INPUT`/`KEYBDINPUT`，Unicode 文本走 `KEYEVENTF_UNICODE`）、`SetCursorPos` + `SendInput` 点击，以及旧式 `keybd_event` 和弦路径。鼠标动作做稳定等待、前台/光标复检，文本按批复查前台；这些是采样式“检测并中止”，不是设备排他锁。`keybd_event` 已被官方标为 superseded，应迁移为一次平衡且可检查插入数的 `SendInput[]` 事务。
 - **窗口激活**：`ShowWindow` + `AttachThreadInput` + `BringWindowToTop` + `SetForegroundWindow`，1.5 秒预算内重试 10 × 10ms。
 - **截图**：优先 `PrintWindow(PW_RENDERFULLCONTENT)`，挂起窗口回退 `BitBlt`（`SRCCOPY|CAPTUREBLT`）；BGRA→RGB；盒式平均缩放到 `max_edge`（默认 1568）；FNV-1a `frame_hash` + 2 秒 TTL 去重（`unchanged: true` 复用旧图）。
 - **网格定位**：纯方形打包，5×7 位图数字字体绘制半透明描边格子；refine 强制 3×3。
@@ -116,6 +116,8 @@ daemon.mjs 同时负责：
 - **单调用预算**：UIA 1.5s、激活 1.5s、截图 3s、WM_GETTEXT 300ms、点命中 800ms。`FASTCUA_TEST_FORCE_UIA_FALLBACK=1` 强制 HWND 回退供测试。
 
 > 深度解析：host 到底怎么驱动 Windows——原始 COM UIA 绑定与 vtable 槽位、快照算法、卡死防护、输入注入时序、窗口激活、捕获/去重、方形网格打包与 CPU 像素渲染、DPI 坐标契约、主循环安全门、并发模型——见 [`windows-control-internals.md`](windows-control-internals.md)（EN）/ [`windows-control-internals_zh.md`](windows-control-internals_zh.md)（ZH）。
+>
+> Windows 输入路径的论文级分析——形式化坐标映射、状态机、不变量、部分插入恢复前提、UIPI、证据边界与和弦重构——见 [`input-injection-internals.md`](input-injection-internals.md)（EN）/ [`input-injection-internals_zh.md`](input-injection-internals_zh.md)（ZH）。
 
 ### 3.4 悬浮岛 —— `overlay.ps1` + `card.xaml`
 

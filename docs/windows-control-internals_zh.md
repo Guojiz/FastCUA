@@ -18,9 +18,9 @@
 `daemon（JSONL over stdio）→ main.rs → dispatch → desktop.rs/uia.rs → Win32 API`。
 host 是单一共享进程（一个光标）。三个设计约束塑造了下面的一切：
 
-1. **每个跨进程调用都有预算**。UIA 快照 1.5s、激活 1.5s、截图 3s、WM_GETTEXT 300ms、点命中 800ms——僵死的应用只能造成降级，永远不会挂住 host。
+1. **大多数 provider 与窗口消息调用都有显式预算**。UIA 快照 1.5s、激活 1.5s、截图 3s、WM_GETTEXT 300ms、点命中 800ms。一个有意保留的例外是同步 UIA `ValuePattern.SetValue`：它避免 detached worker 迟到执行破坏性写，但仍有 provider 活性风险，详见输入注入论文。
 2. **坐标是目标窗口截图的物理像素**。启动即声明 DPI 感知，让 `GetWindowRect`、UIA 边界、`PrintWindow` 位图、点击坐标全部落在同一个坐标系。
-3. **输入走真人同样的 API**（`SendInput`/`keybd_event`/`SetCursorPos`），绝不发合成窗口消息——对话框和 DirectUI 控件会忽略合成的 `BM_CLICK`，但接受真实输入。
+3. **鼠标与键盘动作进入 Windows 输入流**：`SendInput`/`keybd_event` 注入，`SetCursorPos` 定位，而非伪造目标窗口点击消息。已验证的对话框和 DirectUI 控件在合成 `BM_CLICK` 失败时接受了这些路径；这是兼容性实证，不是硬件等价声明。
 
 ## 2. UI Automation
 
@@ -102,13 +102,13 @@ activate_window → 解析 (x,y) → 可选 snap → invalidate_capture_dedup
 
 - **坐标解析**：显式 `x,y` 优先；否则 `element_index` 查元素缓存 bounds 中心，越出外层 HWND 时 clamp 进 `[left+1, right-2]`。
 - **Snap**（`snap:true`，`click_cell` 用）：在点位做 `ElementFromPoint`（800ms 有界）；命中真实控件就点其**中心**；任何失败都退回原坐标。命中元素 bounds 与窗口矩形各边相差 ≤2px 视为"窗口背景本身"，忽略（防劫持）。
-- **移动与点击分离**：移动用 `SetCursorPos`（绝对定位快）；点击本身用 `SendInput`（`INPUT` MOUSEEVENTF_LEFTDOWN/UP）——真实输入被接受之处，合成的 `BM_CLICK` 会被忽略。按下 → Sleep 20ms → 抬起；抬起最多 3 次重试（Sleep 5ms）。
+- **移动与点击分离**：移动用 `SetCursorPos`（绝对定位快）；点击本身用 `SendInput`（`INPUT` MOUSEEVENTF_LEFTDOWN/UP）——已验证目标在合成 `BM_CLICK` 失败时接受了输入流事件。按下 → Sleep 20ms → 抬起；抬起最多 3 次重试（Sleep 5ms）。
 - **前置校验**：`ensure_cursor_position` 复读 `GetCursorPos`，位置不符即中止（"cursor moved; action cancelled"）——人抢鼠标会取消动作而不是误点。`ensure_foreground_window` 在每次点击前复查前台 HWND。
 
 ### 3.2 键盘
 
 - **文本**（`send_text`，`desktop.rs:1983-2037`）：每个 UTF-16 码元是一对 `SendInput` INPUT——`(wVk=0, wScan=码元, KEYEVENTF_UNICODE)` + `(KEYEVENTF_UNICODE|KEYEVENTF_KEYUP)`——每 256 个一批 flush，批间做 `ensure_foreground_window`。若 `SendInput` 返回奇数 `sent` 数（卡在按下态），补发一个 KEYUP，最多 3 次，防按键粘连。
-- **和弦**（`press_key`，`desktop.rs:2039-2066`）：`"Control_L+a"` 按 `+` 拆分，每个 token 经 `key_to_vk` 映射（修饰键→`VK_CONTROL`/`VK_SHIFT`/`VK_MENU`；单字符走 `VkKeyScanW`；`F1`-`F20` 按前缀；`KP_*`/`NUMPAD_*` 小键盘常量）。按键**按顺序按下**（`keybd_event`，`MapVirtualKeyW` 转 scan code，每键 Sleep 8ms），再**逆序抬起**（每键 Sleep 4ms）。分工：和弦 VK 键用 keybd_event，Unicode 文本用 SendInput——各用最可靠的 API。
+- **和弦**（`press_key`，`desktop.rs:2039-2066`）：`"Control_L+a"` 按 `+` 拆分，每个 token 经 `key_to_vk` 映射（修饰键→`VK_CONTROL`/`VK_SHIFT`/`VK_MENU`；单字符走 `VkKeyScanW`；`F1`-`F20` 按前缀；`KP_*`/`NUMPAD_*` 小键盘常量）。按键**按顺序按下**（`keybd_event`，`MapVirtualKeyW` 转 scan code，每键 Sleep 8ms），再**逆序抬起**（每键 Sleep 4ms）。这是当前实现，不是推荐终点：Microsoft 已把 `keybd_event` 标为 superseded；该路径没有插入数、左右修饰键身份或 E0 元数据保证。详见下方输入注入专论。
 - **值写入**走 UIA `ValuePattern.SetValue`（见 2.3）而非按键——`type_text {replace:true}` 用的就是它（控件可写时）。
 
 ### 3.3 拖拽（`desktop.rs:2087-2127`）
@@ -118,6 +118,8 @@ activate_window → 解析 (x,y) → 可选 snap → invalidate_capture_dedup
 ### 3.4 滚动（`desktop.rs:2068-2085`）
 
 `move_and_settle` 到位后：垂直 → `MOUSEEVENTF_WHEEL` 传 `(−vertical)`（符号翻转：正 delta = 向上），水平 → `MOUSEEVENTF_HWHEEL`。`scroll_element` 与 `scroll` 同一函数，元素只用于推导坐标。
+
+> **论文级输入分析：**坐标方程、动作状态机、安全不变量、部分插入前提、UIPI 边界、测试证据与和弦迁移方案，见 [`input-injection-internals.md`](input-injection-internals.md)（EN）/ [`input-injection-internals_zh.md`](input-injection-internals_zh.md)（ZH）。
 
 ## 4. 窗口管理
 
@@ -227,6 +229,6 @@ BGRA → RGB 逐像素（[B,G,R] → [R,G,B]）
 
 1. **UIA 不用 crate**：手写 ABI 级 COM 让 host 零依赖（总共 4 个 crate）、发布自包含，代价是硬编码 vtable 槽位对 UIAutomationCore 版本敏感——所以 `tests/real-machine-validation.mjs` 里有大量实测验证。
 2. **CPU 像素渲染而非 GDI/Direct2D**：管线本来就要 BGRA→RGB 和下采样，网格直接在 RGB 缓冲画；再加 GDI 表面会把捕获与 DC 耦合、搅乱 worker 线程所有权。网格分辨率下开销可忽略。
-3. **三种输入 API 各司其职**：`SetCursorPos` 绝对快速移动、`SendInput` 点击与 Unicode 文本（真实输入胜过合成消息）、`keybd_event` 和弦 VK 键。各用在最可靠处，不求统一。
+3. **当前三种输入 API 分工**：`SetCursorPos` 绝对移动、`SendInput` 点击与 Unicode 文本、`keybd_event` 和弦 VK 键。这描述的是已部署行为，不代表三者同等推荐；和弦路径应迁移为一次平衡、可观测的 `SendInput[]` 事务。
 4. **detached 超时 worker**：host 绝不对 provider 无限等待；超时 worker 直接弃置。配合 bad-app 集合，"应用挂起"从阻塞器变成会话内降级。
 5. **刻意无 OCR**：视觉定位基于网格；host 保持零依赖，真正的"读"交给 Agent 的视觉模型——token 花在视觉有信息量的地方（设计原则 1）。
