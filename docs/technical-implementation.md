@@ -215,6 +215,14 @@ inside the host without blocking the shared helper.
   WM_GETTEXT 300 ms, point-hit 800 ms. `FASTCUA_TEST_FORCE_UIA_FALLBACK=1`
   forces the HWND fallback for tests.
 
+> Deep dive: how the host actually drives Windows — raw-COM UIA bindings and
+> vtable slots, snapshot algorithm, hang protection, input injection timing,
+> window activation, capture/dedupe, square-grid packing and CPU-pixel
+> rendering, DPI coordinate contract, main-loop safety gates, and the
+> concurrency model — see
+> [`windows-control-internals.md`](windows-control-internals.md) (EN) /
+> [`windows-control-internals_zh.md`](windows-control-internals_zh.md) (ZH).
+
 ### 3.4 Overlay island — `overlay.ps1` + `card.xaml`
 
 - WPF dynamic island hosted by PowerShell (`Add-Type` on

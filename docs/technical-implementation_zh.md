@@ -115,6 +115,8 @@ daemon.mjs 同时负责：
 - **通信**：stdin/stdout 换行分隔 JSON `{id, method, params, meta}`；响应 `{id, ok:true, result}` 或 `{id, ok:false, error}` 或 `{id, ok:false, approvalRequest}`。method 白名单与 MCP 工具一一对应。
 - **单调用预算**：UIA 1.5s、激活 1.5s、截图 3s、WM_GETTEXT 300ms、点命中 800ms。`FASTCUA_TEST_FORCE_UIA_FALLBACK=1` 强制 HWND 回退供测试。
 
+> 深度解析：host 到底怎么驱动 Windows——原始 COM UIA 绑定与 vtable 槽位、快照算法、卡死防护、输入注入时序、窗口激活、捕获/去重、方形网格打包与 CPU 像素渲染、DPI 坐标契约、主循环安全门、并发模型——见 [`windows-control-internals.md`](windows-control-internals.md)（EN）/ [`windows-control-internals_zh.md`](windows-control-internals_zh.md)（ZH）。
+
 ### 3.4 悬浮岛 —— `overlay.ps1` + `card.xaml`
 
 - PowerShell 承载的 WPF 动态悬浮岛（`Add-Type` 加载 `PresentationFramework`），UI 来自 `card.xaml`。
