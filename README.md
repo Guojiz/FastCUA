@@ -18,7 +18,7 @@ MCP alone is capability without the required procedure. The Skill alone has no e
 
 ## Model requirement
 
-Use **one full-capability primary model** that can reason over text and images, call Skills and MCP tools, and keep enough context for a multi-step desktop task. Native audio understanding is preferred for recorded narration. Do not configure a separate writer, transcription model, or fallback model for FastCUA; the same active agent observes, acts, reviews evidence, and writes reusable Skills. If it cannot understand an audio track, use the recorded notes or a user-corrected text note instead of adding another model.
+Use **one full-capability primary model** with text/image understanding, reliable reasoning, Skills, MCP, and enough context for the whole task. Native audio understanding is useful for recorded narration; otherwise use typed notes. Do not configure writer, transcription, fallback, or text-only models.
 
 ## Why FastCUA
 
@@ -45,16 +45,26 @@ flowchart TB
   C --> H["Approval / pause / interjection"]
 ```
 
-Core behavior:
+All clients share one daemon, policy state, and physical pointer. A persistent `js` cell can execute related `sky.*` actions in one model turn; stale targets, changed focus/cursor, out-of-bounds points, timeouts, and human control signals stop execution.
 
-- **Accessibility first:** use semantic names, roles, values, and bounds when UIA is healthy.
-- **Vision on demand:** weak or hung providers produce `prefer_vision:true`; `grid_view` returns one annotated image and can refine one cell into 3×3.
-- **One control plane:** all clients share lifecycle, policy, runtime identity, and one physical cursor.
-- **Many actions per turn:** a persistent `js` tool exposes bounded `sky.*` operations and cancels late work when a cell ends.
-- **Fail explicitly:** stale elements, out-of-bounds coordinates, focus loss, pointer movement, timeout, approval wait, or human interruption stop the action.
-- **Local by design:** the console binds to loopback and policy remains on the machine.
+## Targeting logic
 
-For the complete design, formal coordinate model, input state machines, evidence, limitations, recorder architecture, self-hosting, and release process, read the [technical paper](docs/TECHNICAL_PAPER.md).
+Start with `get_window_state({include_text:true})` and read `state.uia`:
+
+| Observation | Required action |
+|---|---|
+| `quality:"good"` and a named, bounded target | Click its current `element_index` |
+| `prefer_vision:true`, `weak`, `broken`, `[no-hit]`, or one stale-index failure | Stop semantic clicking and call `grid_view` |
+
+Visual control is **observe → select → refine → commit**:
+
+1. `grid_view({window})` returns one window image with numbered square cells.
+2. Inspect the image and select the number containing the target. Selection is only a decision; it sends no input.
+3. If the target is not safely isolated at that cell's center, call `grid_refine({window,grid,cell})`. It crops that square and draws a new 3×3 grid; refine again if needed.
+4. Commit exactly once: `click_cell({window,grid,cell})` for the cell center, `click_in_cell({window,grid,cell,x,y,view})` for a cell-local offset, or `click_view({window,view,x,y})` for an exact point in the current image/crop.
+5. Re-observe after any action that may change layout or focus.
+
+Coordinates always use the current window image or crop, origin at its top-left. The helpers reverse capture scaling and reject points outside the target window. Full mechanics and proofs are in the [technical paper](docs/TECHNICAL_PAPER.md#4-observation-semantics-first-pixels-when-needed).
 
 ## Install
 
@@ -94,36 +104,20 @@ Inside MCP, call `runtime_info` to confirm the exact server, daemon, native host
 
 The local control center is available at `http://127.0.0.1:8420`. Safe mode asks before acting in an unknown application. Trust uses exact application identity, not fuzzy name matching.
 
-## Example: one multi-step turn
+## Visual click example
+
+Given a `window` returned by `list_windows`:
 
 ```js
-const windows = await sky.list_windows();
-const window = windows.find((w) => /Notepad/i.test(w.title));
-if (!window) throw new Error("Notepad is not open");
-
-const state = await sky.get_window_state({
+let view = await sky.grid_view({ window });       // inspect; choose cell 4
+view = await sky.grid_refine({
   window,
-  include_screenshot: false,
-  include_text: true,
-});
-
-if (state.uia?.prefer_vision) {
-  let view = await sky.grid_view({ window });
-  view = await sky.grid_refine({ window, grid: view.grid, cell: "4" });
-  await sky.click_cell({ window, grid: view.grid, cell: "5" });
-} else {
-  const editor = /^\s*(\d+)\s+(?:Edit|Document)\b/m.exec(
-    state.accessibility.tree || "",
-  );
-  if (!editor) throw new Error("Editor not found");
-  await sky.click({ window, element_index: Number(editor[1]) });
-}
-
-await sky.type_text({ window, text: "FastCUA" });
+  grid: view.grid,
+  cell: "4",
+});                                               // inspect; choose cell 5
+await sky.click_cell({ window, grid: view.grid, cell: "5" });
 await sky.close();
 ```
-
-Element indexes belong to the latest UIA snapshot. Refresh after layout changes. Selecting a grid number does not click; only an explicit click helper commits input.
 
 ## Record a Skill (preview)
 
@@ -134,7 +128,7 @@ record → compile evidence → current primary agent writes → provenance lint
        → dry-run with new values → human-reviewed promotion
 ```
 
-Password fields and secure-desktop moments are structurally redacted. Compiled drafts are non-executable and unverified. The same active full-capability agent reads the evidence and available media, writes the Skill, then runs provenance lint; no writer or transcription model is configured. Out-of-scope applications, unresolved anchors, control-plane interruption, and promotion without explicit review all fail closed. The agent procedure is in `skills/skill-recorder/`; the design and evidence model are in the [technical paper](docs/TECHNICAL_PAPER.md#9-evidence-first-skill-recording).
+Password fields and secure-desktop moments are redacted. The current primary agent writes the Skill from evidence; lint, dry-run, application scope, and explicit promotion approval remain hard gates. See `skills/skill-recorder/` and the [technical paper](docs/TECHNICAL_PAPER.md#9-evidence-first-skill-recording).
 
 ## Develop from source
 

@@ -18,7 +18,7 @@ FastCUA 不绑定某一家 Agent，但完整安装必须在**同一个 Agent 宿
 
 ## 模型要求
 
-只使用**一个五官齐全的主模型**：能够理解文本和图像、调用 Skill 与 MCP 工具，并保留足够上下文完成多步桌面任务；若要使用录制旁白，最好还能原生理解音频。FastCUA 不再要求配置独立 writer、转写模型或备用模型。同一个当前 Agent 负责观察、操作、审查证据并写出可复用 Skill。如果它无法理解音频，就使用录制时的文字笔记或用户修正的文本，不再额外接入另一个模型。
+只使用**一个五官齐全的主模型**：理解文本和图像、可靠推理、调用 Skill 与 MCP，并保留完成整个任务所需的上下文。录制旁白时最好能原生理解音频，否则使用文字笔记。不再配置 writer、转写、备用或纯文本模型。
 
 ## 为什么使用 FastCUA
 
@@ -45,16 +45,26 @@ flowchart TB
   C --> H["审批 / 暂停 / 插话"]
 ```
 
-核心行为：
+所有客户端共享一个 daemon、策略状态和物理光标。持久化 `js` cell 可在一个模型回合内执行一组相关 `sky.*` 动作；目标过期、焦点或光标变化、坐标越界、超时和人类控制信号都会停止执行。
 
-- **元素优先：** UIA 健康时使用语义名称、角色、值和边界。
-- **按需视觉：** 弱或卡死的 provider 会返回 `prefer_vision:true`；`grid_view` 只给出一张标注图，并可把一个格子继续细分为 3×3。
-- **单一控制平面：** 所有客户端共享生命周期、策略、运行时身份和同一个物理光标。
-- **一轮多步：** 持久化 `js` 工具提供受限的 `sky.*` 操作；cell 结束时会取消迟到任务。
-- **显式失败：** 过期元素、越界坐标、焦点丢失、光标被移动、超时、等待审批或人类中断都会停止动作。
-- **本地优先：** 控制台只绑定 loopback，策略留在电脑本地。
+## 定位逻辑
 
-完整设计、形式化坐标模型、输入状态机、证据、限制、录制器架构、自部署与发行流程统一收录在[技术论文](docs/TECHNICAL_PAPER.md)中。
+先调用 `get_window_state({include_text:true})` 并读取 `state.uia`：
+
+| 观察结果 | 必须采取的动作 |
+|---|---|
+| `quality:"good"`，目标有名称和有效边界 | 点击当前快照的 `element_index` |
+| `prefer_vision:true`、`weak`、`broken`、`[no-hit]`，或一次索引过期 | 停止语义点击，调用 `grid_view` |
+
+视觉操控遵循**观察 → 选择 → 细分 → 提交**：
+
+1. `grid_view({window})` 返回一张带正方形数字格的窗口图。
+2. 看图后选择包含目标的格号。选择只是判断，不会产生输入。
+3. 若目标没有安全地落在格子中心，调用 `grid_refine({window,grid,cell})`；它只裁出该格并重新画 3×3，可继续细分。
+4. 只提交一次：格子中心用 `click_cell({window,grid,cell})`，格内偏移用 `click_in_cell({window,grid,cell,x,y,view})`，当前图或裁剪图中的精确位置用 `click_view({window,view,x,y})`。
+5. 任何可能改变布局或焦点的动作后重新观察。
+
+坐标始终属于当前窗口图或裁剪图，原点在左上角。helper 会反算截图缩放并拒绝窗口外坐标。完整机制与论证见[技术论文](docs/TECHNICAL_PAPER.md#4-observation-semantics-first-pixels-when-needed)。
 
 ## 安装
 
@@ -94,36 +104,20 @@ Skill 或 MCP 缺少任何一个，安装都不完整。
 
 本地控制中心位于 `http://127.0.0.1:8420`。安全模式在操作未知应用前会请求审批；信任采用精确应用身份，而不是模糊名称匹配。
 
-## 示例：一个回合完成多步
+## 视觉点击示例
+
+假设 `window` 来自 `list_windows`：
 
 ```js
-const windows = await sky.list_windows();
-const window = windows.find((w) => /Notepad/i.test(w.title));
-if (!window) throw new Error("Notepad is not open");
-
-const state = await sky.get_window_state({
+let view = await sky.grid_view({ window });       // 看图，选择 4 号格
+view = await sky.grid_refine({
   window,
-  include_screenshot: false,
-  include_text: true,
-});
-
-if (state.uia?.prefer_vision) {
-  let view = await sky.grid_view({ window });
-  view = await sky.grid_refine({ window, grid: view.grid, cell: "4" });
-  await sky.click_cell({ window, grid: view.grid, cell: "5" });
-} else {
-  const editor = /^\s*(\d+)\s+(?:Edit|Document)\b/m.exec(
-    state.accessibility.tree || "",
-  );
-  if (!editor) throw new Error("Editor not found");
-  await sky.click({ window, element_index: Number(editor[1]) });
-}
-
-await sky.type_text({ window, text: "FastCUA" });
+  grid: view.grid,
+  cell: "4",
+});                                               // 看图，选择 5 号格
+await sky.click_cell({ window, grid: view.grid, cell: "5" });
 await sky.close();
 ```
-
-元素索引只属于最新一次 UIA 快照。布局变化后必须重新观察。选择网格数字并不会点击，只有显式点击 helper 才会真正提交输入。
 
 ## 录制技能（预览）
 
@@ -134,7 +128,7 @@ await sky.close();
      → 用新参数 dry-run → 人工审阅后安装
 ```
 
-密码框和安全桌面时刻会被结构化遮蔽。编译出的草稿不可执行且未验证。同一个五官齐全的当前 Agent 读取证据与可用媒体、写出 Skill，再运行来源校验；不配置 writer 或转写模型。应用越界、无法解析的锚点、控制平面中断，以及未经明确审阅的安装都会安全失败。Agent 操作流程位于 `skills/skill-recorder/`；设计和证据模型位于[技术论文](docs/TECHNICAL_PAPER.md#9-evidence-first-skill-recording)。
+密码框和安全桌面时刻会被遮蔽。当前主 Agent 根据证据写 Skill；来源校验、dry-run、应用范围和明确的安装审批都是硬门禁。详见 `skills/skill-recorder/` 与[技术论文](docs/TECHNICAL_PAPER.md#9-evidence-first-skill-recording)。
 
 ## 从源码开发
 

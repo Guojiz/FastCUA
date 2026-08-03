@@ -140,7 +140,23 @@ Window capture runs in a worker with a three-second budget. It tries `PrintWindo
 
 Captured BGRA pixels are converted to RGB, downscaled by box averaging to a default maximum long edge of 1568 pixels, encoded as JPEG, and deduplicated for two seconds by a frame hash. Any input action invalidates the capture cache.
 
-When semantic targeting is weak, `grid_view` overlays centered square cells and small numbers on one image. Selection does not click. The agent may refine one selected square into a new 3×3 crop, then commit with a cell center or a point inside the refined image. This separates observation from actuation and reduces repeated full-window images.
+When semantic targeting is weak, `grid_view` overlays centered square cells and small numbers on one image. Each refinement captures only the selected square and overlays a new 3×3 grid; the path of selected IDs identifies the crop.
+
+### 4.5 Visual-control state machine
+
+Visual control deliberately separates perception from input:
+
+| State | Agent operation | Runtime effect |
+|---|---|---|
+| Observe | `grid_view({window})` | Returns one numbered image; no input |
+| Select | Choose the cell containing the target | Agent-local decision; no tool call and no input |
+| Refine | `grid_refine({window,grid,cell})` | Crops that cell and returns a numbered 3×3 image; no input |
+| Commit center | `click_cell({window,grid,cell})` | Clicks the selected cell center after scope, bounds, foreground, and cursor checks |
+| Commit offset | `click_in_cell({window,grid,cell,x,y,view})` | Validates a cell-local offset, transforms it once, then clicks |
+| Commit point | `click_view({window,view,x,y})` | Validates a point in the current image/crop, transforms it once, then clicks |
+| Verify | New `get_window_state` or `grid_view` | Observes post-action state; input has invalidated the image cache |
+
+The agent refines when a cell contains multiple plausible targets or when its center is not the intended hit point. It may refine repeatedly. Only the three commit operations inject input; selecting a number never clicks. A stale UIA index, `[no-hit]`, `prefer_vision:true`, or `quality` of `weak`/`broken` enters this state machine immediately. After layout or focus changes, the agent discards prior indexes and visual coordinates and observes again.
 
 ## 5. Coordinate model
 
