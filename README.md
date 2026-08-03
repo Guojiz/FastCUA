@@ -2,7 +2,7 @@
 
 **Turn Windows GUIs into a fast, executable interface for AI agents.**
 
-[Website](https://guojiz.github.io/FastCUA/) · [中文](README_zh.md) · [Self-hosting](docs/SELF_HOSTING.md)
+[Website](https://guojiz.github.io/FastCUA/) · [中文](README_zh.md) · [Self-hosting](docs/SELF_HOSTING.md) · [Docs](#documentation)
 
 > [!WARNING]
 > **FastCUA is still under development and is not yet complete.** Current versions may contain bugs, missing functionality, or compatibility issues. Use it for testing only and do not rely on it for important tasks.
@@ -92,6 +92,21 @@ flowchart LR
 | **Daemon + host** | Shared lifecycle, UIA, screenshots, input, policy | Runtime |
 | **README / self-host** | Product + install for people | **Humans** |
 | **Overlay / console** | Pause, approval, interject UI | Humans |
+
+## Documentation
+
+Deep-dive reports live in [`docs/`](docs/) — written for humans, kept separate
+from the agent-only Skill. All bilingual pairs (EN/ZH) cover the same content.
+
+| Document | What it covers |
+|----------|----------------|
+| [Technical implementation](docs/technical-implementation.md) · [中文](docs/technical-implementation_zh.md) | Whole-software report: four-layer architecture, daemon, native host, skill recorder subsystem, safety model, releases, test matrix, CI/CD |
+| [Windows control internals](docs/windows-control-internals.md) · [中文](docs/windows-control-internals_zh.md) | How the native host drives Windows: raw-COM UIA, input injection, window activation, capture/dedupe, square grid, DPI contract, safety gates |
+| [Input injection internals](docs/input-injection-internals.md) · [中文](docs/input-injection-internals_zh.md) | Paper-level input analysis: formal coordinate model, invariants, action state machines, partial-insertion recovery, UIPI limits, evidence vs. open test requirements, chord redesign |
+| [Control center window](docs/control-center-window.md) | Standalone console window (Edge `--app`), rationale and implementation |
+| [Skill recorder design](docs/skill-recorder-design.md) | Evidence-package format and design of the record → compile → dry-run → promote pipeline |
+| [Self-hosting](docs/SELF_HOSTING.md) · [中文](docs/SELF_HOSTING_zh.md) | Run FastCUA from source |
+| [Releases & updates](docs/RELEASING.md) · [中文](docs/RELEASING_zh.md) | Versioning, ZIP manifest, rollback, update policy |
 
 ## Why FastCUA
 

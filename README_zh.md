@@ -2,7 +2,7 @@
 
 **把 Windows 图形界面变成 AI 可快速执行的操作接口。**
 
-[官网](https://guojiz.github.io/FastCUA/) · [English](README.md) · [自部署指南](docs/SELF_HOSTING_zh.md)
+[官网](https://guojiz.github.io/FastCUA/) · [English](README.md) · [自部署指南](docs/SELF_HOSTING_zh.md) · [文档](#文档)
 
 > [!WARNING]
 > **FastCUA 仍在开发中，尚未完全完成。** 当前版本可能存在 Bug、功能缺失或兼容性问题，仅建议用于测试，请勿用于重要任务。
@@ -92,6 +92,20 @@ flowchart LR
 | **Daemon + host** | 生命周期、UIA、截图、输入、策略 | 运行时 |
 | **README / 自部署** | 给人看的产品与安装 | **人** |
 | **Overlay / 控制台** | 暂停、审批、插话 | 人 |
+
+## 文档
+
+深度报告统一放在 [`docs/`](docs/)——给人看，与仅限 Agent 的 Skill 分开。双语成对（EN/ZH）内容一致。
+
+| 文档 | 覆盖内容 |
+|------|----------|
+| [技术实现报告](docs/technical-implementation_zh.md) · [English](docs/technical-implementation.md) | 整机报告：四层架构、daemon、原生 host、Skill 录制器子系统、安全模型、发布、测试矩阵、CI/CD |
+| [Windows 操控原理](docs/windows-control-internals_zh.md) · [English](docs/windows-control-internals.md) | host 如何驱动 Windows：原始 COM UIA、输入注入、窗口激活、截图/去重、方形网格、DPI 契约、安全门 |
+| [输入注入机制（论文级）](docs/input-injection-internals_zh.md) · [English](docs/input-injection-internals.md) | 输入注入专论：形式化坐标模型、不变量、动作状态机、部分插入恢复、UIPI 边界、证据与未证明项、和弦重构 |
+| [控制中心独立窗口](docs/control-center-window.md) | Edge `--app` 独立窗口的取舍与实现 |
+| [Skill 录制器设计](docs/skill-recorder-design.md) | 录制 → 编译 → 干跑 → 晋升证据包格式与设计 |
+| [自部署](docs/SELF_HOSTING_zh.md) · [English](docs/SELF_HOSTING.md) | 从源码运行 FastCUA |
+| [发行与更新](docs/RELEASING_zh.md) · [English](docs/RELEASING.md) | 版本号、ZIP manifest、回滚、更新策略 |
 
 ## 为什么是 FastCUA
 
