@@ -2,7 +2,8 @@
 //
 // Orchestrates stage-1 experiments for tools/record-feasibility against a live
 // FastCUA daemon + Notepad + the test fixture. All artifacts go to %TEMP%;
-// the printed summary is the input for docs/demonstration-recorder-feasibility.md.
+// the printed summary is evidence for the recorder evaluation described in
+// docs/TECHNICAL_PAPER.md.
 //
 // IMPORTANT honest limitation: on an unattended machine every programmatic
 // input source (SendInput/keybd_event/mouse_event/journal playback) is flagged

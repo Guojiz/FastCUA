@@ -764,8 +764,9 @@ async function main() {
     const readmeZhText = fs.readFileSync(path.join(ROOT, "README_zh.md"), "utf8");
     check("README documents Record a Skill (EN+ZH synced)",
       /Record a Skill/i.test(readmeText) && /录制技能/.test(readmeZhText), "");
-    const issueDraft = fs.readFileSync(path.join(ROOT, "docs", "issue-3-comment-draft.md"), "utf8");
-    check("issue #3 comment draft reports stages 2-5", /stages 2-5/i.test(issueDraft) && /dry-run/i.test(issueDraft), "");
+    const paper = fs.readFileSync(path.join(ROOT, "docs", "TECHNICAL_PAPER.md"), "utf8");
+    check("technical paper documents evidence-first recording and dry-run",
+      /Evidence-first Skill recording/i.test(paper) && /Dry-run re-resolves anchors/i.test(paper), "");
 
     const failed = results.filter((entry) => !entry.ok);
     log(`=== ${results.length - failed.length}/${results.length} skill-recorder validation checks passed ===`);

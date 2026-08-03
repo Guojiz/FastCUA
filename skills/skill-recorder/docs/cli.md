@@ -1,7 +1,8 @@
 # skill-recorder CLI reference
 
 Seven tools, one pipeline: `record → compile evidence → synthesize → lint → dry-run → review aids → promote`.
-Session format spec: repo `docs/skill-recorder-design.md` (`fastcua-recording/1`).
+The evidence model and trust boundaries are documented in repo
+`docs/TECHNICAL_PAPER.md`, section 9. Session format: `fastcua-recording/1`.
 
 ## 1. Recorder — `tools/skill-recorder/target/release/skill-recorder.exe`
 

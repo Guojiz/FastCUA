@@ -163,6 +163,6 @@ installed `SKILL.md` and tell the user whether their host must reload.
 
 ## Reference
 
-Read `docs/cli.md` for exact flags and exit codes. Read repo
-`docs/skill-recorder-design.md` for formats, trust boundaries, and media
-handling.
+Read `docs/cli.md` for exact flags and exit codes. Read the repository
+technical paper, section 9, for the evidence model, trust boundaries, and
+media-handling rationale.
