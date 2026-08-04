@@ -142,7 +142,7 @@ Then copy the complete `skills\computer-use` directory into the active agent's S
 
 ## Boundaries
 
-FastCUA currently targets Windows 11 x64. UAC, Secure Desktop, authentication dialogs, password managers, Windows Security, higher-integrity processes, protected surfaces, and applications with unusual capture/accessibility behavior are outside the normal path. Synthetic input is not hardware input, and the current key-chord implementation still uses the superseded `keybd_event` API. The repository also retains legacy npm and separate-model code that is no longer the recommended design; its removal and the other implementation gaps are tracked in [Next design](docs/NEXT_DESIGN.md).
+FastCUA currently targets Windows 11 x64. UAC, Secure Desktop, authentication dialogs, password managers, Windows Security, higher-integrity processes, protected surfaces, and applications with unusual capture/accessibility behavior are outside the normal path. Synthetic input is not hardware input, and the current key-chord implementation still uses the superseded `keybd_event` API. Remaining input, provider, capture, IPC, and evaluation work is tracked in [Next design](docs/NEXT_DESIGN.md).
 
 ## Uninstall
 
