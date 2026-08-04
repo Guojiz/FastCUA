@@ -11,24 +11,19 @@ permissions:
 jobs:
   windows-release:
     runs-on: windows-latest
-    env:
-      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          registry-url: 'https://registry.npmjs.org'
+        with: { node-version: '22' }
       - name: Confirm every component matches the tag
         shell: pwsh
         run: |
           $expected = '${{ github.ref_name }}'.TrimStart('v')
           $manifest = (Get-Content runtime-manifest.json -Raw | ConvertFrom-Json).version
-          $package = (Get-Content package.json -Raw | ConvertFrom-Json).version
           $host = (Select-String -Path native-host/Cargo.toml -Pattern '^version = "([^"]+)"$').Matches[0].Groups[1].Value
           $recorder = (Select-String -Path tools/skill-recorder/Cargo.toml -Pattern '^version = "([^"]+)"$').Matches[0].Groups[1].Value
-          foreach ($entry in @{ manifest=$manifest; package=$package; nativeHost=$host; recorder=$recorder }.GetEnumerator()) {
+          foreach ($entry in @{ manifest=$manifest; nativeHost=$host; recorder=$recorder }.GetEnumerator()) {
             if ($entry.Value -ne $expected) { throw "$($entry.Key) version $($entry.Value) does not match tag $expected" }
           }
       - name: Static checks and contracts
@@ -46,7 +41,7 @@ jobs:
           node tests/runtime-release-contract.mjs
           node tests/runtime-identity-integration.mjs
           node tests/server-lifecycle.mjs
-          node tests/skill-writer-contract.mjs
+          node tests/skill-authoring-contract.mjs
           [scriptblock]::Create((Get-Content install.ps1 -Raw)) | Out-Null
           [scriptblock]::Create((Get-Content scripts/manage.ps1 -Raw)) | Out-Null
           [scriptblock]::Create((Get-Content scripts/build-release.ps1 -Raw)) | Out-Null
@@ -68,9 +63,3 @@ jobs:
             dist/SHA256SUMS.txt
             dist/runtime-manifest.json
             dist/install.ps1
-      - name: Publish npm CLI when NPM_TOKEN is configured
-        if: ${{ env.NODE_AUTH_TOKEN != '' }}
-        shell: pwsh
-        run: |
-          $PSNativeCommandUseErrorActionPreference = $true
-          npm publish --access public

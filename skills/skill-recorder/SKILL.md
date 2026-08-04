@@ -98,8 +98,8 @@ guess through a redaction gap.
 Write `skill-draft/<skill-name>/SKILL.md` directly. Use natural, imperative
 instructions rather than a macro. The frontmatter must declare
 `verified: false` until dry-run succeeds. Every step, step warning, parameter,
-and session warning must retain its evidence citation. Do not invoke
-`synthesize.mjs`; it belongs to the retired separate-model design.
+and session warning must retain its evidence citation. Do not invoke a
+secondary-model synthesis step; the current primary agent owns the draft.
 
 Run provenance lint before accepting the draft:
 

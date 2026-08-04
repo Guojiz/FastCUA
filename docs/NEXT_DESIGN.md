@@ -43,9 +43,9 @@ The same model plans the task, operates Windows, reviews recorder evidence, and 
 - This document: implementation mismatches, migrations, and acceptance criteria.
 - Skill/API references: exact instructions required by the current recommended path.
 
-## 2. Gap A — remove npm from the product
+## 2. Gap A — remove the legacy package-manager path (implemented)
 
-### Current mismatch
+### Resolved mismatch (2026-08-04)
 
 The PowerShell/GitHub Release installer already performs the real installation, checksum verification, update, and rollback. The repository nevertheless retains an npm wrapper and several npm-facing messages:
 
@@ -56,7 +56,7 @@ The PowerShell/GitHub Release installer already performs the real installation, 
 
 These paths duplicate the actual release system and make the installation story ambiguous.
 
-### Required implementation
+### Implemented changes
 
 1. Replace every generated `npx fastcua doctor/check/update` instruction with the installed PowerShell entry point.
 2. Remove npm-specific copy from the console, scripts, tests, and website.
@@ -72,9 +72,9 @@ These paths duplicate the actual release system and make the installation story 
 - installer/update/rollback contract tests pass without `package.json` or `bin/fastcua.mjs`.
 - generated desktop setup instructions contain only PowerShell maintenance commands.
 
-## 3. Gap B — remove the separate-model architecture
+## 3. Gap B — remove the separate-model architecture (implemented)
 
-### Current mismatch
+### Resolved mismatch (2026-08-04)
 
 An earlier recorder design added a dedicated OpenAI-compatible Skill writer, a second transcription model, API-key storage, provider/model fields in the control center, and automatic audio fallbacks. The remaining implementation includes:
 
@@ -100,7 +100,7 @@ record demonstration
 
 Audio handling is simple: the active model understands the WAV directly, or the user provides typed notes. There is no transcription API fallback.
 
-### Required implementation
+### Implemented changes
 
 1. Make the current agent procedure in `skills/skill-recorder/SKILL.md` the only synthesis path.
 2. Keep `compile.mjs`, evidence formats, frame extraction, lint, dry-run, and gated promotion.
@@ -144,9 +144,9 @@ Measure task success, model turns, image bytes/tokens, median/p95 latency, human
 
 ## 5. Delivery order
 
-1. Remove npm-facing instructions and release publication.
-2. Switch recorder documentation and Skill procedure to the current primary agent.
-3. Remove separate writer/transcription code, settings, secrets, and tests.
-4. Re-run installer, release, recorder, Windows fixture, and Office end-to-end suites.
+1. [x] Remove package-manager-facing instructions and release publication.
+2. [x] Switch recorder documentation and Skill procedure to the current primary agent.
+3. [x] Remove separate writer/transcription code, settings, secrets, and tests.
+4. [ ] Re-run installer, release, recorder, Windows fixture, and Office end-to-end suites on a clean interactive Windows machine.
 5. Complete input, provider, capture, and IPC hardening.
 6. Publish comparative results only after the experiment is reproducible.

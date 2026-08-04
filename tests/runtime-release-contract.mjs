@@ -100,7 +100,6 @@ try {
     else process.env.FASTCUA_HOME = previousFastCuaHome;
   }
 
-  const packageJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
   const runtimeManifest = JSON.parse(
     fs.readFileSync(path.join(root, "runtime-manifest.json"), "utf8"),
   );
@@ -109,7 +108,6 @@ try {
     path.join(root, "tools", "skill-recorder", "Cargo.toml"),
     "utf8",
   );
-  assert.equal(packageJson.version, runtimeManifest.version);
   assert.match(nativeCargo, new RegExp(`^version = "${runtimeManifest.version}"$`, "m"));
   assert.match(recorderCargo, new RegExp(`^version = "${runtimeManifest.version}"$`, "m"));
   assert.equal(runtimeManifest.buildType, "development");

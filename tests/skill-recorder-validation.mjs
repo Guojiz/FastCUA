@@ -10,7 +10,7 @@
 // LABEL it injected, the compiler must flag it ⚠ unresolved, and the narration
 // notes (also injected, into the recorder's own dialog) must still be accepted
 // while the dialog's own keystrokes stay OUT of the demo stream.
-// Then compiles the session and asserts evidence + dedicated-writer contracts,
+// Then compiles the session and asserts evidence + current-primary-agent authoring contracts,
 // the media tracks (MJPEG AVI + frame index + best-effort WAV), the
 // frame-extract review aid (including the redaction gate), and the gated
 // promotion tool (refusals, forced unverified copy, overwrite).
@@ -469,22 +469,25 @@ async function main() {
       draft.steps.some((s) => (s.intent || []).some((t) => t.includes("report date")) || (s.text || "").includes("report date")),
       "");
 
-    // ---------------- evidence -> dedicated writer contract (stage 4) ----------------
+    // ---------------- evidence -> current primary agent contract (stage 4) ----------------
     const evidencePath = path.join(recDir, "evidence.json");
     const evidence = JSON.parse(fs.readFileSync(evidencePath, "utf8"));
     check("canonical evidence package generated",
       evidence.format === "fastcua-skill-evidence/1" && evidence.executable === false, evidence.format);
     const requestFile = path.join(recDir, "skill-draft", "fixture-report", "synthesis-request.json");
-    check("--skill writes a dedicated-subagent synthesis request", fs.existsSync(requestFile), requestFile);
+    check("--skill writes an inert primary-agent authoring request", fs.existsSync(requestFile), requestFile);
     const request = JSON.parse(fs.readFileSync(requestFile, "utf8"));
-    check("synthesis request points to evidence and future SKILL.md",
-      request.writer === "dedicated-subagent" && /evidence\.json$/i.test(request.evidence)
+    check("authoring request points to complete evidence and future SKILL.md",
+      request.writer === "current-primary-agent" && /evidence\.json$/i.test(request.evidence)
+        && /evidence\.json$/i.test(request.inputs?.evidence_json)
+        && /evidence\.md$/i.test(request.inputs?.evidence_markdown)
+        && /draft\.md$/i.test(request.inputs?.replay_draft)
         && /SKILL\.md$/i.test(request.output), JSON.stringify(request));
     const skillFile = path.join(recDir, "skill-draft", "fixture-report", "SKILL.md");
     check("mechanical compiler does not write SKILL.md", !fs.existsSync(skillFile), skillFile);
 
     // A deterministic local candidate exercises the same lint/promotion gates;
-    // tests/skill-writer-contract.mjs separately mocks the real subagent API.
+    // tests/skill-authoring-contract.mjs separately verifies the model-independent authoring gate.
     const skillLines = [
       "---",
       "name: fixture-report",
@@ -526,7 +529,7 @@ async function main() {
     fs.writeFileSync(skillFile, skillLines.join("\n"));
     const LINT = path.join(ROOT, "tools", "skill-recorder", "lint-skill.mjs");
     const lint = spawnSync(process.execPath, [LINT, skillFile, "--evidence", evidencePath], { encoding: "utf8" });
-    check("dedicated-writer Skill passes evidence provenance lint", lint.status === 0, lint.stderr || lint.stdout);
+    check("primary-agent Skill passes evidence provenance lint", lint.status === 0, lint.stderr || lint.stdout);
     const skill = fs.readFileSync(skillFile, "utf8");
     check("frontmatter: name + trigger description + verified:false",
       /^---\nname: fixture-report\ndescription: .+\nverified: false\n---/.test(skill), "");

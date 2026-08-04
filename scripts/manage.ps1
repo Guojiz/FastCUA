@@ -149,8 +149,7 @@ function New-LocalRuntime([string]$SourceRoot, [string]$StageRoot) {
     'config.json', 'runtime-manifest.json', 'lib', 'skills', 'scripts/manage.ps1',
     'tools/skill-recorder/compile.mjs', 'tools/skill-recorder/dryrun.mjs',
     'tools/skill-recorder/frame-extract.mjs', 'tools/skill-recorder/lint-skill.mjs',
-    'tools/skill-recorder/promote.mjs', 'tools/skill-recorder/synthesize.mjs',
-    'tools/skill-recorder/writer-config.mjs'
+    'tools/skill-recorder/promote.mjs'
   )) {
     Copy-RuntimeFile $sourceResolved $StageRoot $relative
   }
@@ -255,7 +254,7 @@ After reloading the client, call runtime_info and list_apps. runtime_info must r
    version: $($Manifest.version)
 
 If runtime_info reports another directory or version, stop and run:
-   npx fastcua doctor
+   & "$appDir\install.ps1" -Action Doctor
 
 Do not install a forwarding or shortened SKILL.md. Do not expose the local pipe or control center outside this computer.
 "@
