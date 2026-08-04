@@ -39,8 +39,7 @@ try {
     'config.json', 'runtime-manifest.json', 'lib', 'skills', 'scripts/manage.ps1',
     'tools/skill-recorder/compile.mjs', 'tools/skill-recorder/dryrun.mjs',
     'tools/skill-recorder/frame-extract.mjs', 'tools/skill-recorder/lint-skill.mjs',
-    'tools/skill-recorder/promote.mjs', 'tools/skill-recorder/synthesize.mjs',
-    'tools/skill-recorder/writer-config.mjs'
+    'tools/skill-recorder/promote.mjs'
   )) {
     $source = Join-Path $root $relative
     $destination = Join-Path $stage $relative

@@ -44,8 +44,11 @@ assert.match(web, /state\.update\?\.status === 'available'/);
 assert.doesNotMatch(configText, /^\uFEFF/, "config.json must remain directly JSON.parse-compatible");
 assert.equal(config.approvalPolicy, "safe");
 assert.equal(config.checkForUpdates, true);
-assert.equal(config.skillWriter?.enabled, false);
-assert.equal(Object.hasOwn(config.skillWriter || {}, "apiKey"), false);
+assert.equal(Object.hasOwn(config, "skillWriter"), false);
+const packageManagerWord = new RegExp("\\bn" + "(?:pm|px)", "i");
+assert.doesNotMatch(manager, packageManagerWord);
+assert.doesNotMatch(releaseBuilder, packageManagerWord);
+assert.doesNotMatch(web, packageManagerWord);
 assert.ok(
   !config.whitelist.some((entry) =>
     /^(?:windowsterminal|cmd|powershell|pwsh|claude|chatgpt)\.exe$/i.test(entry),

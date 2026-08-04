@@ -263,7 +263,7 @@ The daemon maps these states to stable `[control_plane:*]` tags. Pause, stop, sh
 
 ### 7.3 Local console
 
-The control center binds to `127.0.0.1`. Mutating browser requests must have no `Origin` header or an exact loopback same-port origin; body sizes are capped and responses use restrictive content headers. The standalone console is an Edge `--app` wrapper around the same local page, not a remote service. The recommended single-model architecture requires no separate writer credential in this console. The repository still contains an older writer-key interface; it is legacy code scheduled for removal in [Next design](NEXT_DESIGN.md).
+The control center binds to `127.0.0.1`. Mutating browser requests must have no `Origin` header or an exact loopback same-port origin; body sizes are capped and responses use restrictive content headers. The standalone console is an Edge `--app` wrapper around the same local page, not a remote service. No separate model credential or synthesis endpoint is present in this console.
 
 ### 7.4 Residual local risk
 
@@ -298,7 +298,7 @@ flowchart TB
 
 The recorder captures low-level keyboard/mouse events, foreground identity, focus snapshots, point anchors, sparse keyframes, optional local video/audio, and typed notes. Password focus removes key content and suppresses visual frames; secure desktop is not recorded. The compiler deterministically creates evidence and draft artifacts, preserves unresolved steps, infers parameters with provenance, and never writes `SKILL.md` itself.
 
-The active agent reads `evidence.json`/`evidence.md`, inspects only the non-redacted frames or audio it needs, and writes `SKILL.md` inside the draft directory. Every step, parameter, and warning must retain its evidence citation. Provenance lint rejects missing or fabricated evidence. Dry-run re-resolves anchors in a restarted application, substitutes new parameter values, refuses out-of-scope applications, skips redacted steps, and stops on unresolved anchors or control-plane interruption. Promotion requires an explicit review attestation; unverified Skills require an additional override. The older `synthesize.mjs`, writer API, transcription model, and secret configuration are not part of this recommended path and are tracked for deletion in [Next design](NEXT_DESIGN.md).
+The active agent reads `evidence.json`/`evidence.md`, inspects only the non-redacted frames or audio it needs, and writes `SKILL.md` inside the draft directory. Every step, parameter, and warning must retain its evidence citation. Provenance lint rejects missing or fabricated evidence. Dry-run re-resolves anchors in a restarted application, substitutes new parameter values, refuses out-of-scope applications, skips redacted steps, and stops on unresolved anchors or control-plane interruption. Promotion requires an explicit review attestation; unverified Skills require an additional override. FastCUA does not route this evidence through a separately configured model or transcription service.
 
 ### 9.3 Recorder limits
 
@@ -325,7 +325,7 @@ This report uses four evidence classes:
 | `control-plane-integration.mjs` | origin rejection, pause/resume, approvals, disconnect cleanup, interjection |
 | `protocol-regression.mjs` | live native observation/actions and failure responses |
 | `real-machine-validation.mjs` | Notepad/fixture UIA, capture/grid, hung providers, scale inversion, click snapping, UIA profile recovery |
-| `skill-writer-contract.mjs` | regression coverage for the legacy separate-writer subsystem pending removal |
+| `skill-authoring-contract.mjs` | deterministic evidence-citation acceptance/rejection and absence of secondary-model configuration |
 | `skill-recorder-validation.mjs` | redaction, media containers, evidence compilation, replay, scope refusal, promotion gates |
 | `office-demo-e2e.mjs` | recorded Office workflow replayed with new values and output verification |
 
@@ -377,9 +377,9 @@ Future releases should apply an explicit current-user access control list to the
 
 ### 11.5 Distribution and model architecture
 
-The intended user path is the PowerShell bootstrapper plus verified GitHub Release artifacts. npm is not a supported or recommended installation path. The current repository still carries `package.json`, `bin/fastcua.mjs`, npm-oriented strings, and an optional npm publication step; these are implementation residue, not a second supported distribution.
+The supported user path is the PowerShell bootstrapper plus verified GitHub Release artifacts. Installation, diagnosis, updates, rollback, and uninstall all use the installed PowerShell entry point; no alternative package-manager bootstrap or publication path is shipped.
 
-Likewise, the intended agent path is one full-capability primary model. The current daemon and console still expose separate writer/provider/transcription settings and the release still ships those tools. The documentation does not present those settings as architecture. The exact removal plan and acceptance criteria for both mismatches are in [Next design](NEXT_DESIGN.md).
+The supported agent path is one full-capability primary model. The daemon, console, release package, and recorder contain no provider, transcription, secondary-model, or separate credential configuration. The active agent keeps task context through operation, evidence review, Skill writing, lint, dry-run, and promotion.
 
 ### 11.6 Empirical evaluation
 
@@ -447,7 +447,7 @@ Tests that move the pointer or type into applications require an interactive des
 
 ### 12.5 Release and rollback
 
-The canonical release is a versioned Windows runtime ZIP, checksum file, manifest, and PowerShell installer published through GitHub Releases. A `v*` tag triggers the Windows workflow that runs checks and builds those artifacts. The current workflow also validates `package.json` and can publish an npm bootstrap package; that is a known mismatch, not part of the target release contract, and is scheduled for removal in [Next design](NEXT_DESIGN.md).
+The canonical release is a versioned Windows runtime ZIP, checksum file, manifest, and PowerShell installer published through GitHub Releases. A `v*` tag triggers the Windows workflow, validates the manifest and both Rust component versions against the tag, runs the contract checks, and builds those artifacts.
 
 Installed updates use a staging directory, verify file hashes from the manifest, atomically replace the application directory, and keep `app.previous` for rollback. Development checkouts are never overwritten by the release updater.
 
