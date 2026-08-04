@@ -130,6 +130,9 @@ record → compile evidence → current primary agent writes → provenance lint
 
 Password fields and secure-desktop moments are redacted. The current primary agent writes the Skill from evidence; lint, dry-run, application scope, and explicit promotion approval remain hard gates. See `skills/skill-recorder/` and the [technical paper](docs/TECHNICAL_PAPER.md#9-evidence-first-skill-recording).
 
+> [!NOTE]
+> Using the Skill Recorder may send recorded screen content, interaction evidence, and narration to the configured cloud model provider.
+
 ## Develop from source
 
 ```powershell

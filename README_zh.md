@@ -86,322 +86,73 @@ Skill 或 MCP 缺少任何一个，安装都不完整。
 ### 验证与更新
 
 ```powershell
-& "$env:LOCALAPPDATA\FastCUA\asͼ��h��춻�q�^wn。',
-    copy: '复制', copied: '已复制',
-    deployNote: '使用无 Display Overlay 的 native host 时，请将二进制保留在本机，并把 overlayEnabled 设为 false。验证与安全说明见自部署指南。',
-    emptyActivity: '等待下一次桌面操作', emptyApproved: '还没有审批记录',
-    helperLive: '原生 helper 在线', helperIdle: '等待第一条请求',
-    unavailable: '无法连接', tryAgain: '请启动 daemon 后重试',
-  },
-  en: {
-    brandSub: 'Desktop automation control plane', connecting: 'Connecting', online: 'Local daemon connected', offline: 'Daemon offline',
-    navConsole: 'Control center', navDeploy: 'Self-host',
-    eyebrow: 'A persistent desktop control plane',
-    heroTitle: 'One warm helper. Every desktop action stays in rhythm.',
-    heroBody: 'FastCUA keeps a single native host alive so every connected client can automate the desktop with less setup and more continuity.',
-    kpiWarm: 'shared warm helper', kpiProtocol: 'transparent local protocol', kpiStop: 'instant turn recovery',
-    statusTitle: 'System pulse', statusWaiting: 'Waiting for daemon', statusLive: 'Ready for desktop actions',
-    statusPaused: 'Paused by user', statusApproval: 'Awaiting approval',
-    portLabel: 'Local endpoint',
-    metricClients: 'Connected clients', metricClientsHint: 'shared session count',
-    metricHelper: 'Native helper', metricHelperHint: 'one cursor, one state',
-    metricApproved: 'Approved apps', metricApprovedHint: 'cached across clients',
-    metricUptime: 'Uptime', metricUptimeHint: 'daemon lifetime',
-    activityTitle: 'Action timeline', activityBody: 'Recent requests across connected clients.',
-    approvedTitle: 'Approval memory', approvedBody: 'Apps approved for the shared helper.',
-    refresh: 'Refresh', clear: 'Clear',
-    runtimeTitle: 'Runtime & safety',
-    runtimeBody: 'Settings stay local. Port and helper path changes need a daemon restart.',
-    pause: 'Pause control', resume: 'Resume control', killHelper: 'Stop helper', shutdown: 'Exit FastCUA', restart: 'Restart daemon',
-    allowOnce: '1 · Allow once', trustApp: '2 · Always approve', fullAccess: '3 · Full access', deny: '4 · Deny',
-    costartLabel: 'Start policy', costartClaude: 'On demand', costartLogin: 'At sign-in', costartManual: 'Manual',
-    costartDesc: { claude: 'Starts on the first MCP request.', login: 'Stays available after Windows sign-in.', manual: 'Runs only when you start the daemon.' },
-    approvalLabel: 'Approval policy', approvalSafe: 'Safe access', approvalFull: 'Full access',
-    approvalHelp: 'Safe: unknown apps need approval. Full: no prompts (high risk).',
-    idleLabel: 'Idle shutdown (minutes)', idleHelp: 'Use 0 to keep the daemon alive.',
-    portHelp: 'Restart the daemon after changing this value.',
-    helperLabel: 'Native helper path', helperHelp: 'Leave empty to auto-discover; CUA_BIN takes precedence.',
-    overlayLabel: 'Enable FastCUA status overlay', overlayHelp: 'Disable when using the native no-display host.',
-    overlayTitleLabel: 'Overlay title',
-    whitelistLabel: 'Whitelist', whitelistHelp: 'One executable name or absolute path per line.',
-    save: 'Save settings', saved: 'Saved', localOnly: 'Runs locally on your Windows desktop',
-    deployEyebrow: 'Repeatable self-hosting',
-    deployTitle: 'From clone to first desktop action in four clear steps.',
-    deployBody: 'A local daemon, a compatible native helper, and one MCP entry point. No cloud control plane required.',
-    step1Title: 'Prepare Windows', step1Body: 'Install Node.js 18+ and place a compatible helper on the machine.',
-    step2Title: 'Clone and configure', step2Body: 'Set the helper path in config.json or use CUA_BIN for a local override.',
-    step3Title: 'Start the control plane', step3Body: 'Run the daemon, then verify its local health endpoint before connecting a client.',
-    quickStartTitle: 'Quick start', quickStartBody: 'Built for copy, paste, verify.',
-    mcpTitle: 'Connect an MCP client', mcpBody: 'Point your client to the thin stdio server; it reuses the shared daemon.',
-    copy: 'Copy', copied: 'Copied',
-    deployNote: 'For the native no-display host, keep the binary local and set overlayEnabled to false. See the self-hosting guide for verification and safety notes.',
-    emptyActivity: 'Waiting for the next desktop action', emptyApproved: 'No approvals yet',
-    helperLive: 'Native helper online', helperIdle: 'Waiting for first request',
-    unavailable: 'Unavailable', tryAgain: 'Start the daemon and try again',
-  }
-};
+& "$env:LOCALAPPDATA\FastCUA\app\install.ps1" -Action Doctor
+& "$env:LOCALAPPDATA\FastCUA\app\install.ps1" -Action Check
+& "$env:LOCALAPPDATA\FastCUA\app\install.ps1" -Action Update
+```
 
-const $ = (id) => document.getElementById(id);
-let cfg = {};
-let lang = localStorage.getItem('fastcua-lang') || ((navigator.language || '').startsWith('zh') ? 'zh' : 'en');
-let events = [];
-let pendingApproval = null;
+在 MCP 内调用 `runtime_info`，确认实际使用的 server、daemon、原生 host、版本、提交、管道和数据目录。
 
-const t = (k) => {
-  const v = I18N[lang] && I18N[lang][k];
-  return v == null ? k : v;
-};
+## 人类控制
 
-const api = (path, body) => fetch(path, body ? {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify(body),
-} : undefined).then(async (r) => {
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
-});
+| 按键 | 操作 |
+|---|---|
+| `F7` | 暂停并打开控制中心 |
+| `F8` | 暂停或继续 |
+| `F9` | 暂停并插话 |
+| `F10` | 退出 FastCUA |
 
-function applyLanguage() {
-  document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
-  document.title = 'FastCUA · ' + (lang === 'zh' ? '控制中心' : 'Control Center');
-  $('locale').textContent = lang === 'zh' ? 'EN' : '中文';
-  document.querySelectorAll('[data-i18n]').forEach((el) => {
-    const v = t(el.dataset.i18n);
-    if (typeof v === 'string') el.textContent = v;
-  });
-  if (cfg.costartMode && t('costartDesc') && typeof t('costartDesc') === 'object') {
-    $('costart-desc').textContent = t('costartDesc')[cfg.costartMode] || '';
-  }
-  renderEvents();
-}
+本地控制中心位于 `http://127.0.0.1:8420`。安全模式在操作未知应用前会请求审批；信任采用精确应用身份，而不是模糊名称匹配。
 
-function selectSegment(id, value) {
-  const group = $(id);
-  if (!group) return;
-  [...group.children].forEach((button) => button.classList.toggle('active', button.dataset.v === value));
-  group.onclick = (e) => {
-    if (!e.target.dataset.v) return;
-    [...group.children].forEach((button) => button.classList.remove('active'));
-    e.target.classList.add('active');
-    if (id === 'costart' && t('costartDesc') && typeof t('costartDesc') === 'object') {
-      $('costart-desc').textContent = t('costartDesc')[e.target.dataset.v] || '';
-    }
-  };
-}
+## 视觉点击示例
 
-function renderEvents() {
-  const box = $('activity');
-  box.replaceChildren();
-  if (!events.length) {
-    const e = document.createElement('div');
-    e.className = 'empty';
-    e.textContent = t('emptyActivity');
-    box.append(e);
-    return;
-  }
-  events.slice(-40).reverse().forEach((event) => {
-    const row = document.createElement('div');
-    row.className = 'event';
-    const dot = document.createElement('span');
-    dot.className = 'event-dot ' + (event.ok === false ? 'bad' : event.type === 'action_end' ? 'ok' : '');
-    const text = document.createElement('div');
-    const a = document.createElement('div');
-    a.className = 'action';
-    a.textContent = event.action || event.type || 'event';
-    const s = document.createElement('div');
-    s.className = 'summary';
-    s.textContent = event.summary || event.error || event.client || '';
-    text.append(a, s);
-    const time = document.createElement('time');
-    time.textContent = new Date(event.ts || Date.now()).toLocaleTimeString([], {
-      hour: '2-digit', minute: '2-digit', second: '2-digit',
-    });
-    row.append(dot, text, time);
-    box.append(row);
-  });
-}
+假设 `window` 来自 `list_windows`：
 
-function renderApproved(apps) {
-  const box = $('approved');
-  box.replaceChildren();
-  if (!apps || !apps.length) {
-    const empty = document.createElement('span');
-    empty.className = 'muted';
-    empty.textContent = t('emptyApproved');
-    box.append(empty);
-    return;
-  }
-  apps.forEach((app) => {
-    const chip = document.createElement('span');
-    chip.className = 'chip';
-    chip.textContent = app;
-    box.append(chip);
-  });
-}
+```js
+let view = await sky.grid_view({ window });       // 看图，选择 4 号格
+view = await sky.grid_refine({
+  window,
+  grid: view.grid,
+  cell: "4",
+});                                               // 看图，选择 5 号格
+await sky.click_cell({ window, grid: view.grid, cell: "5" });
+await sky.close();
+```
 
-function setPulse(state) {
-  const control = state.controlState || 'running';
-  const hasPending = (state.pendingApprovals || []).length > 0;
-  if (control === 'paused_by_user') {
-    $('dot').className = 'dot paused';
-    $('big-status').textContent = t('statusPaused');
-    $('status-copy').textContent = t('statusPaused');
-    $('act-pause').hidden = true;
-    $('act-resume').hidden = false;
-  } else if (hasPending || control === 'awaiting_approval') {
-    $('dot').className = 'dot approval';
-    $('big-status').textContent = t('statusApproval');
-    $('status-copy').textContent = t('statusApproval');
-    $('act-pause').hidden = false;
-    $('act-resume').hidden = true;
-  } else {
-    $('dot').className = 'dot live';
-    $('big-status').textContent = state.binaryPid ? t('helperLive') : t('helperIdle');
-    $('status-copy').textContent = state.binaryPid ? t('statusLive') : t('statusWaiting');
-    $('act-pause').hidden = false;
-    $('act-resume').hidden = true;
-  }
-  pendingApproval = (state.pendingApprovals || [])[0] || null;
-  const callout = $('approval-callout');
-  if (pendingApproval) {
-    callout.hidden = false;
-    $('pending-app').textContent = pendingApproval.app || pendingApproval.summary || 'app';
-  } else {
-    callout.hidden = true;
-  }
-}
+## 录制技能（预览）
 
-async function load() {
-  cfg = await api('/api/config');
-  selectSegment('costart', cfg.costartMode || 'claude');
-  selectSegment('approval', cfg.approvalPolicy === 'full' ? 'full' : 'safe');
-  $('idle').value = cfg.idleTimeoutMin;
-  $('port').value = cfg.port;
-  $('whitelist').value = (cfg.whitelist || []).join('\n');
-  $('overlay-en').checked = cfg.overlayEnabled !== false;
-  $('overlay-title').value = cfg.overlayTitle || '';
-  $('cuabin').value = cfg.cuaBinPath || '';
-  applyLanguage();
-}
+可选录制器会先把演示变成可审计证据包，再允许写出 Skill：
 
-async function refresh() {
-  try {
-    const [state, feed] = await Promise.all([
-      api('/api/state'),
-      api('/api/events?since=0'),
-    ]);
-    events = feed.events || [];
-    $('connection').textContent = t('online');
-    const version = state.runtime?.version || '—';
-    $('version-pill').textContent = state.update?.status === 'available'
-      ? `v${version} → v${state.update.latestVersion}`
-      : `v${version}`;
-    $('version-pill').title = state.update?.status === 'available'
-      ? 'Update available - run & "$env:LOCALAPPDATA\\FastCUA\\app\\install.ps1" -Action Update'
-      : (state.runtime?.root || '');
-    $('endpoint').textContent = '127.0.0.1:' + (cfg.port || 8420);
-    $('s-clients').textContent = state.clients;
-    $('s-binary').textContent = state.binaryPid ? (lang === 'zh' ? '运行' : 'Live') : (lang === 'zh' ? '空闲' : 'Idle');
-    $('s-approved').textContent = (state.approvedApps || []).length;
-    $('s-uptime').textContent = state.uptime || '—';
-    setPulse(state);
-    renderApproved(state.approvedApps || []);
-    renderEvents();
-  } catch {
-    $('dot').className = 'dot';
-    $('connection').textContent = t('offline');
-    $('big-status').textContent = t('unavailable');
-    $('status-copy').textContent = t('tryAgain');
-    $('act-pause').hidden = false;
-    $('act-resume').hidden = true;
-    $('approval-callout').hidden = true;
-  }
-}
+```text
+录制 → 编译证据 → 当前主 Agent 写 Skill → 来源校验
+     → 用新参数 dry-run → 人工审阅后安装
+```
 
-async function save() {
-  const costart = [...$('costart').children].find((b) => b.classList.contains('active'))?.dataset.v;
-  const approval = [...$('approval').children].find((b) => b.classList.contains('active'))?.dataset.v;
-  cfg = await api('/api/config', {
-    costartMode: costart,
-    approvalPolicy: approval,
-    idleTimeoutMin: +$('idle').value,
-    port: +$('port').value,
-    whitelist: $('whitelist').value.split('\n').map((s) => s.trim()).filter(Boolean),
-    bannerEnabled: !!cfg.bannerEnabled,
-    overlayEnabled: $('overlay-en').checked,
-    overlayTitle: $('overlay-title').value,
-    overlayLanguage: cfg.overlayLanguage || 'auto',
-    cuaBinPath: $('cuabin').value.trim(),
-  });
-  $('saved').classList.add('show');
-  setTimeout(() => $('saved').classList.remove('show'), 1500);
-  applyLanguage();
-  await refresh();
-}
+密码框和安全桌面时刻会被遮蔽。当前主 Agent 根据证据写 Skill；来源校验、dry-run、应用范围和明确的安装审批都是硬门禁。详见 `skills/skill-recorder/` 与[技术论文](docs/TECHNICAL_PAPER.md#9-evidence-first-skill-recording)。
 
-async function control(action, token) {
-  await api('/api/action', { action, token });
-  await refresh();
-}
+> [!NOTE]
+> 使用 Skill Recorder 时，录制的屏幕内容、操作证据和旁白可能会发送给所使用的云端模型提供商。
 
-document.querySelectorAll('.nav button').forEach((button) => {
-  button.onclick = () => {
-    document.querySelectorAll('.nav button').forEach((b) => b.classList.toggle('active', b === button));
-    document.querySelectorAll('.view').forEach((v) => v.classList.toggle('active', v.id === button.dataset.view));
-  };
-});
-$('locale').onclick = () => {
-  lang = lang === 'zh' ? 'en' : 'zh';
-  localStorage.setItem('fastcua-lang', lang);
-  applyLanguage();
-  refresh();
-};
-$('save').onclick = () => save().catch((error) => alert(error.message));
-$('act-pause').onclick = () => control('pause').catch((error) => alert(error.message));
-$('act-resume').onclick = () => control('resume').catch((error) => alert(error.message));
-$('approve-once').onclick = () => pendingApproval && control('allowOnce', pendingApproval.token).catch((e) => alert(e.message));
-$('approve-trust').onclick = () => pendingApproval && control('alwaysApprove', pendingApproval.token).catch((e) => alert(e.message));
-$('approve-full').onclick = () => pendingApproval && control('fullAccess', pendingApproval.token).catch((e) => alert(e.message));
-$('approve-deny').onclick = () => pendingApproval && control('denyApproval', pendingApproval.token).catch((e) => alert(e.message));
-$('act-shutdown').onclick = () => api('/api/action', { action: 'shutdown' }).catch(() => {});
-$('act-restart').onclick = () => api('/api/action', { action: 'restart' }).catch(() => {});
-$('act-killbin').onclick = () => control('killBinary').catch((error) => alert(error.message));
-$('act-clear').onclick = () => control('clearApprovals').catch((error) => alert(error.message));
-$('clear-events').onclick = refresh;
-document.querySelectorAll('.copy').forEach((button) => {
-  button.onclick = async () => {
-    try {
-      await navigator.clipboard.writeText($(button.dataset.copy).textContent);
-      const before = button.textContent;
-      button.textContent = t('copied');
-      setTimeout(() => { button.textContent = before; }, 1200);
-    } catch {}
-  };
-});
+## 从源码开发
 
-// Approval keyboard: 1 once / 2 always / 3 full access / 4 deny (skip when typing in a field)
-document.addEventListener('keydown', (event) => {
-  if (!pendingApproval) return;
-  const tag = (event.target && event.target.tagName || '').toLowerCase();
-  if (tag === 'input' || tag === 'textarea' || tag === 'select' || event.target?.isContentEditable) return;
-  if (event.key === '1') {
-    event.preventDefault();
-    control('allowOnce', pendingApproval.token).catch((e) => alert(e.message));
-  } else if (event.key === '2') {
-    event.preventDefault();
-    control('alwaysApprove', pendingApproval.token).catch((e) => alert(e.message));
-  } else if (event.key === '3') {
-    event.preventDefault();
-    control('fullAccess', pendingApproval.token).catch((e) => alert(e.message));
-  } else if (event.key === '4') {
-    event.preventDefault();
-    control('denyApproval', pendingApproval.token).catch((e) => alert(e.message));
-  }
-});
+```powershell
+git clone https://github.com/Guojiz/FastCUA.git
+cd FastCUA
+.\native-host\build.ps1
+```
 
-load().then(refresh).catch(refresh);
-setInterval(refresh, 1500);
-</script>
+然后把完整 `skills\computer-use` 目录复制到当前 Agent 的 Skill 目录，并把 `server.mjs` 的绝对路径配置为 stdio MCP Server。用 `runtime_info` 验证当前 checkout。复现命令与测试矩阵见[技术论文](docs/TECHNICAL_PAPER.md#12-reproduction-and-operation)。
 
-</body>
-</html>
+## 使用边界
+
+FastCUA 当前面向 Windows 11 x64。UAC、安全桌面、认证对话框、密码管理器、Windows 安全中心、更高完整性进程、受保护画面，以及具有特殊截图/无障碍行为的应用，不属于正常工作路径。合成输入不等同于硬件输入，当前组合键实现仍使用已被取代的 `keybd_event` API。剩余的输入、provider、截图、IPC 与评测工作记录在[下一步设计](docs/NEXT_DESIGN.md)中。
+
+## 卸载
+
+```powershell
+& "$env:LOCALAPPDATA\FastCUA\app\uninstall.ps1"
+```
+
+## 许可证
+
+MIT，见 [LICENSE](LICENSE)。
