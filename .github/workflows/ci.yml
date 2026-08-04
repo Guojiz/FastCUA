@@ -55,6 +55,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node --check tests/site-contract.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --check tests/release-workflow-contract.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node tests/installer-contract.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node tests/runtime-release-contract.mjs
@@ -64,6 +66,8 @@ jobs:
           node tests/server-lifecycle.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node tests/site-contract.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node tests/release-workflow-contract.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           [scriptblock]::Create((Get-Content install.ps1 -Raw)) | Out-Null
           [scriptblock]::Create((Get-Content scripts/manage.ps1 -Raw)) | Out-Null

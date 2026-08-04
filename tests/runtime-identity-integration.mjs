@@ -7,6 +7,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 
 const root = path.resolve(new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
+const expectedVersion = JSON.parse(fs.readFileSync(path.join(root, "runtime-manifest.json"), "utf8")).version;
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "fastcua-identity-"));
 const pipe = `\\\\.\\pipe\\fastcua-identity-${crypto.randomUUID()}`;
 
@@ -94,7 +95,7 @@ try {
   });
   socket.destroy();
   assert.equal(result.error, undefined);
-  assert.equal(result.result.version, "0.3.0");
+  assert.equal(result.result.version, expectedVersion);
   assert.equal(result.result.buildType, "development");
   assert.equal(path.resolve(result.result.root), root);
   assert.equal(result.result.pipe, pipe);

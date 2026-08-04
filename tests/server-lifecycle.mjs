@@ -2,8 +2,12 @@
 
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
+
+const root = path.resolve(new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
+const expectedVersion = JSON.parse(fs.readFileSync(path.join(root, "runtime-manifest.json"), "utf8")).version;
 
 const pipe = `\\\\.\\pipe\\fastcua-server-test-${process.pid}-${Date.now()}`;
 const calls = [];
@@ -96,7 +100,7 @@ function waitForChildExit() {
 try {
   const initialized = await rpc("initialize");
   assert.equal(initialized.serverInfo.name, "sky-computer-use");
-  assert.equal(initialized.serverInfo.version, "0.3.0");
+  assert.equal(initialized.serverInfo.version, expectedVersion);
 
   const listed = await rpc("tools/list");
   const names = listed.tools.map(tool => tool.name);
@@ -110,7 +114,7 @@ try {
   assert.equal(typeText.inputSchema.properties.via_clipboard, undefined);
   assert.match(typeText.description, /fails safely instead of sending global Ctrl\+A/i);
   assert.match(listed.tools.find(tool => tool.name === "list_apps").description, /running apps/i);
-  console.log("PASS MCP contract matches v0.3.0 capabilities");
+  console.log(`PASS MCP contract matches v${expectedVersion} capabilities`);
 
   const delayedConnection = await rpc("tools/call", {
     name: "js",

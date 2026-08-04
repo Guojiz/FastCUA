@@ -21,9 +21,9 @@ jobs:
         run: |
           $expected = '${{ github.ref_name }}'.TrimStart('v')
           $manifest = (Get-Content runtime-manifest.json -Raw | ConvertFrom-Json).version
-          $host = (Select-String -Path native-host/Cargo.toml -Pattern '^version = "([^"]+)"$').Matches[0].Groups[1].Value
+          $nativeHost = (Select-String -Path native-host/Cargo.toml -Pattern '^version = "([^"]+)"$').Matches[0].Groups[1].Value
           $recorder = (Select-String -Path tools/skill-recorder/Cargo.toml -Pattern '^version = "([^"]+)"$').Matches[0].Groups[1].Value
-          foreach ($entry in @{ manifest=$manifest; nativeHost=$host; recorder=$recorder }.GetEnumerator()) {
+          foreach ($entry in @{ manifest=$manifest; nativeHost=$nativeHost; recorder=$recorder }.GetEnumerator()) {
             if ($entry.Value -ne $expected) { throw "$($entry.Key) version $($entry.Value) does not match tag $expected" }
           }
       - name: Static checks and contracts
@@ -42,6 +42,7 @@ jobs:
           node tests/runtime-identity-integration.mjs
           node tests/server-lifecycle.mjs
           node tests/skill-authoring-contract.mjs
+          node tests/release-workflow-contract.mjs
           [scriptblock]::Create((Get-Content install.ps1 -Raw)) | Out-Null
           [scriptblock]::Create((Get-Content scripts/manage.ps1 -Raw)) | Out-Null
           [scriptblock]::Create((Get-Content scripts/build-release.ps1 -Raw)) | Out-Null
