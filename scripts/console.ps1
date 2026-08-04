@@ -29,13 +29,13 @@ $edge = $edgeCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
 
 if ($edge) {
   $profileDir = Join-Path $env:LOCALAPPDATA 'FastCUA\console-profile'
-  $args = @(
+  $edgeArgs = @(
     "--app=$url",
     "--user-data-dir=$profileDir",
     '--no-first-run',
     '--window-size=1180,860'
   )
-  Start-Process -FilePath $edge -ArgumentList $args | Out-Null
+  Start-Process -FilePath $edge -ArgumentList $edgeArgs | Out-Null
 } else {
   # No Edge: open in whatever default browser the user has.
   Start-Process $url | Out-Null
