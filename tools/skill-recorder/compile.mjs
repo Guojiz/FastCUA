@@ -4,7 +4,7 @@
 //
 // session.jsonl (fastcua-recording/1) -> human-readable, NON-executable
 // evidence package (evidence.json + evidence.md) plus the deterministic replay
-// draft. --skill writes only a synthesis request; a dedicated agent writes SKILL.md.
+// draft. --skill writes only an authoring request; the current primary agent writes SKILL.md.
 //
 // Principles (beating the Cowork weaknesses):
 //   * Auditable: every step keeps its semantic anchor (numeric control-type ID
@@ -571,7 +571,7 @@ function compileSession(sessionPath, outDir) {
     },
   };
   // draft.json remains the deterministic replay/acceptance artifact. The
-  // evidence package is the only input to the natural-language writer.
+  // current primary agent receives the evidence package for natural-language authoring.
   const draft = {
     ...evidence,
     format: "fastcua-skill-draft/1",
@@ -591,7 +591,7 @@ function compileSession(sessionPath, outDir) {
     ``,
     `- source: \`${evidence.source}\``,
     `- generated: ${new Date(evidence.generated_ts).toISOString()} · format ${evidence.format} · **non-executable**`,
-    `- writer contract: a dedicated agent writes natural-language SKILL.md; this compiler never does`,
+    `- authoring contract: the current primary agent writes natural-language SKILL.md; this compiler never does`,
     ``,
     `## Warnings`,
     ...(warnings.length ? warnings.map((w, i) => `- [evidence:warning:${i + 1}] ${w}`) : ["- (none)"]),
@@ -638,7 +638,12 @@ function createSynthesisRequest(name, evidence, outDir) {
     skill_name: name,
     evidence: path.resolve(outDir, "evidence.json"),
     output: path.resolve(dir, "SKILL.md"),
-    writer: "dedicated-subagent",
+    writer: "current-primary-agent",
+    inputs: {
+      evidence_json: path.resolve(outDir, "evidence.json"),
+      evidence_markdown: path.resolve(outDir, "evidence.md"),
+      replay_draft: path.resolve(outDir, "draft.md"),
+    },
     lint: "tools/skill-recorder/lint-skill.mjs",
     verified: false,
     stats: evidence.stats,
@@ -671,7 +676,7 @@ function main() {
     const { dir, file } = createSynthesisRequest(skillName, evidence, outDir);
     console.log(`[compile] synthesis request folder (inert, verified:false): ${dir}`);
     console.log(`[compile] request: ${file}`);
-    console.log(`[compile] next: node tools/skill-recorder/synthesize.mjs ${JSON.stringify(evidenceJson)} --skill ${skillName}`);
+    console.log(`[compile] next: current primary agent writes ${path.join(dir, "SKILL.md")} from the evidence, then runs provenance lint`);
   }
 }
 

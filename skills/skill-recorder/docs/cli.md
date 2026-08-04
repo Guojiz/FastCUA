@@ -88,10 +88,9 @@ The generated Skill must begin as `verified: false`, use imperative workflow
 instructions rather than a macro, and retain every evidence citation. Run the
 lint command below before accepting it.
 
-`synthesize.mjs`, `writer-config.mjs`, the writer API, and their model/auth
-settings are remnants of the retired separate-model design. They are not part
-of this workflow and are scheduled for removal in
-`docs/NEXT_DESIGN.md` (Gap B).
+There is no secondary synthesis command, writer API, transcription fallback,
+or separate model/auth configuration. The current primary agent owns the draft
+from local evidence through lint and dry-run.
 
 ## 4. Evidence lint — `tools/skill-recorder/lint-skill.mjs`
 
