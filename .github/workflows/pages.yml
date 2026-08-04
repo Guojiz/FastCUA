@@ -1,5 +1,7 @@
 name: Deploy FastCUA website
 
+# Repository Pages source must be set to GitHub Actions.
+
 on:
   push:
     branches: [main]
