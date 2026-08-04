@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="FastCUA is a local, accessibility-first Windows control plane for AI agents.">
+  <meta name="theme-color" content="#0a0d0f">
+  <meta property="og:title" content="FastCUA — Windows control for AI agents">
+  <meta property="og:description" content="Text-first observation, visual fallback, multi-action execution, and human control in one local Windows runtime.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://guojiz.github.io/FastCUA/">
+  <link rel="canonical" href="https://guojiz.github.io/FastCUA/">
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./styles.css">
+  <title>FastCUA — Windows control for AI agents</title>
+</head>
+<body>
+  <a class="skip-link" href="#main" data-en="Skip to content" data-zh="跳到正文">Skip to content</a>
+
+  <header class="topbar">
+    <a class="brand" href="#top" aria-label="FastCUA home">
+      <span class="brand-mark" aria-hidden="true"><span></span></span>
+      <span>FastCUA</span>
+    </a>
+    <nav aria-label="Primary navigation">
+      <a href="#how" data-en="How it works" data-zh="工作方式">How it works</a>
+      <a href="#recorder" data-en="Recorder" data-zh="录制器">Recorder</a>
+      <a href="#install" data-en="Install" data-zh="安装">Install</a>
+    </nav>
+    <div class="topbar-actions">
+      <div class="language-switch" aria-label="Language">
+        <button type="button" data-set-language="en" aria-pressed="true">EN</button>
+        <button type="button" data-set-language="zh" aria-pressed="false">中文</button>
+      </div>
+      <a class="github-link" href="https://github.com/Guojiz/FastCUA" aria-label="FastCUA on GitHub">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .7a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2.2c-3.22.7-3.9-1.37-3.9-1.37-.53-1.34-1.29-1.7-1.29-1.7-1.05-.72.08-.71.08-.71 1.16.08 1.78 1.2 1.78 1.2 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.57-.29-5.27-1.28-5.27-5.68 0-1.25.45-2.28 1.19-3.08-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.16 1.18a10.9 10.9 0 0 1 5.76 0c2.2-1.49 3.16-1.18 3.16-1.18.63 1.58.23 2.75.11 3.04.74.8 1.19 1.83 1.19 3.08 0 4.41-2.71 5.38-5.29 5.67.42.36.79 1.07.79 2.16v3.2c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .7Z"/></svg>
+      </a>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="hero" id="top">
+      <div class="hero-copy" data-reveal>
+        <p class="kicker"><span class="signal-dot"></span><span data-en="Local Windows control plane" data-zh="本地 Windows 控制平面">Local Windows control plane</span></p>
+        <h1 data-en="A faster control plane for Windows agents." data-zh="让 Agent 更快、更稳地操作 Windows。">A faster control plane for Windows agents.</h1>
+        <p class="hero-lede" data-en="FastCUA gives AI agents structured interface text first, vision when needed, and several native actions per turn — while keeping pause, approval, and exit controls with the human." data-zh="FastCUA 让 AI Agent 优先读取结构化界面文字，必要时再使用视觉，并能在一次推理中执行多步原生操作；暂停、审批和退出始终由人掌控。">FastCUA gives AI agents structured interface text first, vision when needed, and several native actions per turn — while keeping pause, approval, and exit controls with the human.</p>
+        <div class="hero-actions">
+          <a class="button primary" href="#install" data-en="Install FastCUA" data-zh="安装 FastCUA">Install FastCUA</a>
+          <a class="button secondary" href="https://github.com/Guojiz/FastCUA" data-en="Read the source" data-zh="查看源码">Read the source</a>
+        </div>
+        <dl class="hero-facts">
+          <div><dt data-en="Target" data-zh="平台">Target</dt><dd>Windows 11 x64</dd></div>
+          <div><dt data-en="Interface" data-zh="接口">Interface</dt><dd>Skill + MCP</dd></div>
+          <div><dt data-en="License" data-zh="许可">License</dt><dd>MIT</dd></div>
+        </dl>
+      </div>
+
+      <div class="demo-shell" data-demo="uia" data-reveal>
+        <div class="demo-heading">
+          <div>
+            <span class="eyebrow">LIVE CONTROL MODEL</span>
+            <strong data-en="Observe. Refine. Act." data-zh="观察、细化、执行。">Observe. Refine. Act.</strong>
+          </div>
+          <span class="guard-chip"><span></span><span data-en="Human guard active" data-zh="人工保护已启用">Human guard active</span></span>
+        </div>
+
+        <div class="window-frame" aria-label="Interactive FastCUA targeting demonstration">
+          <div class="window-bar">
+            <span class="window-app">Paint</span>
+            <span class="window-title" data-en="Untitled — Paint" data-zh="无标题 — 画图">Untitled — Paint</span>
+            <span class="window-controls" aria-hidden="true"><i></i><i></i><i></i></span>
+          </div>
+          <div class="paint-ui" aria-hidden="true">
+            <div class="paint-tools">
+              <span class="tool active"></span><span class="tool"></span><span class="tool wide"></span>
+              <span class="swatch red"></span><span class="swatch blue"></span><span class="swatch green"></span>
+            </div>
+            <div class="paint-canvas">
+              <svg class="house" viewBox="0 0 460 270" role="img" aria-label="A simple house drawing">
+                <path class="ground" d="M28 231c81-22 151-2 213-5 64-3 112-20 191 2"/>
+                <circle class="sun" cx="386" cy="53" r="25"/>
+                <path class="rays" d="M386 13v-9m0 94v-9m40-36h9m-98 0h9m68-28 7-7m-70 70 7-7m56 0 7 7m-70-70 7 7"/>
+                <path class="roof" d="m117 127 100-76 104 76"/>
+                <path class="walls" d="M137 116v112h164V116"/>
+                <path class="door" d="M202 228v-69h39v69"/>
+                <path class="window-shape" d="M155 145h29v29h-29zm99 0h29v29h-29z"/>
+              </svg>
+              <div class="uia-label">
+                <span>UIA · quality: good</span>
+                <strong data-en="Canvas · bounded target" data-zh="画布 · 有边界目标">Canvas · bounded target</strong>
+              </div>
+              <div class="vision-grid">
+                <span>1</span><span>2</span><span>3</span><span>4</span><span class="target">5</span><span>6</span><span>7</span><span>8</span><span>9</span>
+              </div>
+              <div class="action-pulse"><span></span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="demo-tabs" role="group" aria-label="Targeting demonstration steps">
+          <button type="button" data-demo-step="uia" aria-pressed="true"><span>01</span><strong data-en="Read UIA" data-zh="读取 UIA">Read UIA</strong></button>
+          <button type="button" data-demo-step="grid" aria-pressed="false"><span>02</span><strong data-en="Refine visually" data-zh="视觉细化">Refine visually</strong></button>
+          <button type="button" data-demo-step="act" aria-pressed="false"><span>03</span><strong data-en="Commit once" data-zh="执行一次">Commit once</strong></button>
+        </div>
+      </div>
+    </section>
+
+    <section class="trust-strip" aria-label="Product principles" data-reveal>
+      <span data-en="Accessibility first" data-zh="无障碍优先">Accessibility first</span>
+      <span data-en="Vision on demand" data-zh="按需使用视觉">Vision on demand</span>
+      <span data-en="One warm runtime" data-zh="单一常驻运行时">One warm runtime</span>
+      <span data-en="Visible human control" data-zh="可见的人工控制">Visible human control</span>
+    </section>
+
+    <section class="section" id="how">
+      <div class="section-intro" data-reveal>
+        <p class="section-number">01 / CONTROL LOOP</p>
+        <h2 data-en="Use semantics until pixels are the better answer." data-zh="语义优先；像素更可靠时再切换。">Use semantics until pixels are the better answer.</h2>
+        <p data-en="FastCUA routes every action through fresh window state. Good accessibility data stays fast and precise. Weak or stale semantics switch to a numbered visual grid with repeatable refinement." data-zh="FastCUA 的每次操作都从最新窗口状态开始。无障碍信息质量好时，目标定位快速且精确；语义较弱或过期时，则切换到可重复细化的编号视觉网格。">FastCUA routes every action through fresh window state. Good accessibility data stays fast and precise. Weak or stale semantics switch to a numbered visual grid with repeatable refinement.</p>
+      </div>
+
+      <div class="loop-grid">
+        <article class="loop-card" data-reveal>
+          <span class="card-index">A</span>
+          <div class="card-icon semantic" aria-hidden="true"><i></i><i></i><i></i></div>
+          <h3 data-en="Read the interface" data-zh="读取界面">Read the interface</h3>
+          <p data-en="Inspect UI Automation names, roles, bounds, focus, and quality before spending a vision turn." data-zh="先读取 UI Automation 的名称、角色、边界、焦点和质量，再决定是否需要视觉。">Inspect UI Automation names, roles, bounds, focus, and quality before spending a vision turn.</p>
+          <code>get_window_state()</code>
+        </article>
+        <article class="loop-card" data-reveal>
+          <span class="card-index">B</span>
+          <div class="card-icon matrix" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+          <h3 data-en="Refine the image" data-zh="细化图像">Refine the image</h3>
+          <p data-en="When semantics are weak, select a numbered square and refine it into a new 3×3 view until the target is isolated." data-zh="当语义较弱时，选择编号方格并继续细化为新的 3×3 视图，直到目标被安全隔离。">When semantics are weak, select a numbered square and refine it into a new 3×3 view until the target is isolated.</p>
+          <code>grid_refine()</code>
+        </article>
+        <article class="loop-card" data-reveal>
+          <span class="card-index">C</span>
+          <div class="card-icon pointer" aria-hidden="true"><i></i></div>
+          <h3 data-en="Commit one action" data-zh="提交一次操作">Commit one action</h3>
+          <p data-en="Click exactly once against the current capture, then re-observe whenever focus or layout may have changed." data-zh="针对当前捕获只点击一次；只要焦点或布局可能变化，就重新观察。">Click exactly once against the current capture, then re-observe whenever focus or layout may have changed.</p>
+          <code>click_cell()</code>
+        </article>
+      </div>
+    </section>
+
+    <section class="architecture section" id="architecture">
+      <div class="section-intro compact" data-reveal>
+        <p class="section-number">02 / ARCHITECTURE</p>
+        <h2 data-en="One agent host. One local runtime. One source of control." data-zh="一个 Agent Host，一个本地运行时，一套控制状态。">One agent host. One local runtime. One source of control.</h2>
+      </div>
+      <div class="pipeline" data-reveal>
+        <div class="pipeline-node primary-node"><span>01</span><strong data-en="Agent + Skill" data-zh="Agent + Skill">Agent + Skill</strong><small data-en="Procedure" data-zh="操作规程">Procedure</small></div>
+        <i aria-hidden="true"></i>
+        <div class="pipeline-node"><span>02</span><strong>MCP server</strong><small>stdio</small></div>
+        <i aria-hidden="true"></i>
+        <div class="pipeline-node"><span>03</span><strong data-en="Resident daemon" data-zh="常驻 daemon">Resident daemon</strong><small data-en="Shared state" data-zh="共享状态">Shared state</small></div>
+        <i aria-hidden="true"></i>
+        <div class="pipeline-node"><span>04</span><strong data-en="Native host" data-zh="原生 Host">Native host</strong><small>UIA · capture · input</small></div>
+      </div>
+      <div class="safety-grid">
+        <article data-reveal><span>F7</span><strong data-en="Open control center" data-zh="打开控制中心">Open control center</strong></article>
+        <article data-reveal><span>F8</span><strong data-en="Pause or resume" data-zh="暂停或继续">Pause or resume</strong></article>
+        <article data-reveal><span>F9</span><strong data-en="Interject text" data-zh="插入文字指令">Interject text</strong></article>
+        <article data-reveal><span>F10</span><strong data-en="Exit FastCUA" data-zh="退出 FastCUA">Exit FastCUA</strong></article>
+      </div>
+    </section>
+
+    <section class="recorder section" id="recorder">
+      <div class="recorder-copy" data-reveal>
+        <p class="section-number">03 / SKILL RECORDER · PREVIEW</p>
+        <h2 data-en="Turn a demonstration into evidence an agent can audit." data-zh="把演示变成 Agent 可审计的证据。">Turn a demonstration into evidence an agent can audit.</h2>
+        <p data-en="The optional recorder captures an interaction, compiles an evidence package, and lets the current primary agent write a reusable Skill. Provenance lint, a dry run with new values, and human-reviewed promotion remain hard gates." data-zh="可选录制器捕获操作并编译证据包，再由当前主 Agent 编写可复用 Skill。来源校验、使用新参数的 dry-run 和人工审阅后的安装仍是硬门禁。">The optional recorder captures an interaction, compiles an evidence package, and lets the current primary agent write a reusable Skill. Provenance lint, a dry run with new values, and human-reviewed promotion remain hard gates.</p>
+        <a class="text-link" href="https://github.com/Guojiz/FastCUA/tree/main/skills/skill-recorder" data-en="Read the recorder playbook" data-zh="阅读录制器手册">Read the recorder playbook <span>↗</span></a>
+      </div>
+      <div class="recorder-flow" data-reveal>
+        <ol>
+          <li><span>01</span><strong data-en="Record" data-zh="录制">Record</strong><small data-en="Actions + notes" data-zh="操作 + 备注">Actions + notes</small></li>
+          <li><span>02</span><strong data-en="Compile" data-zh="编译">Compile</strong><small data-en="Evidence package" data-zh="证据包">Evidence package</small></li>
+          <li><span>03</span><strong data-en="Author" data-zh="编写">Author</strong><small data-en="Primary agent" data-zh="主 Agent">Primary agent</small></li>
+          <li><span>04</span><strong data-en="Verify" data-zh="验证">Verify</strong><small data-en="Lint + dry run" data-zh="校验 + dry-run">Lint + dry run</small></li>
+        </ol>
+        <div class="privacy-note">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4.5 6v5.2c0 4.7 3.2 8.3 7.5 9.8 4.3-1.5 7.5-5.1 7.5-9.8V6L12 3Zm0 4.1a2.2 2.2 0 0 1 2.2 2.2v1h.6v5.2H9.2v-5.2h.6v-1A2.2 2.2 0 0 1 12 7.1Zm0 1.2a1 1 0 0 0-1 1v1h2v-1a1 1 0 0 0-1-1Z"/></svg>
+          <p data-en="Using the Skill Recorder may send recorded screen content, interaction evidence, and narration to the configured cloud model provider." data-zh="使用 Skill Recorder 时，录制的屏幕内容、操作证据和旁白可能会发送给所使用的云端模型提供商。">Using the Skill Recorder may send recorded screen content, interaction evidence, and narration to the configured cloud model provider.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="install section" id="install">
+      <div class="install-card" data-reveal>
+        <div class="install-copy">
+          <p class="section-number">04 / INSTALL</p>
+          <h2 data-en="Start with one verified PowerShell path." data-zh="从唯一的 PowerShell 验证路径开始。">Start with one verified PowerShell path.</h2>
+          <p data-en="The installer prepares Node.js when needed, downloads the GitHub Release runtime, verifies its checksum, and writes an Agent setup prompt to the desktop." data-zh="安装器会按需准备 Node.js，下载 GitHub Release 运行时并校验哈希，然后把 Agent 配置提示写到桌面。">The installer prepares Node.js when needed, downloads the GitHub Release runtime, verifies its checksum, and writes an Agent setup prompt to the desktop.</p>
+        </div>
+        <div class="terminal" aria-label="PowerShell installation command">
+          <div class="terminal-bar"><span>PowerShell</span><button type="button" data-copy-command data-en="Copy" data-zh="复制">Copy</button></div>
+          <pre><code id="install-command">irm https://raw.githubusercontent.com/Guojiz/FastCUA/main/install.ps1 | iex</code></pre>
+          <p><span class="terminal-prompt">✓</span><span data-en="GitHub Release · SHA-256 verified" data-zh="GitHub Release · SHA-256 校验">GitHub Release · SHA-256 verified</span></p>
+        </div>
+      </div>
+      <div class="install-links" data-reveal>
+        <a href="https://github.com/Guojiz/FastCUA#install"><span data-en="Installation guide" data-zh="安装指南">Installation guide</span><strong>README ↗</strong></a>
+        <a href="https://github.com/Guojiz/FastCUA/blob/main/docs/TECHNICAL_PAPER.md"><span data-en="Mechanisms &amp; proofs" data-zh="机制与验证">Mechanisms &amp; proofs</span><strong data-en="Technical paper ↗" data-zh="技术论文 ↗">Technical paper ↗</strong></a>
+        <a href="https://github.com/Guojiz/FastCUA/releases"><span data-en="Verified packages" data-zh="验证包">Verified packages</span><strong data-en="Releases ↗" data-zh="发布页 ↗">Releases ↗</strong></a>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="footer-brand"><span class="brand-mark" aria-hidden="true"><span></span></span><div><strong>FastCUA</strong><small data-en="Local Windows control for AI agents" data-zh="面向 AI Agent 的本地 Windows 控制">Local Windows control for AI agents</small></div></div>
+    <div class="footer-links">
+      <a href="https://github.com/Guojiz/FastCUA">GitHub</a>
+      <a href="https://github.com/Guojiz/FastCUA/issues" data-en="Issues" data-zh="问题">Issues</a>
+      <a href="https://github.com/Guojiz/FastCUA/blob/main/LICENSE">MIT</a>
+    </div>
+    <p>© 2026 Guojiz</p>
+  </footer>
+
+  <script src="./main.js" defer></script>
+</body>
+</html>
