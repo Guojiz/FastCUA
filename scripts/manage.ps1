@@ -256,6 +256,10 @@ After reloading the client, call runtime_info and list_apps. runtime_info must r
 If runtime_info reports another directory or version, stop and run:
    & "$appDir\install.ps1" -Action Doctor
 
+Automated helper when available in the installed runtime:
+   & "$appDir\scripts\agent-setup.ps1" -Action Install
+Full runbook: https://github.com/Guojiz/FastCUA/blob/main/docs/AGENT_SETUP.md
+
 Do not install a forwarding or shortened SKILL.md. Do not expose the local pipe or control center outside this computer.
 "@
   [System.IO.File]::WriteAllText($agentPromptPath, $agentPrompt.Trim() + "`r`n", [System.Text.UTF8Encoding]::new($false))
