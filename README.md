@@ -1,217 +1,136 @@
 # FastCUA
 
-**Turn Windows GUIs into a fast, executable interface for AI agents.**
+**A local, accessibility-first Windows control plane for AI agents.**
 
-[Website](https://guojiz.github.io/FastCUA/) · [中文](README_zh.md) · [Self-hosting](docs/SELF_HOSTING.md) · [Docs](#documentation)
+[Website](https://guojiz.github.io/FastCUA/) · [中文](README_zh.md) · [Technical paper](docs/TECHNICAL_PAPER.md) · [Next design](docs/NEXT_DESIGN.md)
 
 > [!WARNING]
-> **FastCUA is still under development and is not yet complete.** Current versions may contain bugs, missing functionality, or compatibility issues. Use it for testing only and do not rely on it for important tasks.
+> FastCUA is an experimental project under active development. Use it for testing, not important or unattended work.
 
-> **Bring your own agent, and install FastCUA into that agent itself by default.** The Windows installer prepares Node.js and the verified FastCUA runtime. The agent that receives the setup prompt must then install both the complete `computer-use` Skill and the `sky-computer-use` MCP server into its own active configuration. Missing either part means installation failed.
+FastCUA gives an agent a fast, inspectable interface to Windows applications. It prefers Windows UI Automation text, switches to screenshots and a numbered square grid when semantics are weak, and executes related native actions through one resident local runtime. The human remains in control through visible state, per-app approval, global pause, interjection, and exit controls.
 
-FastCUA is an open-source, local-first Computer Use runtime for Windows. It combines accessibility-first navigation, optional screenshots, native keyboard and mouse input, multi-action execution, access policy, and visible human control in one resident service.
+FastCUA is agent-neutral, but a complete installation always has two parts in the **same agent host**:
 
-**Where things live (one line):** humans read this README + [self-host](docs/SELF_HOSTING.md); agents only load `skills/computer-use/` (Skill) and call MCP — not project docs.
+1. the full `skills/computer-use/` operating policy;
+2. the `sky-computer-use` stdio MCP server.
 
-## Design principles
+MCP alone is capability without the required procedure. The Skill alone has no executor.
 
-Product rules the runtime is built around. How an agent must act step-by-step is **not** here — that is the Skill.
+## Model requirement
 
-### 1. Accessibility first, vision optional
+Use **one full-capability primary model** with text/image understanding, reliable reasoning, Skills, MCP, and enough context for the whole task. Native audio understanding is useful for recorded narration; otherwise use typed notes. Do not configure writer, transcription, fallback, or text-only models.
 
-Prefer Windows UI Automation text when the next step is identifiable by name, role, or value. Request screenshots only when pixels add information (canvas, custom paint, verification). Do not burn tokens on near-duplicate full-window images every step.
+## Why FastCUA
 
-### 2. One warm control plane
+| | Vision-first computer use | Browser automation | FastCUA |
+|---|---|---|---|
+| Main observation | Screenshots | DOM/CDP | UIA text, then vision when needed |
+| Scope | Any visible surface | Web content | Windows apps, browser chrome, cross-app flows |
+| Execution | Often one action per loop | Browser commands | Several native actions per model turn |
+| Runtime state | Often rebuilt per call | Browser session | One warm daemon and native host |
+| Human takeover | Integration-dependent | Browser-limited | Global pause, interject, approve, exit |
 
-All agent clients share **one resident daemon** and **one native host** (one cursor). Window identity, approvals, pause, and interjection live in that control plane — they are not rebuilt per click.
-
-### 3. Many actions per model turn
-
-Through MCP, the agent gets a persistent JS environment (`sky.*`). Related keyboard, text, click, drag, and scroll work can run sequentially in one turn. Re-observe only when layout, focus, or modals may have changed.
-
-### 4. Window screenshot pixels are the coordinate space
-
-`click` / `drag` / `scroll` **x,y** are in **window screenshot pixels**, origin top-left of the target window — same space as `get_window_state().viewport` and `screenshots[0].width/height`. Never invent desktop-absolute coordinates. Captures may be downscaled (1568px long edge): read `viewport.scale` before pixel work; `unchanged: true` means reuse the previous image.
-
-### 5. Fail fast on software work (30s)
-
-Each desktop helper request, MCP round-trip, and JS cell defaults to a **30 second** budget. On timeout the runtime fails the call; agents retry once then change strategy (defined in the Skill). Human pause and approval waits are separate — not software hangs.
-
-Hung target apps are bounded much tighter inside the helper: a wedged UIA provider times out in ~1.5s and that app's UIA is then disabled for the session (the request still returns, falling back to the HWND tree with `uia.prefer_vision: true`). Window activation (~1.5s) and screenshot capture (~3s) are bounded too, and screenshots / `grid_view` keep working against an unresponsive window via BitBlt. Cross-process window text never blocks the host, so wedged apps still appear in `list_windows` with their stored title. The shared helper survives all of this — a full helper restart is the last resort, not the default.
-
-### 6. Visual targeting = Apple-style square number grid
-
-When UIA is weak or `state.uia.prefer_vision` is true, the runtime exposes that signal; agents must switch to vision immediately (Skill). Product shape:
-
-1. `sky.grid_view({ window })` → **one** annotated image: semi-transparent **square** cell outlines + small outlined numbers.
-2. **Select** a number only (does **not** click).
-3. `sky.grid_refine({ window, grid, cell })` → crop **inside that cell only**, draw a 3×3 of squares (still one image).
-4. `sky.click_cell(...)` (cell center), `sky.click_in_cell(...)` (cell-local x,y), or `sky.click_view({window, view, x, y})` (precise point in the view image) only when ready.
-
-Select ≠ click. Prefer `grid_view` over raw full screenshots for targeting.
-
-### 7. Human control plane is first-class
-
-People stay in charge with visible state and global keys:
-
-| Key | Meaning |
-|-----|---------|
-| `F7` | Pause + open control center |
-| `F8` | Pause / resume |
-| `F9` | Pause, then interject text |
-| `F10` | Exit FastCUA (agents must not self-restart) |
-
-Agents receive stable `[control_plane:…]` tags on tool errors. **Branching rules are only in the Skill** — not re-specified here.
-
-### 8. Safe by default, local by design
-
-Safe mode requires human approval for unknown apps. Trust matches exact executable paths/names — never fuzzy substring. Common local tools ship on a default **whitelist** that only skips the approval prompt; Skill safety bans (terminals, password managers, security UI) still apply. MCP uses a named pipe; the console binds to `127.0.0.1` only. Policy stays on the machine.
-
-### 9. Agent-neutral, Skill + MCP together
-
-FastCUA is not tied to one vendor client. Complete install = **Skill folder** + **stdio MCP** in the **same** agent that will use it. MCP alone or Skill alone is incomplete. Runtime installers prepare the machine; the agent still must wire both parts into **itself**.
+FastCUA complements in-page browser automation; it does not replace it.
 
 ## Architecture
 
 ```mermaid
-flowchart LR
-  A["Agent + computer-use Skill"] -->|"stdio MCP"| B["server.mjs sky-computer-use"]
-  B -->|"named pipe"| C["daemon.mjs control plane"]
-  C --> D["cua-native-host.exe"]
-  D --> E["UI Automation"]
-  D --> F["Screenshot / grid overlay"]
-  D --> G["SendInput"]
-  C --> H["Policy · pause · approval · interject"]
-  C --> I["Dynamic Island + http://127.0.0.1:8420"]
+flowchart TB
+  A["Agent host + computer-use Skill"] -->|"stdio MCP"| B["server.mjs"]
+  B -->|"path-scoped named pipe"| C["Resident daemon"]
+  C --> D["Rust native host"]
+  D --> E["UI Automation / HWND"]
+  D --> F["Capture / square grid"]
+  D --> G["Keyboard / mouse input"]
+  C --> H["Approval / pause / interjection"]
 ```
 
-| Layer | Role | Who reads it |
-|-------|------|----------------|
-| **Skill** `skills/computer-use/` | How to run a desktop task (bootstrap, tags, grid, safety) | **Agent only** |
-| **MCP** `server.mjs` | Tools + persistent `js` / `sky` | Agent tools (not prose docs) |
-| **Daemon + host** | Shared lifecycle, UIA, screenshots, input, policy | Runtime |
-| **README / self-host** | Product + install for people | **Humans** |
-| **Overlay / console** | Pause, approval, interject UI | Humans |
+All clients share one daemon, policy state, and physical pointer. A persistent `js` cell can execute related `sky.*` actions in one model turn; stale targets, changed focus/cursor, out-of-bounds points, timeouts, and human control signals stop execution.
 
-## Documentation
+## Targeting logic
 
-Deep-dive reports live in [`docs/`](docs/) — written for humans, kept separate
-from the agent-only Skill. All bilingual pairs (EN/ZH) cover the same content.
+Start with `get_window_state({include_text:true})` and read `state.uia`:
 
-| Document | What it covers |
-|----------|----------------|
-| [Technical implementation](docs/technical-implementation.md) · [中文](docs/technical-implementation_zh.md) | Whole-software report: four-layer architecture, daemon, native host, skill recorder subsystem, safety model, releases, test matrix, CI/CD |
-| [Windows control internals](docs/windows-control-internals.md) · [中文](docs/windows-control-internals_zh.md) | How the native host drives Windows: raw-COM UIA, input injection, window activation, capture/dedupe, square grid, DPI contract, safety gates |
-| [Input injection internals](docs/input-injection-internals.md) · [中文](docs/input-injection-internals_zh.md) | Paper-level input analysis: formal coordinate model, invariants, action state machines, partial-insertion recovery, UIPI limits, evidence vs. open test requirements, chord redesign |
-| [Control center window](docs/control-center-window.md) | Standalone console window (Edge `--app`), rationale and implementation |
-| [Skill recorder design](docs/skill-recorder-design.md) | Evidence-package format and design of the record → compile → dry-run → promote pipeline |
-| [Self-hosting](docs/SELF_HOSTING.md) · [中文](docs/SELF_HOSTING_zh.md) | Run FastCUA from source |
-| [Releases & updates](docs/RELEASING.md) · [中文](docs/RELEASING_zh.md) | Versioning, ZIP manifest, rollback, update policy |
+| Observation | Required action |
+|---|---|
+| `quality:"good"` and a named, bounded target | Click its current `element_index` |
+| `prefer_vision:true`, `weak`, `broken`, `[no-hit]`, or one stale-index failure | Stop semantic clicking and call `grid_view` |
 
-## Why FastCUA
+Visual control is **observe → select → refine → commit**:
 
-| | Vision-first Computer Use | Browser bridge | FastCUA |
-|---|---|---|---|
-| Scope | Screenshot surface | Web pages | Windows apps + browser chrome |
-| Primary nav | Pixels | DOM / CDP | UIA text; screenshots when needed |
-| Model | Usually vision | Often text | Text or vision |
-| Execution | Often one act per loop | Browser cmds | Many native acts per turn |
-| Human takeover | Varies | Browser-limited | Global pause, interject, approval, exit |
+1. `grid_view({window})` returns one window image with numbered square cells.
+2. Inspect the image and select the number containing the target. Selection is only a decision; it sends no input.
+3. If the target is not safely isolated at that cell's center, call `grid_refine({window,grid,cell})`. It crops that square and draws a new 3×3 grid; refine again if needed.
+4. Commit exactly once: `click_cell({window,grid,cell})` for the cell center, `click_in_cell({window,grid,cell,x,y,view})` for a cell-local offset, or `click_view({window,view,x,y})` for an exact point in the current image/crop.
+5. Re-observe after any action that may change layout or focus.
 
-FastCUA does not replace in-page browser automation. It covers the desktop layer around it: windows, system dialogs, Paint, Explorer, Office-style apps, and cross-app flows.
+Coordinates always use the current window image or crop, origin at its top-left. The helpers reverse capture scaling and reject points outside the target window. Full mechanics and proofs are in the [technical paper](docs/TECHNICAL_PAPER.md#4-observation-semantics-first-pixels-when-needed).
 
-## Start in 30 seconds
+## Install
 
-Windows 11, Node 18+ already available — **one line via npm**:
-
-```bash
-npx fastcua
-```
-
-Or PowerShell (installs Node via WinGet if needed):
+Use the PowerShell installer. It installs Node.js through WinGet when needed, downloads the GitHub Release runtime, and verifies its checksum:
 
 ```powershell
 irm https://raw.githubusercontent.com/Guojiz/FastCUA/main/install.ps1 | iex
 ```
 
-Both run the same verified installer: Node runtime, SHA-256 native host, and `FastCUA Agent Setup.txt` on the desktop.
+The verified installer writes `FastCUA Agent Setup.txt` to the desktop. Give it to the agent that will actually use FastCUA. That agent must:
 
-Give that prompt to **the agent that will actually use FastCUA**. It must:
+1. install the complete `skills\computer-use` folder into its own Skill system;
+2. configure Node.js + the installed `server.mjs` as `sky-computer-use` MCP;
+3. reload and verify that the Skill is discoverable;
+4. call `list_windows` successfully.
 
-1. Install the complete `skills\computer-use` folder into its own Skill system (not a stub that only points at the source).
-2. Add the `sky-computer-use` stdio MCP server (Node → `server.mjs`).
-3. Reload, verify the Skill is discoverable, and successfully call `list_windows` through MCP.
+If either the Skill or MCP is missing, installation is incomplete.
 
-If either the Skill or MCP is missing, installation failed.
-
-Local control center: `http://127.0.0.1:8420` (loopback only). Press `F7` to
-open it in a standalone window (Edge `--app` mode, no browser chrome), or run:
+### Verify and update
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\console.ps1
+& "$env:LOCALAPPDATA\FastCUA\app\install.ps1" -Action Doctor
+& "$env:LOCALAPPDATA\FastCUA\app\install.ps1" -Action Check
+& "$env:LOCALAPPDATA\FastCUA\app\install.ps1" -Action Update
 ```
 
-### Updates and version checks
+Inside MCP, call `runtime_info` to confirm the exact server, daemon, native host, version, commit, pipe, and data directory in use.
 
-```powershell
-npx fastcua check
-npx fastcua update
-npx fastcua doctor
-```
+## Human control
 
-Installed releases check for updates at most once per day and only notify. Updates use one verified runtime ZIP, keep `app.previous` for rollback, and never overwrite a development checkout. Call `runtime_info` through MCP to see the exact server, daemon, native-host, version, commit, pipe, and data directory in use. See [releases and updates](docs/RELEASING.md).
+| Key | Action |
+|---|---|
+| `F7` | Pause and open the control center |
+| `F8` | Pause or resume |
+| `F9` | Pause and interject text |
+| `F10` | Exit FastCUA |
 
-## You stay in control
+The local control center is available at `http://127.0.0.1:8420`. Safe mode asks before acting in an unknown application. Trust uses exact application identity, not fuzzy name matching.
 
-| State | Signal | Behavior |
-|---|---|---|
-| Active | Compact island + border | AI using the PC; border is click-through |
-| Approval | Amber | `1` once · `2` always · `3` full access · `4` deny |
-| Full access | Purple / pink | No per-app prompts until disabled |
-| Paused | Red | New actions blocked; resume in one step |
+## Visual click example
 
-## Example: multi-step turn
+Given a `window` returned by `list_windows`:
 
 ```js
-const windows = await sky.list_windows();
-const window = windows.find((w) => /Notepad/i.test(w.title));
-await sky.activate_window({ window });
-const state = await sky.get_window_state({ window, include_screenshot: false, include_text: true });
-const editor = /^\s*(\d+)\s+(?:Edit|Document)\b/m.exec(state.accessibility.tree || "");
-if (!editor) throw new Error("Notepad editor not found");
-await sky.click({ window, element_index: Number(editor[1]) });
-// Observe focused_value before deciding to replace or type at the caret.
-const focused = await sky.get_window_state({ window, include_screenshot: false, include_text: true });
-if (focused.accessibility.focused_value === undefined) throw new Error("Focused value was not observed");
-// This example intentionally inserts at the current caret; use replace:true only after deciding to replace the observed value.
-await sky.type_text({ window, text: "FastCUA" });
-// Weak UIA? visual square grid, one image at a time:
-let gv = await sky.grid_view({ window });
-gv = await sky.grid_refine({ window, grid: gv.grid, cell: "4" });
-await sky.click_cell({ window, grid: gv.grid, cell: "5" });
-await sky.close(); // end this MCP turn; daemon stays up
+let view = await sky.grid_view({ window });       // inspect; choose cell 4
+view = await sky.grid_refine({
+  window,
+  grid: view.grid,
+  cell: "4",
+});                                               // inspect; choose cell 5
+await sky.click_cell({ window, grid: view.grid, cell: "5" });
+await sky.close();
 ```
 
 ## Record a Skill (preview)
 
-> **Status: validated preview.** Works on real Windows 11; end-to-end validated against the FastCUA test fixture (60+ real-machine checks: record -> compile -> dry-run with a new parameter value after an app restart -> fail-safe drills). A short human-input comparison session is still owed (all validation input was automation-injected and is labeled as such).
+The optional recorder turns a demonstration into an auditable evidence package before any Skill is written:
 
-`tools/skill-recorder` watches a real demonstration — yours or a synthetic one driven through FastCUA itself — and compiles it into an **auditable, non-executable evidence package** before a dedicated subagent writes the Skill. The agent drives the whole flow; the user demonstrates, reviews, and decides:
+```text
+record → compile evidence → current primary agent writes → provenance lint
+       → dry-run with new values → human-reviewed promotion
+```
 
-1. **Record** — capture UIA anchors, sampled pointer paths, wheel axis/delta, sparse keyframes, local MJPEG video, optional WAV narration, and typed notes. Wheel input and drag gestures remain distinct; password and secure-desktop moments are structurally redacted.
-2. **Compile evidence** — `session.jsonl` becomes canonical `evidence.json`/`evidence.md` plus deterministic `draft.json`/`draft.md`. `--skill` writes a synthesis request, not `SKILL.md`; parameters and uncertainty retain provenance.
-3. **Synthesize + lint** — the FastCUA console configures a dedicated OpenAI-compatible subagent API/model and optional transcription model. Its key is stored separately. The tool-less writer produces natural-language Skill prose; provenance lint requires citations for every step, parameter, and warning and rejects fabrication. Narration fallback is direct audio → transcription API → typed notes; `typed` mode keeps audio local.
-4. **Review** — the agent presents parameters, warnings, redactions, app scope, model, and narration path. `frame-extract.mjs` lets the agent inspect a chosen non-redacted moment instead of guessing.
-5. **Dry-run** — replay the deterministic draft through the normal control plane with a new parameter value. Unresolved steps need explicit decisions; redacted steps never execute; scope and anchor failures abort safely.
-6. **Promote** — only after explicit user approval, detect the active host Skill directory and run `promote.mjs`. Review and verification gates remain mandatory; nothing installs silently.
+Password fields and secure-desktop moments are redacted. The current primary agent writes the Skill from evidence; lint, dry-run, application scope, and explicit promotion approval remain hard gates. See `skills/skill-recorder/` and the [technical paper](docs/TECHNICAL_PAPER.md#9-evidence-first-skill-recording).
 
-Agent procedure lives in `skills/skill-recorder/`; format + design in [docs/skill-recorder-design.md](docs/skill-recorder-design.md).
-
-## Current boundaries
-
-Windows 11 x64. Secure Desktop, UAC elevation, auth dialogs, password managers, and Windows security UI are outside the normal path. Apps with little accessibility data need screenshots / grid targeting. Element indexes belong to the latest UIA snapshot — refresh after layout changes.
-
-## Self-host
+## Develop from source
 
 ```powershell
 git clone https://github.com/Guojiz/FastCUA.git
@@ -219,21 +138,13 @@ cd FastCUA
 .\native-host\build.ps1
 ```
 
-Then install Skill + MCP into the agent. The MCP server starts the daemon automatically. See [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md).
+Then copy the complete `skills\computer-use` directory into the active agent's Skill directory and configure the absolute path to `server.mjs` as a stdio MCP server. Use `runtime_info` to verify the checkout. Reproduction commands and the test matrix are in the [technical paper](docs/TECHNICAL_PAPER.md#12-reproduction-and-operation).
 
-## FAQ
+## Boundaries
 
-**How do I take control immediately?** `F7` pause or `F10` exit.
+FastCUA currently targets Windows 11 x64. UAC, Secure Desktop, authentication dialogs, password managers, Windows Security, higher-integrity processes, protected surfaces, and applications with unusual capture/accessibility behavior are outside the normal path. Synthetic input is not hardware input, and the current key-chord implementation still uses the superseded `keybd_event` API. The repository also retains legacy npm and separate-model code that is no longer the recommended design; its removal and the other implementation gaps are tracked in [Next design](docs/NEXT_DESIGN.md).
 
-**How does an agent finish a turn?** Call MCP `close` once after verification. That closes the client connection, not the shared daemon.
-
-**Can an unknown app launch silently?** Not in safe mode.
-
-**Is one specific agent required?** No — any client with local Skills and stdio MCP.
-
-**Can I configure only MCP?** No. Skill + MCP together.
-
-**Uninstall:**
+## Uninstall
 
 ```powershell
 & "$env:LOCALAPPDATA\FastCUA\app\uninstall.ps1"

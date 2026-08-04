@@ -53,53 +53,38 @@ Any non-error response means the Windows helper is reachable. If `list_apps` / `
 
 When desktop work for this turn is done, call MCP **`close` once**. That ends the turn and closes this MCP client connection. The shared FastCUA daemon/helper stay resident for other clients. Do not call `close` between every action.
 
-### Coordinate targeting + broken UIA → vision immediately
+### Targeting: UIA first, visual grid when needed
 
-`click` / `drag` / `scroll` **x,y are in window screenshot pixels**, origin **top-left** of the target window — same as `get_window_state().viewport` and `screenshots[0].width/height`. Do **not** invent desktop-absolute pixels.
+`click` / `drag` / `scroll` x,y belong to the current window image, origin at
+its top-left. Never invent desktop-absolute coordinates. Each desktop request
+or JS cell has a 30-second software budget; retry one timeout at most.
 
-**Software action budget: 30 seconds** per desktop request / JS cell (default). On timeout: retry **once** max, then change strategy or report. Do not spin.
+After `get_window_state({include_text:true})`, read `state.uia`:
 
-After every `get_window_state({ include_text: true })`, read **`state.uia`**:
+| Observation | Required action |
+|---|---|
+| `quality:"good"` and target has a current label/bounds | Use `element_index` |
+| `prefer_vision:true`, `weak`, `broken`, `[no-hit]`, or one stale index | Stop UIA clicks; call `grid_view` |
 
-| `uia.quality` / flag | Required agent behavior |
-|----------------------|-------------------------|
-| `prefer_vision: true` or `quality` is `broken` / `weak` | **Immediately** `sky.grid_view` — **do not** click `element_index` |
-| `quality: "good"` | Prefer `element_index` when labels exist |
-| `element_index` returns stale / `[no-hit]` once | **Stop UIA clicks** for that target; switch to `grid_view` now |
+Visual control is **observe → select → refine → commit**:
 
-Why trees go bad (do not debug host source mid-task):
-
-- App has poor Accessibility (Electron, canvas, custom paint)
-- Nodes listed but no hit bounds (`[no-hit]`)
-- Provider timeout / tree only shell panes
-- Stale snapshot after dialog open / list refresh
-
-```js
-const state = await sky.get_window_state({ window, include_text: true, include_screenshot: false });
-if (state.uia?.prefer_vision) {
-  // Broken/weak tree — vision path only
-  let gv = await sky.grid_view({ window });
-  gv = await sky.grid_refine({ window, grid: gv.grid, cell: "4" });
-  await sky.click_cell({ window, grid: gv.grid, cell: "5" });
-} else {
-  // Good UIA — element_index OK
-  // ...
-}
-```
-
-Visual square grid (one annotated image — save tokens):
+1. Call `grid_view({window})` and inspect its one numbered square-grid image.
+2. Select the cell containing the target. **Selection is not a click.**
+3. If the target is not isolated at the cell center, call
+   `grid_refine({window,grid,cell})`; inspect the returned 3×3 crop and repeat
+   refinement if necessary.
+4. Commit once with `click_cell` (center), `click_in_cell` (cell-local offset),
+   or `click_view` (exact point in the current image/crop).
+5. Re-observe after layout or focus changes; discard old indexes and points.
 
 ```js
-let gv = await sky.grid_view({ window: targetWindow });
-gv = await sky.grid_refine({ window: targetWindow, grid: gv.grid, cell: "4" });
-await sky.click_cell({ window: targetWindow, grid: gv.grid, cell: "5" });
+let view = await sky.grid_view({ window });
+view = await sky.grid_refine({ window, grid: view.grid, cell: "4" });
+await sky.click_cell({ window, grid: view.grid, cell: "5" });
 ```
 
-Rules:
-- Overlay: semi-transparent **square** borders + small outlined digits.
-- Refine crops to the selected cell only.
-- **Select ≠ click.**
-- Prefer `grid_view` over raw full screenshots for targeting.
+Prefer `grid_view` over a separate raw screenshot for targeting. Helpers undo
+capture scaling once and reject out-of-window points.
 
 ### Text fields (read → decide → write)
 
