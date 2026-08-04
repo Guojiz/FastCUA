@@ -29,6 +29,8 @@ assert.match(css, /:focus-visible/);
 assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
 assert.match(css, /@media \(max-width: 580px\)/);
 assert.match(js, /navigator\.clipboard/);
+assert.doesNotMatch(js, /navigator\.language/, "English must be the first-visit default regardless of browser locale");
+assert.match(js, /function preferredLanguage\(\)[\s\S]*return "en";/);
 assert.match(js, /IntersectionObserver/);
 assert.match(js, /aria-pressed/);
 

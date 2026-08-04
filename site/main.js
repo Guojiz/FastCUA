@@ -12,7 +12,7 @@
       var stored = localStorage.getItem(LANGUAGE_KEY);
       if (stored === "en" || stored === "zh") return stored;
     } catch (_) {}
-    return navigator.language && navigator.language.toLowerCase().startsWith("zh") ? "zh" : "en";
+    return "en";
   }
 
   function applyLanguage(language, persist) {
