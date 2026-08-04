@@ -53,6 +53,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node --check tests/real-machine-validation.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --check tests/site-contract.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node tests/installer-contract.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node tests/runtime-release-contract.mjs
@@ -60,6 +62,8 @@ jobs:
           node tests/runtime-identity-integration.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node tests/server-lifecycle.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node tests/site-contract.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           [scriptblock]::Create((Get-Content install.ps1 -Raw)) | Out-Null
           [scriptblock]::Create((Get-Content scripts/manage.ps1 -Raw)) | Out-Null
