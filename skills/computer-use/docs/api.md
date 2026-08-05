@@ -4,6 +4,11 @@
 
 Use this as the supported `sky` / MCP window2 surface for FastCUA.
 
+**Contents**: API surface and type shapes (below) | Text-field contract |
+Capture size, scale, and dedup contract | Per-app UIA quality profile.
+Grid responses: see the "five click modes" comment block below - every
+vision click takes `view = response.view` from `grid_view`/`grid_refine`.
+
 Tools are available both as individual MCP tools and on `sky` inside the MCP `js` REPL.
 
 ```ts

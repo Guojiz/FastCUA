@@ -1,3 +1,16 @@
+## Contents
+
+- Troubleshooting - first-response playbook; control-plane tag map
+- Timeouts (software action budget)
+- Hung or unresponsive target apps
+- Large trees and transitional windows
+- Broken UIA tree -> vision immediately
+- Runtime Behavior - bindings, first cell, API-use behavior (grid targeting)
+- Guidelines - API-use do/don't and error handling
+- Office apps (Word / Excel) - app-specific quirks only
+- Windows Safety
+- Browser Safety
+
 ## Troubleshooting
 
 IMPORTANT: do NOT dig through source code or control Windows apps through unrelated mechanisms before attempting this workflow. If you run into issues, follow the steps below FIRST.
