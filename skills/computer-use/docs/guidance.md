@@ -336,7 +336,23 @@ globalThis.targetWindow = state.window;
 - For drawing/canvas/3D manipulation, use `drag` strokes on the canvas. For Blender-like apps, focus work surface and clear modals with `Escape` before shortcut sequences.
 - Prefer a dedicated browser automation plugin for pure in-page DOM work when available; FastCUA still owns desktop chrome, system dialogs, and cross-app flows.
 
+## Office apps (Word / Excel)
+
+Field notes from live automation sessions against Microsoft Office (Office16):
+
+- Word start screen and the Save As dialog expose good UIA: use `element_index`. Chinese `type_text` works in the document body.
+- Word body text is **not** readable back via `selected_text` / `document_text` (they return empty or concatenated control names). Verify typed content via the status-bar word count (e.g. `16/16 个字`) or a `grid_view` screenshot.
+- Office Save As pre-fills the file name from the first body line. Read `focused_value` first, then decide; replace with `type_text({ replace: true })`.
+- Save commits can take several seconds when the default location is a cloud-sync folder (OneDrive). A later `window … no longer exists` on the dialog HWND usually means the save completed and the dialog closed — recover with `list_windows` instead of retrying the click.
+- The Excel start-screen HWND is transitional: `window … no longer exists` right after launch is normal; re-run `list_apps` and pick the fresh window.
+- Excel workbook grids frequently report `uia.quality: "broken"` / `prefer_vision: true` (`timeout_or_provider_disabled`). Go straight to `grid_view`; do not click `element_index`. Verify cell content visually.
+- `click` x,y use the **viewport** coordinate space (`get_window_state().viewport`), not the enlarged annotated grid image. Out-of-bounds errors print the valid range — recompute, don't retry the same point.
+- The square grid leaves narrow uncovered strips at the left/right window edges (Excel column A / row headers land there). For edge targets use plain `click` x,y instead of `click_cell`.
+- The initial `grid_view` result has no crop metadata, so `click_view` rejects it; use `click` x,y or call `grid_refine` first.
+- `lost foreground; action cancelled` appears when another app (IDE, cursor overlay) steals focus: `activate_window` and retry once; if it persists, report instead of looping.
+
 ## Windows Safety
+
 
 - Do not run Windows terminal commands via UI automation directly or indirectly via any means.
 - Do not use the Windows Run dialog.
