@@ -210,7 +210,10 @@ function Install-Skill($Def) {
 
 # ------------------------------------------------------------ smoke test ---
 
+$script:SmokePaused = $false
+
 function Test-McpSmoke([string]$AppDir) {
+  $script:SmokePaused = $false
   $node = Get-Command node -ErrorAction SilentlyContinue
   if (-not $node) { Write-Fail 'node not found on PATH'; return $false }
   $serverMjs = Join-Path $AppDir 'server.mjs'
@@ -226,14 +229,14 @@ function Test-McpSmoke([string]$AppDir) {
 
   $init = '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"fastcua-agent-setup","version":"1.0"}}}'
   $ready = '{"jsonrpc":"2.0","method":"notifications/initialized"}'
-  $list = '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
+  $call = '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_windows","arguments":{}}}'
 
   $proc = [System.Diagnostics.Process]::Start($psi)
   try {
     $proc.StandardInput.WriteLine($init)
     $proc.StandardInput.Flush()
-    $sawListWindows = $false
-    $deadline = (Get-Date).AddSeconds(20)
+    $succeeded = $false
+    $deadline = (Get-Date).AddSeconds(30)
     $initialized = $false
     while ((Get-Date) -lt $deadline) {
       $task = $proc.StandardOutput.ReadLineAsync()
@@ -242,13 +245,21 @@ function Test-McpSmoke([string]$AppDir) {
       if ($null -eq $line) { break }
       if (-not $initialized -and $line -match '"id"\s*:\s*1') {
         $proc.StandardInput.WriteLine($ready)
-        $proc.StandardInput.WriteLine($list)
+        $proc.StandardInput.WriteLine($call)
         $proc.StandardInput.Flush()
         $initialized = $true
       }
-      if ($line -match 'list_windows') { $sawListWindows = $true; break }
+      if ($initialized -and $line -match '"id"\s*:\s*2') {
+        if ($line -match 'control_plane:paused') {
+          $script:SmokePaused = $true
+        }
+        $succeeded = ($line -match '"result"') -and
+                     ($line -notmatch '"error"\s*:') -and
+                     ($line -notmatch '"isError"\s*:\s*true')
+        break
+      }
     }
-    return $sawListWindows
+    return $succeeded
   } finally {
     try {
       if (-not $proc.HasExited) { $proc.Kill() }
@@ -325,7 +336,11 @@ function Invoke-Install($Registry, [string]$AppDir) {
   Write-Host ''
   Write-Step 'Smoke test (stdio MCP handshake against server.mjs)'
   if (Test-McpSmoke $AppDir) {
-    Write-Ok 'MCP handshake succeeded; list_windows is exposed'
+    Write-Ok 'end-to-end check succeeded; list_windows returned a real response'
+  } elseif ($SmokePaused) {
+    Write-Warn2 'Runtime reachable, but desktop control is paused by the user.'
+    Write-Warn2 'Resume with F8, the control center, or:'
+    Write-Warn2 ('  Invoke-WebRequest http://127.0.0.1:8420/api/action -Method POST -Body ''{"action":"resume"}'' -ContentType ''application/json''')
   } else {
     Write-Fail 'MCP handshake failed. Run: install.ps1 -Action Doctor'
   }
@@ -363,7 +378,12 @@ function Invoke-Verify($Registry, [string]$AppDir) {
   }
   Write-Step 'Smoke test (stdio MCP handshake against server.mjs)'
   if (Test-McpSmoke $AppDir) {
-    Write-Ok 'MCP handshake succeeded; list_windows is exposed'
+    Write-Ok 'end-to-end check succeeded; list_windows returned a real response'
+  } elseif ($SmokePaused) {
+    Write-Warn2 'Runtime reachable, but desktop control is paused by the user.'
+    Write-Warn2 'Resume with F8, the control center, or:'
+    Write-Warn2 ('  Invoke-WebRequest http://127.0.0.1:8420/api/action -Method POST -Body ''{"action":"resume"}'' -ContentType ''application/json''')
+    $problems++
   } else {
     Write-Fail 'MCP handshake failed. Run: install.ps1 -Action Doctor'
     $problems++

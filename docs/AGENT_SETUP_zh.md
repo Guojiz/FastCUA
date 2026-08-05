@@ -71,7 +71,8 @@ Agent 客户端重启后，Agent 必须确认以下三点：
 3. `list_apps` 或 `list_windows` 返回真实的 Windows 数据。
 
 `-Action Verify` 为人类执行同样的检查，包括对 `server.mjs` 的真实 stdio
-MCP 握手（initialize → tools/list），并期望工具列表中出现 `list_windows`。
+MCP 往返调用（initialize → tools/call `list_windows`），要求常驻 daemon 返回成功结果；
+仅凭 tools/list 的工具元数据不算通过。
 
 如果 `runtime_info` 报告了其他目录或版本，说明 Agent 正在连接一个过期的
 检出副本。运行：
@@ -100,6 +101,7 @@ MCP 握手（initialize → tools/list），并期望工具列表中出现 `list
 | Agent 报告 FastCUA 不可用 | 重启 Agent 客户端；MCP 配置在启动时加载 |
 | `MCP configured but STALE` | 重新运行 `-Action Install -Agent <名称>` |
 | 冒烟测试失败 | `install.ps1 -Action Doctor`；检查 `node --version` |
+| Verify 提示桌面控制已暂停 | 按 F8、使用控制中心，或向 `http://127.0.0.1:8420/api/action` POST `{"action":"resume"}` |
 | Skill 未被发现 | 确认复制的是完整的 `computer-use` 文件夹，而不是单个 SKILL.md |
 
 ## 安全说明

@@ -77,8 +77,9 @@ After the agent client restarts, the agent must confirm all of:
 3. `list_apps` or `list_windows` returns real Windows data.
 
 `-Action Verify` performs the same checks for humans, including a real stdio
-MCP handshake against `server.mjs` (initialize → tools/list) that expects
-`list_windows` in the tool list.
+MCP round trip against `server.mjs` (initialize → tools/call
+`list_windows`) that requires a successful result from the live daemon;
+tool metadata alone (tools/list) is not accepted as proof.
 
 If `runtime_info` reports another directory or version, the agent is talking
 to a stale checkout. Run:
@@ -108,6 +109,7 @@ runtime.
 | Agent says FastCUA is unavailable | Restart the agent client; MCP configs load at startup |
 | `MCP configured but STALE` | Re-run `-Action Install -Agent <name>` |
 | Smoke test fails | `install.ps1 -Action Doctor`; check `node --version` |
+| Verify says desktop control is paused | Press F8, use the control center, or POST `{"action":"resume"}` to `http://127.0.0.1:8420/api/action` |
 | Skill not discovered | Confirm the full `computer-use` folder was copied, not a single SKILL.md |
 
 ## Security notes
