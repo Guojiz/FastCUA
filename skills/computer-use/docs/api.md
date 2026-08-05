@@ -262,11 +262,8 @@ type MouseButton = "left" | "right" | "middle" | "l" | "r" | "m";
 
 ### Text-field contract
 
-1. Model focuses control and calls `get_window_state` with `include_text: true`.
-2. Model reads `accessibility.focused_value`.
-3. If already correct → no `type_text`.
-4. If replacing that focused value → `type_text({ text, replace: true })` once.
-5. If typing at a caret or explicit selection → `type_text({ text })`.
+Canonical read -> decide -> write procedure: `SKILL.md` section "Text fields".
+API-level semantics: the `TypeTextInput.replace` comment above.
 
 ### Capture size, scale, and dedup contract
 

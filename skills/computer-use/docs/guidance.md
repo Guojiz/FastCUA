@@ -1,6 +1,6 @@
 ## Contents
 
-- Troubleshooting - first-response playbook; control-plane tag map
+- Troubleshooting - first-response playbook; control-plane tag pointer
 - Timeouts (software action budget)
 - Hung or unresponsive target apps
 - Large trees and transitional windows
@@ -18,12 +18,7 @@ IMPORTANT: do NOT dig through source code or control Windows apps through unrela
 - Do not fall back to PowerShell, shell scripts, SendKeys, or other foreground keyboard/mouse automation just because those tools are visible. Read and attempt this workflow first.
 - If `sky-computer-use` MCP tools are missing, say that FastCUA is unavailable. Do not invent another desktop-control stack.
 - If a tool error starts with `[control_plane:…]`, treat it as authoritative human control-plane state. **Stop desktop tools** unless the tag is `interjection` (then follow only that instruction). Never fall back to PowerShell `SendKeys` or other automation.
-- **Tag map (prompt engineering — branch on the prefix):**
-  - `[control_plane:paused]` — **BLOCK**. Not a task. No retry/poll/recovery. Wait for resume or chat.
-  - `[control_plane:interjection]` — **INSTRUCTION** (one-shot). Follow the quoted text only; control auto-resumes — continue tools immediately. Do not wait for F8.
-  - `[control_plane:stopped]` — end Computer Use this turn; report that the user stopped.
-  - `[control_plane:shutdown]` — final stop. **Do not restart** FastCUA, reconnect, reinstall, or re-open Computer Use yourself.
-  - `[control_plane:awaiting_approval]` — **BLOCK**. Wait; do not retry in a loop.
+  - Control-plane `[control_plane:...]` tags are authoritative human state. Canonical tag table and required agent behavior: `SKILL.md` section "Human control plane". On any tag, never fall back to PowerShell SendKeys or other automation; only `interjection` lets you continue, following its quoted text only.
 
 On the first Computer Use task in a session, try a lightweight call after bootstrap:
 
@@ -339,7 +334,7 @@ globalThis.targetWindow = state.window;
   - **Precise point inside a (refined) view:** `sky.click_view({window, view, x, y})` — x,y are pixels in the image you see; it bounds-checks and translates via `view.cropLeft/cropTop` + `view.scale`. Prefer `click_cell` when a numbered cell fits; use `click_view` for exact points cells don't cover; use absolute x,y only against a full-window screenshot.
   - **Cell-local offsets (voice-ready):** `sky.click_in_cell({window, grid, cell, x, y, view})` — x,y are pixels INSIDE the named cell (cell top-left = 0,0); out-of-cell coordinates are rejected, never clamped. This is the primitive for commands like "5 号格内 (30,20)".
   - Square grids are centered: narrow strips at the left/right window edges can fall outside every cell (spreadsheet column A / row headers are typical victims). For edge targets, use plain `click` x,y instead of `click_cell`.
-  - `click_view` takes the response's `view` field (`gv.view`), not the whole `grid_view` response 鈥?passing the whole response errors with `view.cropLeft is missing`. The initial view carries full crop metadata.
+  - Response contract (canonical): `grid_view`/`grid_refine` response shape and the `view = response.view` rule are defined in `SKILL.md` section "Response contract" and in `docs/api.md` (five click modes block).
 - **Normalized coords:** both `x` and `y` in `0..1` are treated as fractions of the viewport.
 - Out-of-bounds clicks error with viewport bounds; recompute instead of retrying the same bad point.
 - `lost foreground; action cancelled` means another window (IDE, cursor overlay) stole focus between activation and input: `activate_window` and retry once; if it persists, stop and report instead of looping.
