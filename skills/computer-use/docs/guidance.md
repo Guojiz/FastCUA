@@ -325,8 +325,11 @@ globalThis.targetWindow = state.window;
   - `sky.click_cell` only when ready (cell center; snaps to the UIA element under the point when UIA is healthy). Select ≠ click. Do not spam raw full-window screenshots for targeting.
   - **Precise point inside a (refined) view:** `sky.click_view({window, view, x, y})` — x,y are pixels in the image you see; it bounds-checks and translates via `view.cropLeft/cropTop` + `view.scale`. Prefer `click_cell` when a numbered cell fits; use `click_view` for exact points cells don't cover; use absolute x,y only against a full-window screenshot.
   - **Cell-local offsets (voice-ready):** `sky.click_in_cell({window, grid, cell, x, y, view})` — x,y are pixels INSIDE the named cell (cell top-left = 0,0); out-of-cell coordinates are rejected, never clamped. This is the primitive for commands like "5 号格内 (30,20)".
+  - Square grids are centered: narrow strips at the left/right window edges can fall outside every cell (spreadsheet column A / row headers are typical victims). For edge targets, use plain `click` x,y instead of `click_cell`.
+  - The initial `grid_view` result carries no crop metadata, so `click_view` rejects it; call `grid_refine` first or use plain `click` x,y.
 - **Normalized coords:** both `x` and `y` in `0..1` are treated as fractions of the viewport.
 - Out-of-bounds clicks error with viewport bounds; recompute instead of retrying the same bad point.
+- `lost foreground; action cancelled` means another window (IDE, cursor overlay) stole focus between activation and input: `activate_window` and retry once; if it persists, stop and report instead of looping.
 - Do not use `set_value` for normal text editing in this release (limited to classic Win32 Edit). Prefer click → read → decide → `type_text`.
 - `scroll` uses window-relative coordinates: `sky.scroll({ window, x, y, scrollX: 0, scrollY: 600 })`. Negative `scrollY` is up. Do not pass `element_index` to `scroll`.
 - Use keyboard navigation when it is faster than hunting UI pixels.
@@ -338,18 +341,13 @@ globalThis.targetWindow = state.window;
 
 ## Office apps (Word / Excel)
 
-Field notes from live automation sessions against Microsoft Office (Office16):
+App-specific field notes (generic grid/coordinate/foreground rules live in the sections above):
 
 - Word start screen and the Save As dialog expose good UIA: use `element_index`. Chinese `type_text` works in the document body.
 - Word body text is **not** readable back via `selected_text` / `document_text` (they return empty or concatenated control names). Verify typed content via the status-bar word count (e.g. `16/16 个字`) or a `grid_view` screenshot.
 - Office Save As pre-fills the file name from the first body line. Read `focused_value` first, then decide; replace with `type_text({ replace: true })`.
 - Save commits can take several seconds when the default location is a cloud-sync folder (OneDrive). A later `window … no longer exists` on the dialog HWND usually means the save completed and the dialog closed — recover with `list_windows` instead of retrying the click.
-- The Excel start-screen HWND is transitional: `window … no longer exists` right after launch is normal; re-run `list_apps` and pick the fresh window.
 - Excel workbook grids frequently report `uia.quality: "broken"` / `prefer_vision: true` (`timeout_or_provider_disabled`). Go straight to `grid_view`; do not click `element_index`. Verify cell content visually.
-- `click` x,y use the **viewport** coordinate space (`get_window_state().viewport`), not the enlarged annotated grid image. Out-of-bounds errors print the valid range — recompute, don't retry the same point.
-- The square grid leaves narrow uncovered strips at the left/right window edges (Excel column A / row headers land there). For edge targets use plain `click` x,y instead of `click_cell`.
-- The initial `grid_view` result has no crop metadata, so `click_view` rejects it; use `click` x,y or call `grid_refine` first.
-- `lost foreground; action cancelled` appears when another app (IDE, cursor overlay) steals focus: `activate_window` and retry once; if it persists, report instead of looping.
 
 ## Windows Safety
 
