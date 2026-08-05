@@ -1,3 +1,16 @@
+## Contents
+
+- Troubleshooting - first-response playbook; control-plane tag pointer
+- Timeouts (software action budget)
+- Hung or unresponsive target apps
+- Large trees and transitional windows
+- Broken UIA tree -> vision immediately
+- Runtime Behavior - bindings, first cell, API-use behavior (grid targeting)
+- Guidelines - API-use do/don't and error handling
+- Office apps (Word / Excel) - app-specific quirks only
+- Windows Safety
+- Browser Safety
+
 ## Troubleshooting
 
 IMPORTANT: do NOT dig through source code or control Windows apps through unrelated mechanisms before attempting this workflow. If you run into issues, follow the steps below FIRST.
@@ -5,12 +18,7 @@ IMPORTANT: do NOT dig through source code or control Windows apps through unrela
 - Do not fall back to PowerShell, shell scripts, SendKeys, or other foreground keyboard/mouse automation just because those tools are visible. Read and attempt this workflow first.
 - If `sky-computer-use` MCP tools are missing, say that FastCUA is unavailable. Do not invent another desktop-control stack.
 - If a tool error starts with `[control_plane:…]`, treat it as authoritative human control-plane state. **Stop desktop tools** unless the tag is `interjection` (then follow only that instruction). Never fall back to PowerShell `SendKeys` or other automation.
-- **Tag map (prompt engineering — branch on the prefix):**
-  - `[control_plane:paused]` — **BLOCK**. Not a task. No retry/poll/recovery. Wait for resume or chat.
-  - `[control_plane:interjection]` — **INSTRUCTION** (one-shot). Follow the quoted text only; control auto-resumes — continue tools immediately. Do not wait for F8.
-  - `[control_plane:stopped]` — end Computer Use this turn; report that the user stopped.
-  - `[control_plane:shutdown]` — final stop. **Do not restart** FastCUA, reconnect, reinstall, or re-open Computer Use yourself.
-  - `[control_plane:awaiting_approval]` — **BLOCK**. Wait; do not retry in a loop.
+  - Control-plane `[control_plane:...]` tags are authoritative human state. Canonical tag table and required agent behavior: `SKILL.md` section "Human control plane". On any tag, never fall back to PowerShell SendKeys or other automation; only `interjection` lets you continue, following its quoted text only.
 
 On the first Computer Use task in a session, try a lightweight call after bootstrap:
 
@@ -325,8 +333,11 @@ globalThis.targetWindow = state.window;
   - `sky.click_cell` only when ready (cell center; snaps to the UIA element under the point when UIA is healthy). Select ≠ click. Do not spam raw full-window screenshots for targeting.
   - **Precise point inside a (refined) view:** `sky.click_view({window, view, x, y})` — x,y are pixels in the image you see; it bounds-checks and translates via `view.cropLeft/cropTop` + `view.scale`. Prefer `click_cell` when a numbered cell fits; use `click_view` for exact points cells don't cover; use absolute x,y only against a full-window screenshot.
   - **Cell-local offsets (voice-ready):** `sky.click_in_cell({window, grid, cell, x, y, view})` — x,y are pixels INSIDE the named cell (cell top-left = 0,0); out-of-cell coordinates are rejected, never clamped. This is the primitive for commands like "5 号格内 (30,20)".
+  - Square grids are centered: narrow strips at the left/right window edges can fall outside every cell (spreadsheet column A / row headers are typical victims). For edge targets, use plain `click` x,y instead of `click_cell`.
+  - Response contract (canonical): `grid_view`/`grid_refine` response shape and the `view = response.view` rule are defined in `SKILL.md` section "Response contract" and in `docs/api.md` (five click modes block).
 - **Normalized coords:** both `x` and `y` in `0..1` are treated as fractions of the viewport.
 - Out-of-bounds clicks error with viewport bounds; recompute instead of retrying the same bad point.
+- `lost foreground; action cancelled` means another window (IDE, cursor overlay) stole focus between activation and input: `activate_window` and retry once; if it persists, stop and report instead of looping.
 - Do not use `set_value` for normal text editing in this release (limited to classic Win32 Edit). Prefer click → read → decide → `type_text`.
 - `scroll` uses window-relative coordinates: `sky.scroll({ window, x, y, scrollX: 0, scrollY: 600 })`. Negative `scrollY` is up. Do not pass `element_index` to `scroll`.
 - Use keyboard navigation when it is faster than hunting UI pixels.
@@ -336,7 +347,18 @@ globalThis.targetWindow = state.window;
 - For drawing/canvas/3D manipulation, use `drag` strokes on the canvas. For Blender-like apps, focus work surface and clear modals with `Escape` before shortcut sequences.
 - Prefer a dedicated browser automation plugin for pure in-page DOM work when available; FastCUA still owns desktop chrome, system dialogs, and cross-app flows.
 
+## Office apps (Word / Excel)
+
+App-specific field notes (generic grid/coordinate/foreground rules live in the sections above):
+
+- Word start screen and the Save As dialog expose good UIA: use `element_index`. Chinese `type_text` works in the document body.
+- Word body text is **not** readable back via `selected_text` / `document_text` (they return empty or concatenated control names). Verify typed content via the status-bar word count (e.g. `16/16 个字`) or a `grid_view` screenshot.
+- Office Save As pre-fills the file name from the first body line. Read `focused_value` first, then decide; replace with `type_text({ replace: true })`.
+- Save commits can take several seconds when the default location is a cloud-sync folder (OneDrive). A later `window … no longer exists` on the dialog HWND usually means the save completed and the dialog closed — recover with `list_windows` instead of retrying the click.
+- Excel workbook grids frequently report `uia.quality: "broken"` / `prefer_vision: true` (`timeout_or_provider_disabled`). Go straight to `grid_view`; do not click `element_index`. Verify cell content visually.
+
 ## Windows Safety
+
 
 - Do not run Windows terminal commands via UI automation directly or indirectly via any means.
 - Do not use the Windows Run dialog.

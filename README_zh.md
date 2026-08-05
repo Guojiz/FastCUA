@@ -83,6 +83,21 @@ irm https://raw.githubusercontent.com/Guojiz/FastCUA/main/install.ps1 | iex
 
 Skill 或 MCP 缺少任何一个，安装都不完整。
 
+### Agent 自部署（推荐）
+
+`scripts/agent-setup.ps1` 会把 `sky-computer-use` MCP Server 和
+`computer-use` Skill 注册到检测到的 Agent 宿主（Qoder、Claude Code、
+Claude Desktop、Codex CLI、VS Code、opencode、Kimi Work），自动备份每个
+被修改的配置文件，并运行真实的 stdio MCP 冒烟测试：
+
+```powershell
+& "$env:LOCALAPPDATA\FastCUA\app\scripts\agent-setup.ps1" -Action List
+& "$env:LOCALAPPDATA\FastCUA\app\scripts\agent-setup.ps1" -Action Install
+& "$env:LOCALAPPDATA\FastCUA\app\scripts\agent-setup.ps1" -Action Verify
+```
+
+各 Agent 的配置路径、组件生命周期和验证规则见 [docs/AGENT_SETUP_zh.md](docs/AGENT_SETUP_zh.md)。
+
 ### 验证与更新
 
 ```powershell

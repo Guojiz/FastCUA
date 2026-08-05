@@ -77,10 +77,19 @@ Visual control is **observe → select → refine → commit**:
    or `click_view` (exact point in the current image/crop).
 5. Re-observe after layout or focus changes; discard old indexes and points.
 
+**Response contract**: `grid_view` / `grid_refine` return
+`{ grid, view, screenshots, viewport, ... }` - `grid` is the numbered-cell
+geometry in window pixels; `view` is the annotated image's crop metadata
+(`cropLeft/cropTop/cropRight/cropBottom/width/height/scale`). Every vision
+click (`click_cell` / `click_in_cell` / `click_view`) takes `view =
+response.view` - never the whole response. Full shapes in `docs/api.md`.
+
 ```js
-let view = await sky.grid_view({ window });
-view = await sky.grid_refine({ window, grid: view.grid, cell: "4" });
-await sky.click_cell({ window, grid: view.grid, cell: "5" });
+let gv = await sky.grid_view({ window });
+gv = await sky.grid_refine({ window, grid: gv.grid, cell: "4" });
+await sky.click_cell({ window, grid: gv.grid, cell: "5" });
+// exact point in the image you see: pass the response's view field, not the whole response
+await sky.click_view({ window, view: gv.view, x: 120, y: 80 });
 ```
 
 Prefer `grid_view` over a separate raw screenshot for targeting. Helpers undo

@@ -83,6 +83,22 @@ The verified installer writes `FastCUA Agent Setup.txt` to the desktop. Give it 
 
 If either the Skill or MCP is missing, installation is incomplete.
 
+### Agent self-setup (recommended)
+
+`scripts/agent-setup.ps1` registers the `sky-computer-use` MCP server and the
+`computer-use` Skill into detected agent hosts (Qoder, Claude Code, Claude
+Desktop, Codex CLI, VS Code, opencode, Kimi Work), backs up every config it
+touches, and runs a live stdio MCP smoke test:
+
+```powershell
+& "$env:LOCALAPPDATA\FastCUA\app\scripts\agent-setup.ps1" -Action List
+& "$env:LOCALAPPDATA\FastCUA\app\scripts\agent-setup.ps1" -Action Install
+& "$env:LOCALAPPDATA\FastCUA\app\scripts\agent-setup.ps1" -Action Verify
+```
+
+See [docs/AGENT_SETUP.md](docs/AGENT_SETUP.md) for per-agent config paths,
+the component lifecycle, and verification rules.
+
 ### Verify and update
 
 ```powershell

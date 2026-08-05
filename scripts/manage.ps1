@@ -147,6 +147,7 @@ function New-LocalRuntime([string]$SourceRoot, [string]$StageRoot) {
     'server.mjs', 'daemon.mjs', 'overlay.ps1', 'card.xaml', 'web.html',
     'install.ps1', 'uninstall.ps1', 'LICENSE', 'README.md', 'README_zh.md',
     'config.json', 'runtime-manifest.json', 'lib', 'skills', 'scripts/manage.ps1',
+    'scripts/agent-setup.ps1',
     'tools/skill-recorder/compile.mjs', 'tools/skill-recorder/dryrun.mjs',
     'tools/skill-recorder/frame-extract.mjs', 'tools/skill-recorder/lint-skill.mjs',
     'tools/skill-recorder/promote.mjs'
@@ -255,6 +256,10 @@ After reloading the client, call runtime_info and list_apps. runtime_info must r
 
 If runtime_info reports another directory or version, stop and run:
    & "$appDir\install.ps1" -Action Doctor
+
+Automated helper when available in the installed runtime:
+   & "$appDir\scripts\agent-setup.ps1" -Action Install
+Full runbook: https://github.com/Guojiz/FastCUA/blob/main/docs/AGENT_SETUP.md
 
 Do not install a forwarding or shortened SKILL.md. Do not expose the local pipe or control center outside this computer.
 "@

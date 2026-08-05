@@ -37,6 +37,7 @@ try {
     'server.mjs', 'daemon.mjs', 'overlay.ps1', 'card.xaml', 'web.html',
     'install.ps1', 'uninstall.ps1', 'LICENSE', 'README.md', 'README_zh.md',
     'config.json', 'runtime-manifest.json', 'lib', 'skills', 'scripts/manage.ps1',
+    'scripts/agent-setup.ps1',
     'tools/skill-recorder/compile.mjs', 'tools/skill-recorder/dryrun.mjs',
     'tools/skill-recorder/frame-extract.mjs', 'tools/skill-recorder/lint-skill.mjs',
     'tools/skill-recorder/promote.mjs'

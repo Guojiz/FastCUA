@@ -4,6 +4,11 @@
 
 Use this as the supported `sky` / MCP window2 surface for FastCUA.
 
+**Contents**: API surface and type shapes (below) | Text-field contract |
+Capture size, scale, and dedup contract | Per-app UIA quality profile.
+Grid responses: see the "five click modes" comment block below - every
+vision click takes `view = response.view` from `grid_view`/`grid_refine`.
+
 Tools are available both as individual MCP tools and on `sky` inside the MCP `js` REPL.
 
 ```ts
@@ -136,6 +141,13 @@ type ClickInput = {
 // 5. click_view — sky.click_view({window, view, x, y}): x,y are pixels in the
 //    image returned by grid_view/grid_refine; the helper bounds-checks, then
 //    translates via view.cropLeft/cropTop and view.scale. Rejects out-of-view points.
+//
+// grid_view / grid_refine response shape:
+// { grid, view, screenshots, viewport, window, path, phase, select_only, unchanged? }
+// - grid: { cols, rows, side, cells: [{id,row,col,left,top,right,bottom,cx,cy}] } in WINDOW pixels.
+// - view: { cropLeft, cropTop, cropRight, cropBottom, width, height, scale } describes the
+//   annotated image you see. click_view / click_in_cell take view = THIS object, never the
+//   whole response (passing the whole response errors with "view.cropLeft is missing").
 
 // Voice-ready interaction (primitives only — no speech engine):
 //   "点击 5"        -> sky.click_cell({window, grid, cell: "5"})
@@ -250,11 +262,8 @@ type MouseButton = "left" | "right" | "middle" | "l" | "r" | "m";
 
 ### Text-field contract
 
-1. Model focuses control and calls `get_window_state` with `include_text: true`.
-2. Model reads `accessibility.focused_value`.
-3. If already correct → no `type_text`.
-4. If replacing that focused value → `type_text({ text, replace: true })` once.
-5. If typing at a caret or explicit selection → `type_text({ text })`.
+Canonical read -> decide -> write procedure: `SKILL.md` section "Text fields".
+API-level semantics: the `TypeTextInput.replace` comment above.
 
 ### Capture size, scale, and dedup contract
 
