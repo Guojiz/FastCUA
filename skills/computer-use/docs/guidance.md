@@ -326,7 +326,7 @@ globalThis.targetWindow = state.window;
   - **Precise point inside a (refined) view:** `sky.click_view({window, view, x, y})` — x,y are pixels in the image you see; it bounds-checks and translates via `view.cropLeft/cropTop` + `view.scale`. Prefer `click_cell` when a numbered cell fits; use `click_view` for exact points cells don't cover; use absolute x,y only against a full-window screenshot.
   - **Cell-local offsets (voice-ready):** `sky.click_in_cell({window, grid, cell, x, y, view})` — x,y are pixels INSIDE the named cell (cell top-left = 0,0); out-of-cell coordinates are rejected, never clamped. This is the primitive for commands like "5 号格内 (30,20)".
   - Square grids are centered: narrow strips at the left/right window edges can fall outside every cell (spreadsheet column A / row headers are typical victims). For edge targets, use plain `click` x,y instead of `click_cell`.
-  - The initial `grid_view` result carries no crop metadata, so `click_view` rejects it; call `grid_refine` first or use plain `click` x,y.
+  - `click_view` takes the response's `view` field (`gv.view`), not the whole `grid_view` response 鈥?passing the whole response errors with `view.cropLeft is missing`. The initial view carries full crop metadata.
 - **Normalized coords:** both `x` and `y` in `0..1` are treated as fractions of the viewport.
 - Out-of-bounds clicks error with viewport bounds; recompute instead of retrying the same bad point.
 - `lost foreground; action cancelled` means another window (IDE, cursor overlay) stole focus between activation and input: `activate_window` and retry once; if it persists, stop and report instead of looping.

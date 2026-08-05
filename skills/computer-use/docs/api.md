@@ -136,6 +136,13 @@ type ClickInput = {
 // 5. click_view — sky.click_view({window, view, x, y}): x,y are pixels in the
 //    image returned by grid_view/grid_refine; the helper bounds-checks, then
 //    translates via view.cropLeft/cropTop and view.scale. Rejects out-of-view points.
+//
+// grid_view / grid_refine response shape:
+// { grid, view, screenshots, viewport, window, path, phase, select_only, unchanged? }
+// - grid: { cols, rows, side, cells: [{id,row,col,left,top,right,bottom,cx,cy}] } in WINDOW pixels.
+// - view: { cropLeft, cropTop, cropRight, cropBottom, width, height, scale } describes the
+//   annotated image you see. click_view / click_in_cell take view = THIS object, never the
+//   whole response (passing the whole response errors with "view.cropLeft is missing").
 
 // Voice-ready interaction (primitives only — no speech engine):
 //   "点击 5"        -> sky.click_cell({window, grid, cell: "5"})
