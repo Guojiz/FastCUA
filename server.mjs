@@ -86,8 +86,8 @@ class DaemonClient {
         candidate.once("error", () => {
           if (settled) return;
           if (attempt === 0 && readCostart() !== "manual") { this.spawnDaemon(); }
-          // Cold-start budget: the daemon (esp. spawning the WPF overlay + bundled
-          // node cold start) can take several seconds to open the pipe. Retry for
+          // Cold-start budget: the daemon (bundled node cold start + helper spawn)
+          // can take several seconds to open the pipe. Retry for
           // up to ~14s so the first call after a cold start succeeds instead of
           // failing with "daemon unavailable".
           if (attempt < 40) { attempt++; retryTimer = setTimeout(tryConn, 350); }
@@ -373,6 +373,8 @@ const sky = {
   drag: (i) => daemonForCall().request("drag", i),
   perform_secondary_action: (i) => daemonForCall().request("perform_secondary_action", i),
   activate_window: (i) => daemonForCall().request("activate_window", i),
+  list_history: (i) => daemonForCall().request("list_history", i),
+  get_history: (i) => daemonForCall().request("get_history", i),
   close: async () => { await closeDaemonClients(); return { ok: true }; },
   // Coordinate helpers
   viewport: viewportFromState,
@@ -653,6 +655,8 @@ const TOOLS = [
   { name: "close", desc: "Finish the current computer-use turn and close this MCP client connection. Call once after the task is verified. The shared FastCUA daemon and helper remain available to other clients.", inputSchema: { type: "object", properties: {} } },
   { name: "js", desc: "Persistent JS REPL with sky + nodeRepl. Prefer sky.grid_view({window}) for ONE annotated square-grid image (semi-transparent outlines + outlined numbers). Refine: sky.grid_refine({window,grid,cell}). Click when ready: sky.click_cell (cell center) or sky.click_view({window, view, x, y}) (point inside a refined view image). Example: let gv=await sky.grid_view({window}); gv=await sky.grid_refine({window,grid:gv.grid,cell:'4'}); await sky.click_cell({window,grid:gv.grid,cell:'5'});", inputSchema: { type: "object", properties: { code: { type: "string", description: "JavaScript to execute. Use await for sky calls. Assign cross-cell state to globalThis." } }, required: ["code"] } },
   { name: "grid_view", desc: "Capture window once with visual SQUARE number grid overlaid (semi-transparent cell outlines + outlined digits). Optional path drills into prior cell ids (crops + 3x3). Returns one annotated image only. Does not click.", inputSchema: { type: "object", properties: { window: W, path: { type: "array", items: { type: "string" }, description: "Prior selected cell ids for drill-down" }, max_edge: { type: "number", description: "Max long edge of the view JPEG (default 1568); view.scale reports the factor." } }, required: ["window"] } },
+  { name: "list_history", desc: "List recent Computer Use history entries from the local on-disk audit timeline (actions, apps, outcomes, control events). Default returns up to 100 metadata entries without screenshots; set include_screenshots:true to embed each entry's first screenshot. Filter by since (entry id), sessionId, or app.", inputSchema: { type: "object", properties: { limit: { type: "number", description: "Max entries (default 100, max 1000)." }, since: { type: "number", description: "Only entries with id > since." }, sessionId: { type: "string" }, app: { type: "string" }, include_screenshots: { type: "boolean", default: false } } } },
+  { name: "get_history", desc: "Return one Computer Use history entry by id, optionally with its screenshots embedded as data URLs.", inputSchema: { type: "object", properties: { id: { type: "number" }, include_screenshots: { type: "boolean", default: true } }, required: ["id"] } },
 ];
 
 function win(a) { return a && typeof a === "object" ? { app: a.app, id: a.id } : a; }
@@ -674,6 +678,8 @@ async function callTool(name, args) {
     case "drag": return await sky.drag({ window: w, from_x: args.from_x, from_y: args.from_y, to_x: args.to_x, to_y: args.to_y, screenshotId: args.screenshotId });
     case "perform_secondary_action": return await sky.perform_secondary_action({ window: w, element_index: args.element_index, action: args.action });
     case "activate_window": return await sky.activate_window({ window: w });
+    case "list_history": return await sky.list_history({ limit: args.limit, since: args.since, sessionId: args.sessionId, app: args.app, includeScreenshots: args.include_screenshots === true });
+    case "get_history": return await sky.get_history({ id: args.id, includeScreenshots: args.include_screenshots !== false });
     case "close": return await sky.close();
     default: throw new Error("unknown tool: " + name);
   }
@@ -743,6 +749,22 @@ function stateToContent(state) {
   if (state?.window) content.push({ type: "text", text: "window=" + JSON.stringify(state.window) });
   return content;
 }
+function historyToContent(out) {
+  const content = [];
+  const entries = Array.isArray(out?.entries) ? out.entries : (out ? [out] : []);
+  if (out?.stats) content.push({ type: "text", text: "history stats=" + JSON.stringify(out.stats) });
+  for (const entry of entries) {
+    const meta = { ...entry };
+    const shots = Array.isArray(meta.screenshots) ? meta.screenshots : [];
+    meta.screenshots = shots.map((shot) => ({ path: shot?.path || null, mime: shot?.mime || null, width: shot?.width || null, height: shot?.height || null, embedded: Boolean(shot?.url) }));
+    content.push({ type: "text", text: "entry=" + JSON.stringify(meta) });
+    for (const shot of shots) {
+      const m = /^data:([^;]+);base64,(.*)$/s.exec(shot?.url || "");
+      if (m) content.push({ type: "image", data: m[2], mimeType: m[1] });
+    }
+  }
+  return content.length ? content : [{ type: "text", text: JSON.stringify(out, null, 2) }];
+}
 
 // ---- MCP stdio JSON-RPC 2.0 ----
 let buf = "";
@@ -786,8 +808,8 @@ async function handle(line) {
         delete result.closeRequested;
       } else {
         const out = await callTool(name, args);
-        const content = ((name === "get_window_state" || name === "grid_view") && out)
-          ? stateToContent(out)
+        const content = ((name === "get_window_state" || name === "grid_view" || name === "list_history" || name === "get_history") && out)
+          ? ((name === "list_history" || name === "get_history") ? historyToContent(out) : stateToContent(out))
           : [{ type: "text", text: JSON.stringify(out, null, 2) }];
         result = { content, isError: false };
         closeAfterResponse = name === "close";

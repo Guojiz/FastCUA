@@ -6,12 +6,13 @@
 //
 // Owns ONE helper subprocess (one cursor, shared across all clients), hosts a
 // named pipe for MCP-server clients, centralizes app approval (cached across
-// clients), turn metadata + Esc interrupt (per client), overlay lifecycle
-// (idle-shutdown). Persistent-helper-shared-by-clients model (no per-process
-// spawn).
+// clients), turn metadata + Esc interrupt (per client), persistent Computer Use
+// history recording, and idle-shutdown. Headless: configuration is a local
+// config.json file; there is no HTTP UI, console, or overlay. The optional
+// control UI lives in the DeepSeek Harness plugin instead.
+// Persistent-helper-shared-by-clients model (no per-process spawn).
 import { spawn, execFileSync } from "node:child_process";
 import net from "node:net";
-import http from "node:http";
 import path from "node:path";
 import fs from "node:fs";
 import crypto from "node:crypto";
@@ -20,12 +21,12 @@ import {
   readRuntimeManifest,
   runtimeConfigPath,
   runtimeDataDir,
-  runtimeDefaultPort,
   runtimeInfo,
   runtimePipe,
   runtimeRootHash,
 } from "./lib/runtime.mjs";
 import { checkForUpdates } from "./lib/update-check.mjs";
+import { HistoryStore, sanitizeParams } from "./lib/history.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const RUNTIME_MANIFEST = readRuntimeManifest(HERE);
@@ -79,15 +80,51 @@ function interjectMsg(text) {
 }
 const B = (t) => String(t).replace(/[^A-Za-z0-9._-]/g, "_");
 const recentLogs = [];
-const events = []; // structured events for overlay [{id,ts,type,action,client,duration_ms,summary}]
+const events = []; // structured control/activity events [{id,ts,type,action,client,duration_ms,summary}]
 let nextEventId = 1;
 const startedAt = Date.now();
 let currentAction = null; // in-flight: {action, summary, startedAt, client}
-let pendingInterjection = null; // text from overlay interjection input
+let pendingInterjection = null; // text supplied by the host control plane
 function emitEvent(type, data) {
   const e = { id: nextEventId++, ts: Date.now(), type, ...data };
   events.push(e);
   if (events.length > 200) events.shift();
+  historyRecordEvent(type, data);
+}
+// Persist control-plane events into the Computer Use history timeline. Desktop
+// actions are recorded separately in handleClientReq (with screenshots/params).
+function historyRecordEvent(type, data) {
+  if (!history.enabled) return;
+  if (!["approval_required", "approval_allowed", "approval_denied", "policy", "paused", "resumed", "interjection", "shutdown", "interrupt"].includes(type)) return;
+  const app = data?.app || null;
+  const summaries = {
+    approval_required: () => `approval required: ${app || "unknown app"}${data?.action ? ` · ${data.action}` : ""}`,
+    approval_allowed: () => `approval allowed: ${app || "unknown app"}${data?.decision ? ` (${data.decision})` : ""}`,
+    approval_denied: () => `approval denied: ${app || "unknown app"}`,
+    policy: () => `approval policy: ${data?.approvalPolicy || "changed"}`,
+    paused: () => "control paused",
+    resumed: () => "control resumed",
+    interjection: () => `interjection (${data?.text ? String(data.text).length : 0} chars)`,
+    shutdown: () => "fastcua shutdown",
+    interrupt: () => `interrupt (client ${data?.client || "?"})`,
+  };
+  try {
+    history.append({
+      sessionId: null,
+      turnId: null,
+      client: data?.client || null,
+      app,
+      action: `control:${type}`,
+      summary: String((summaries[type] || (() => type))()).slice(0, 500),
+      params: null,
+      ok: type !== "approval_denied",
+      durationMs: null,
+      error: null,
+      screenshots: [],
+    });
+  } catch (e) {
+    log("history append failed (control event):", e.message);
+  }
 }
 function actionSummary(method, params) {
   if (!params) return "";
@@ -96,10 +133,10 @@ function actionSummary(method, params) {
     const short = app.includes("\\") ? app.split("\\").pop() : app;
     if (method === "click") return `${short} · click(${params.element_index ?? (params.x+','+params.y)})`;
     if (method === "drag") return `${short} · drag(${params.from_x},${params.from_y})→(${params.to_x},${params.to_y})`;
-    if (method === "type_text") return `${short} · type "${params.text?.slice(0,20)||''}"`;
+    if (method === "type_text") return `${short} · type ${String(params.text || "").length} chars`;
     if (method === "press_key") return `${short} · press ${params.key}`;
     if (method === "scroll") return `${short} · scroll(${params.scrollX||0},${params.scrollY||0})`;
-    if (method === "set_value") return `${short} · set[${params.element_index}]="${params.value?.slice(0,20)||''}"`;
+    if (method === "set_value") return `${short} · set[${params.element_index}] ${String(params.value || "").length} chars`;
     return `${short} · ${method}`;
   }
   if (method === "list_apps") return "列出应用";
@@ -107,8 +144,32 @@ function actionSummary(method, params) {
   if (method === "get_window_state") return `截图 ${(params.window?.app||"").split("\\").pop()||"?"}`;
   return method;
 }
+// Append one desktop action to the persistent Computer Use history timeline.
+function recordActionHistory({ method, params, app, summary, sessionId, turnId, ok, durationMs, error, result }) {
+  if (!history.enabled) return;
+  try {
+    const screenshots = (result && Array.isArray(result.screenshots))
+      ? result.screenshots.map((s) => ({ url: s?.url, width: s?.width, height: s?.height }))
+      : [];
+    history.append({
+      sessionId,
+      turnId,
+      client: sessionId ? sessionId.slice(0, 8) : null,
+      app: app ? String(app) : null,
+      action: method,
+      summary,
+      params: sanitizeParams(method, params),
+      ok,
+      durationMs,
+      error: error || null,
+      screenshots,
+    });
+  } catch (e) {
+    log("history append failed (action):", e.message);
+  }
+}
 
-// ---- config (web UI editable) ----
+// ---- config (config-file and named-pipe editable) ----
 const CONFIG_PATH = runtimeConfigPath(HERE, RUNTIME_MANIFEST);
 // Default whitelist: exact basenames / AUMIDs only (no substring match). Common local tools; not browsers/password managers.
 const DEFAULT_WHITELIST = [
@@ -121,18 +182,20 @@ const DEFAULT_WHITELIST = [
   "write.exe",
   "Code.exe",
 ];
+// Default is FULL ACCESS: no per-app prompts unless the user edits config.json
+// and opts back into "safe" (whitelist/prompt) mode.
 const DEFAULT_CONFIG = {
   costartMode: "claude",
   idleTimeoutMin: 5,
-  approvalPolicy: "safe",
+  approvalPolicy: "full",
   whitelist: [...DEFAULT_WHITELIST],
-  port: runtimeDefaultPort(HERE, RUNTIME_MANIFEST),
   checkForUpdates: true,
-  bannerEnabled: false,
-  overlayEnabled: true,
-  overlayTitle: "FastCUA is using your computer",
-  overlayLanguage: "auto",
   cuaBinPath: "",
+  historyEnabled: true,
+  historyCaptureScreenshots: true,
+  historyMaxEntries: 10000,
+  historyRetentionDays: 30,
+  historyMaxShotsPerAction: 1,
 };
 const APPROVAL_WAIT_MS = 60_000;
 const pendingApprovals = new Map();
@@ -154,38 +217,60 @@ function rejectPendingApproval(token, reason) {
   emitEvent("approval_denied", { action: approval.method, summary: approval.summary, error: reason });
   return true;
 }
+const VALID_APPROVAL_DECISIONS = ["deny", "allow_once", "allow_and_whitelist", "full_access"];
 function resolvePendingApproval(token, decision) {
+  if (!VALID_APPROVAL_DECISIONS.includes(decision)) throw new Error("unknown approval decision: " + decision);
   const approval = pendingApprovals.get(token);
   if (!approval) throw new Error("approval request is no longer pending");
-  pendingApprovals.delete(token); clearTimeout(approval.timer);
-  if (decision === "deny") { approval.entry.reject(new Error("Desktop action denied by user")); emitEvent("approval_denied", { action: approval.method, summary: approval.summary }); return; }
+
+  if (decision === "deny") {
+    pendingApprovals.delete(token);
+    clearTimeout(approval.timer);
+    approval.entry.reject(new Error("Desktop action denied by user"));
+    emitEvent("approval_denied", { action: approval.method, summary: approval.summary });
+    return;
+  }
+
+  // Persist any security-policy mutation before changing live state or
+  // consuming the approval token. If persistence fails, the request remains
+  // pending and the existing in-memory policy remains authoritative.
+  let nextConfig = config;
   if (decision === "allow_and_whitelist") {
     const basename = approval.app.slice(Math.max(approval.app.lastIndexOf("\\"), approval.app.lastIndexOf("/")) + 1);
-    if (basename && !isWhitelisted(approval.app)) { config = { ...config, whitelist: [...(config.whitelist || []), basename] }; saveConfig(config); }
+    if (basename && !isWhitelisted(approval.app)) nextConfig = { ...config, whitelist: [...(config.whitelist || []), basename] };
+  } else if (decision === "full_access" && config.approvalPolicy !== "full") {
+    nextConfig = { ...config, approvalPolicy: "full" };
   }
+  if (nextConfig !== config) saveConfig(nextConfig);
+
+  pendingApprovals.delete(token);
+  clearTimeout(approval.timer);
+  const policyChanged = nextConfig.approvalPolicy !== config.approvalPolicy;
+  config = nextConfig;
+  if (policyChanged) {
+    emitEvent("policy", { approvalPolicy: "full" });
+    log("approval: switched to FULL ACCESS from host control plane");
+  }
+
   if (decision === "full_access") {
-    // Switch control plane to full access (no further per-app prompts) and allow this request.
-    if (config.approvalPolicy !== "full") {
-      config = { ...config, approvalPolicy: "full" };
-      saveConfig(config);
-      emitEvent("policy", { approvalPolicy: "full" });
-      log("approval: switched to FULL ACCESS from approval island");
-    }
-    // Allow any other pending prompts as well — full access means no more waiting.
+    // Full access resolves all already-pending prompts, but an active pause
+    // still wins and prevents those desktop actions from executing.
     for (const [otherToken, other] of [...pendingApprovals.entries()]) {
-      if (otherToken === token) continue;
       pendingApprovals.delete(otherToken);
       clearTimeout(other.timer);
       if (other.app) approvedApps.add(other.app);
       emitEvent("approval_allowed", { action: other.method, summary: other.summary, app: other.app, decision: "full_access" });
+      if (isUserPaused) { other.entry.reject(new Error(PAUSE_BLOCK_MSG)); continue; }
       sendToBinary(other.entry.method, other.entry.params, other.entry.meta, { [APPROVED_KEY]: other.app })
         .then(other.entry.resolve, other.entry.reject);
     }
   }
-  // allow_once authorizes only this retry. Caching it here silently turns a
-  // one-shot decision into daemon-lifetime trust.
+
+  // allow_once authorizes only this retry; policy-backed decisions may be
+  // cached only after their config mutation has been persisted successfully.
   if (approval.app && decision !== "allow_once") approvedApps.add(approval.app);
   emitEvent("approval_allowed", { action: approval.method, summary: approval.summary, app: approval.app, decision });
+  if (isUserPaused) { approval.entry.reject(new Error(PAUSE_BLOCK_MSG)); return; }
   sendToBinary(approval.entry.method, approval.entry.params, approval.entry.meta, { [APPROVED_KEY]: approval.app })
     .then(approval.entry.resolve, approval.entry.reject);
 }
@@ -193,9 +278,10 @@ function normalizeConfig(value = {}) {
   const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
   const costartMode = ["claude", "login", "manual"].includes(source.costartMode) ? source.costartMode : DEFAULT_CONFIG.costartMode;
   const requestedPolicy = ["whitelist", "prompt", "auto"].includes(source.approvalPolicy) ? "safe" : source.approvalPolicy;
-  const approvalPolicy = ["safe", "full"].includes(requestedPolicy) ? requestedPolicy : DEFAULT_CONFIG.approvalPolicy;
+  // Missing policy uses the product default. A present-but-unknown policy is a
+  // semantic config error and must fail closed rather than silently grant full.
+  const approvalPolicy = requestedPolicy == null ? DEFAULT_CONFIG.approvalPolicy : (["safe", "full"].includes(requestedPolicy) ? requestedPolicy : "safe");
   const idle = Number(source.idleTimeoutMin);
-  const port = Number(source.port);
   const whitelist = Array.isArray(source.whitelist)
     ? [...new Set(source.whitelist.map(entry => String(entry).trim()).filter(Boolean))].slice(0, 100)
     : [...DEFAULT_CONFIG.whitelist];
@@ -204,32 +290,63 @@ function normalizeConfig(value = {}) {
     idleTimeoutMin: Number.isFinite(idle) ? Math.min(120, Math.max(0, idle)) : DEFAULT_CONFIG.idleTimeoutMin,
     approvalPolicy,
     whitelist,
-    port: Number.isInteger(port) && port >= 1024 && port <= 65535 ? port : DEFAULT_CONFIG.port,
     checkForUpdates: source.checkForUpdates !== false,
-    bannerEnabled: source.bannerEnabled === true,
-    overlayEnabled: source.overlayEnabled !== false,
-    overlayTitle: typeof source.overlayTitle === "string" ? source.overlayTitle.slice(0, 100) : DEFAULT_CONFIG.overlayTitle,
-    overlayLanguage: ["auto", "en", "zh"].includes(source.overlayLanguage) ? source.overlayLanguage : DEFAULT_CONFIG.overlayLanguage,
     cuaBinPath: typeof source.cuaBinPath === "string" ? source.cuaBinPath.slice(0, 4096) : "",
+    historyEnabled: source.historyEnabled !== false,
+    historyCaptureScreenshots: source.historyCaptureScreenshots !== false,
+    historyMaxEntries: Number.isFinite(Number(source.historyMaxEntries)) ? Math.min(1_000_000, Math.max(0, Number(source.historyMaxEntries))) : DEFAULT_CONFIG.historyMaxEntries,
+    historyRetentionDays: Number.isFinite(Number(source.historyRetentionDays)) ? Math.min(3650, Math.max(0, Number(source.historyRetentionDays))) : DEFAULT_CONFIG.historyRetentionDays,
+    historyMaxShotsPerAction: Number.isFinite(Number(source.historyMaxShotsPerAction)) ? Math.min(10, Math.max(1, Number(source.historyMaxShotsPerAction))) : DEFAULT_CONFIG.historyMaxShotsPerAction,
   };
 }
+function recoverConfigBackup() {
+  const backup = CONFIG_PATH + ".bak";
+  if (!fs.existsSync(backup)) return;
+  let currentValid = false;
+  try { JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8")); currentValid = true; } catch {}
+  if (!currentValid) fs.copyFileSync(backup, CONFIG_PATH);
+  try { fs.unlinkSync(backup); } catch {}
+}
 function loadConfig() {
+  recoverConfigBackup();
   for (const candidate of [CONFIG_PATH, path.join(HERE, "config.json")]) {
+    let raw;
+    try { raw = fs.readFileSync(candidate, "utf8"); } catch { continue; } // file missing: try next candidate
     try {
-      const loaded = JSON.parse(fs.readFileSync(candidate, "utf8"));
-      if (candidate !== CONFIG_PATH && RUNTIME_MANIFEST.buildType === "development") {
-        delete loaded.port;
-      }
+      const loaded = JSON.parse(raw);
       return normalizeConfig({ ...DEFAULT_CONFIG, ...loaded });
-    } catch {}
+    } catch (e) {
+      // File exists but is not valid JSON: fail CLOSED to safe mode rather
+      // than silently falling back to the full-access default.
+      log("config.json at", candidate, "is invalid JSON (" + e.message + ") \u2014 failing closed to safe mode");
+      return normalizeConfig({ ...DEFAULT_CONFIG, approvalPolicy: "safe" });
+    }
   }
   return { ...DEFAULT_CONFIG };
 }
 function saveConfig(c) {
   fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify(normalizeConfig(c), null, 2) + "\n");
+  const payload = JSON.stringify(normalizeConfig(c), null, 2) + "\n";
+  const backup = CONFIG_PATH + ".bak";
+  try { fs.unlinkSync(backup); } catch {}
+  const hadCurrent = fs.existsSync(CONFIG_PATH);
+  if (hadCurrent) fs.copyFileSync(CONFIG_PATH, backup);
+  try {
+    fs.writeFileSync(CONFIG_PATH, payload);
+  } catch (error) {
+    if (hadCurrent && fs.existsSync(backup)) fs.copyFileSync(backup, CONFIG_PATH);
+    throw error;
+  }
+  try { fs.unlinkSync(backup); } catch {}
 }
 let config = loadConfig();
+const history = new HistoryStore(path.join(CUA_CACHE_DIR, "history"), {
+  enabled: config.historyEnabled,
+  captureScreenshots: config.historyCaptureScreenshots,
+  maxEntries: config.historyMaxEntries,
+  retentionDays: config.historyRetentionDays,
+  maxShots: config.historyMaxShotsPerAction,
+});
 let updateStatus = {
   status: RUNTIME_MANIFEST.buildType === "development" ? "development" : "pending",
   checkedAt: null,
@@ -344,9 +461,6 @@ function recordUiaObservation(method, params, app, result, dur, errorMessage) {
     }
   }
   saveUiaProfile();
-}
-if (process.env.FASTCUA_HTTP_PORT) {
-  config = normalizeConfig({ ...config, port: Number(process.env.FASTCUA_HTTP_PORT) });
 }
 function idleMs() { const m = config.idleTimeoutMin; return m > 0 ? m * 60 * 1000 : 0; }
 
@@ -505,6 +619,7 @@ function clearClientInterrupt(c) {
   c.interruptMessage = null;
   c.interjection = null;
   c.interruptOneShot = false;
+  c.interruptPauseLinked = false;
 }
 
 /**
@@ -521,7 +636,7 @@ function abortInFlightWithoutAgentPrompt(reason = PAUSE_BLOCK_MSG) {
     e.reject(new Error(reason));
   }
   pendingBin.clear();
-  // Keep pendingApprovals: pause is not a deny. User may still decide on the approval island.
+  // Keep pendingApprovals: pause is not a deny. The host control plane may still resolve them.
   try { if (p) killProcessTree(p.pid); } catch {}
 }
 
@@ -535,6 +650,16 @@ function abortInFlightWithoutAgentPrompt(reason = PAUSE_BLOCK_MSG) {
  */
 function applyStopAll({ pause = false } = {}) {
   const interjection = pendingInterjection;
+  // Paired stop+pause is semantically just Pause: block future calls and cancel
+  // in-flight helper work without client latches or approval loss.
+  if (pause && !interjection) {
+    pendingInterjection = null;
+    isUserPaused = true;
+    abortInFlightWithoutAgentPrompt(PAUSE_BLOCK_MSG);
+    emitEvent("paused", { client: "user", reason: "stop" });
+    log("action: stopAll — paused", clients.size, "clients (block only)");
+    return;
+  }
   // Only interjection text is a real agent-facing instruction. Plain stop uses ESC_MSG.
   const msg = interjection ? interjectMsg(interjection) : ESC_MSG;
   pendingInterjection = null;
@@ -544,6 +669,7 @@ function applyStopAll({ pause = false } = {}) {
     c.interruptMessage = msg;
     // Mark one-shot so interjection is delivered once then control continues.
     c.interruptOneShot = Boolean(interjection);
+    c.interruptPauseLinked = false;
     const f = interruptFilePath(c.sessionId, c.turnId);
     try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, ""); } catch {}
   }
@@ -554,20 +680,17 @@ function applyStopAll({ pause = false } = {}) {
     isUserPaused = false;
     emitEvent("interjection", { client: "user", text: String(interjection).slice(0, 200) });
     emitEvent("resumed", { client: "user", reason: "interjection_auto_resume" });
-  } else if (pause) {
-    isUserPaused = true;
-    emitEvent("paused", { client: "user", reason: "stop" });
   }
   emitEvent("interrupt", {
     client: "stop",
-    paused: Boolean(pause) && !interjection,
+    paused: false,
     interjection: Boolean(interjection),
   });
   log(
     "action: stopAll — interrupted",
     clients.size,
     "clients",
-    interjection ? "(interject + auto-resume)" : pause ? "(paused_by_user)" : "(running latch only)",
+    interjection ? "(interject + auto-resume)" : "(running latch only)",
     interjection ? `interjection="${String(interjection).slice(0, 60)}"` : ""
   );
 }
@@ -582,6 +705,7 @@ function makeClient(socket) {
     interrupted: false,
     interruptMessage: null,
     interruptOneShot: false,
+    interruptPauseLinked: false,
     clientGroup: null,
     closed: false,
   };
@@ -619,7 +743,6 @@ function onClientGone(socket) {
       idleTimer = setTimeout(() => {
         log("idle for", ms / 1000, "s — shutting down helper + daemon");
         resetBinary();
-        if (overlayProc) { try { overlayProc.kill(); } catch {} }
         process.exit(0);
       }, ms);
     }
@@ -659,10 +782,128 @@ async function handleClientReq(c, req) {
         serverPath: path.join(HERE, "server.mjs"),
         daemonPath: path.join(HERE, "daemon.mjs"),
         nativeHostPath: resolveCuaBin(),
-        httpPort: config.port,
         update: updateStatus,
       }),
     });
+    return;
+  }
+  // ---- headless control plane + Computer Use history (named-pipe methods) ----
+  // These are NOT gated by pause/approval/interrupt: they are how a control UI
+  // (the DeepSeek Harness plugin, a test, or a script) drives the daemon.
+  if (method === "state") {
+    reply(c, id, { result: buildState() });
+    return;
+  }
+  if (method === "get_config") {
+    reply(c, id, { result: config });
+    return;
+  }
+  if (method === "set_config") {
+    try {
+      const next = normalizeConfig({ ...config, ...(params?.config || params || {}) });
+      const costartChanged = next.costartMode !== config.costartMode;
+      const approvalChanged = next.approvalPolicy !== config.approvalPolicy || JSON.stringify(next.whitelist) !== JSON.stringify(config.whitelist);
+      saveConfig(next);
+      config = next;
+      history.reconfigure({
+        enabled: config.historyEnabled,
+        captureScreenshots: config.historyCaptureScreenshots,
+        maxEntries: config.historyMaxEntries,
+        retentionDays: config.historyRetentionDays,
+        maxShots: config.historyMaxShotsPerAction,
+      });
+      if (approvalChanged) approvedApps.clear();
+      if (costartChanged) applyCostart(config.costartMode);
+      emitEvent("policy", { approvalPolicy: config.approvalPolicy });
+      reply(c, id, { result: config });
+    } catch (error) {
+      reply(c, id, { error: error.message });
+    }
+    return;
+  }
+  if (method === "pause") {
+    isUserPaused = true;
+    // Abort in-flight desktop work, but do NOT latch interrupt prompts on clients.
+    // Agent only sees PAUSE_BLOCK_MSG if a call is cancelled or they try again.
+    abortInFlightWithoutAgentPrompt(PAUSE_BLOCK_MSG);
+    emitEvent("paused", { client: "user" });
+    log("action: user paused desktop control (block only — no agent prompt)");
+    reply(c, id, { result: { ok: true } });
+    return;
+  }
+  if (method === "resume") {
+    isUserPaused = false;
+    for (const [, peer] of clients) {
+      if (peer.interrupted && peer.interruptPauseLinked) clearClientInterrupt(peer);
+    }
+    emitEvent("resumed", { client: "user" });
+    reply(c, id, { result: { ok: true } });
+    return;
+  }
+  if (method === "interject") {
+    const text = typeof params?.text === "string" ? params.text.trim().slice(0, 2000) : "";
+    if (!text) { reply(c, id, { error: "interjection text is required" }); return; }
+    pendingInterjection = text;
+    applyStopAll({ pause: false });
+    isUserPaused = false;
+    reply(c, id, { result: { ok: true, paused: false, resumed: true, interjection: true } });
+    return;
+  }
+  if (method === "resolve_approval") {
+    try {
+      await resolvePendingApproval(params?.token, params?.decision);
+      reply(c, id, { result: { ok: true } });
+    } catch (error) {
+      reply(c, id, { error: error.message });
+    }
+    return;
+  }
+  if (method === "clear_approvals") {
+    approvedApps.clear();
+    reply(c, id, { result: { ok: true } });
+    return;
+  }
+  if (method === "stop_all") {
+    applyStopAll({ pause: Boolean(params?.pause) });
+    reply(c, id, { result: { ok: true } });
+    return;
+  }
+  if (method === "restart") {
+    log("action: restarting daemon");
+    resetBinary();
+    reply(c, id, { result: { ok: true } });
+    setTimeout(() => process.exit(0), 200);
+    return;
+  }
+  if (method === "shutdown") {
+    shutdownDaemon();
+    reply(c, id, { result: { ok: true } });
+    return;
+  }
+  if (method === "list_history") {
+    const includeScreenshots = params?.includeScreenshots === true || params?.include_screenshots === true;
+    // Agent-facing history is scoped to the requesting daemon client. A host
+    // settings/history UI reads the local history file through its own grant.
+    const entries = history.list({
+      limit: params?.limit,
+      since: params?.since,
+      app: params?.app,
+      sessionId: c.sessionId,
+      includeScreenshots,
+    });
+    reply(c, id, { result: { entries, stats: history.stats() } });
+    return;
+  }
+  if (method === "get_history") {
+    const includeScreenshots = params?.includeScreenshots !== false && params?.include_screenshots !== false;
+    const candidate = history.get(params?.id, { includeScreenshots });
+    const entry = candidate?.sessionId === c.sessionId ? candidate : null;
+    reply(c, id, { result: entry });
+    return;
+  }
+  if (method === "clear_history") {
+    history.clear();
+    reply(c, id, { result: { ok: true, stats: history.stats() } });
     return;
   }
   // Order matters for agent messaging:
@@ -706,6 +947,7 @@ async function handleClientReq(c, req) {
     const result = await sendToBinary(method, params, meta, {});
     const dur = Date.now() - t0;
     recordUiaObservation(method, params, app, result, dur, null);
+    recordActionHistory({ method, params, app, summary, sessionId: c.sessionId, turnId: String(c.turnId), ok: true, durationMs: dur, error: null, result });
     if (currentAction === action) currentAction = null;
     emitEvent("action_end", { client: c.sessionId.slice(0,8), action: method, duration_ms: dur, summary, ok: true });
     reply(c, id, { result });
@@ -713,6 +955,7 @@ async function handleClientReq(c, req) {
     if (currentAction === action) currentAction = null;
     const dur = Date.now() - t0;
     recordUiaObservation(method, params, app, null, dur, e.message);
+    recordActionHistory({ method, params, app, summary, sessionId: c.sessionId, turnId: String(c.turnId), ok: false, durationMs: dur, error: e.message, result: null });
     emitEvent("action_end", { client: c.sessionId.slice(0,8), action: method, duration_ms: dur, summary, ok: false, error: e.message });
     reply(c, id, { error: e.message });
   }
@@ -747,167 +990,57 @@ function applyCostart(mode) {
   } catch (e) { log("co-start reg write failed:", e.message); }
 }
 
-// ---- HTTP config UI ----
+// ---- headless control-plane helpers (named-pipe only; no HTTP UI / overlay) ----
 function fmtUptime() {
   const s = Math.floor((Date.now() - startedAt) / 1000);
   if (s < 60) return s + "s";
   if (s < 3600) return Math.floor(s / 60) + "m";
   return Math.floor(s / 3600) + "h" + Math.floor((s % 3600) / 60) + "m";
 }
-const WEB = fs.readFileSync(path.join(HERE, "web.html"), "utf8");
-function trustedMutationOrigin(req) {
-  const origin = req.headers.origin;
-  if (!origin) return true;
-  try {
-    const parsed = new URL(origin);
-    return parsed.protocol === "http:"
-      && (parsed.hostname === "127.0.0.1" || parsed.hostname === "localhost")
-      && parsed.port === String(config.port);
-  } catch {
-    return false;
-  }
+function buildState() {
+  return {
+    clients: clients.size,
+    binaryPid: proc?.pid || null,
+    approvedApps: [...approvedApps],
+    pendingApprovals: [...pendingApprovals.entries()].map(([token, approval]) => approvalView(token, approval)),
+    approvalPolicy: config.approvalPolicy,
+    controlState: isUserPaused ? "paused_by_user" : pendingApprovals.size ? "awaiting_approval" : "running",
+    uptime: fmtUptime(),
+    runtime: runtimeInfo(HERE, { component: "daemon", nativeHostPath: resolveCuaBin() }),
+    update: updateStatus,
+    history: history.stats(),
+    inflight: currentAction ? { ...currentAction } : null,
+    recentEvents: events.slice(-100),
+    recentLogs,
+  };
 }
-const httpServer = http.createServer((req, res) => {
-  res.setHeader("X-Content-Type-Options", "nosniff");
-  res.setHeader("X-Frame-Options", "DENY");
-  res.setHeader("Referrer-Policy", "no-referrer");
-  res.setHeader("Content-Security-Policy", "default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:");
-  const u = new URL(req.url, "http://x");
-  try {
-    if (req.method === "POST" && !trustedMutationOrigin(req)) {
-      res.writeHead(403, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "untrusted request origin" }));
-      return;
-    }
-    if (u.pathname === "/" || u.pathname === "/index.html") {
-      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" }); res.end(WEB); return;
-    }
-    if (u.pathname === "/api/state") {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ clients: clients.size, binaryPid: proc?.pid || null, approvedApps: [...approvedApps], pendingApprovals: [...pendingApprovals.entries()].map(([token, approval]) => approvalView(token, approval)), approvalPolicy: config.approvalPolicy, controlState: isUserPaused ? "paused_by_user" : pendingApprovals.size ? "awaiting_approval" : "running", uptime: fmtUptime(), runtime: runtimeInfo(HERE, { component: "daemon", nativeHostPath: resolveCuaBin(), httpPort: config.port }), update: updateStatus, recentLogs }));
-      return;
-    }
-    if (u.pathname === "/api/config" && req.method === "GET") {
-      res.writeHead(200, { "Content-Type": "application/json" }); res.end(JSON.stringify(config)); return;
-    }
-    if (u.pathname === "/api/config" && req.method === "POST") {
-      let body = ""; req.on("data", d => body += d); req.on("end", () => {
-        try {
-          if (Buffer.byteLength(body) > 64 * 1024) throw new Error("config payload too large");
-          const next = normalizeConfig({ ...config, ...JSON.parse(body) });
-          const costartChanged = next.costartMode !== config.costartMode;
-          const approvalChanged = next.approvalPolicy !== config.approvalPolicy || JSON.stringify(next.whitelist) !== JSON.stringify(config.whitelist);
-          config = next;
-          saveConfig(config);
-          if (approvalChanged) approvedApps.clear();
-          if (costartChanged) applyCostart(config.costartMode);
-          res.writeHead(200, { "Content-Type": "application/json" }); res.end(JSON.stringify(config));
-        } catch (error) {
-          res.writeHead(400, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error: error.message }));
-        }
-      });
-      return;
-    }
-    if (u.pathname === "/api/events" && req.method === "GET") {
-      const since = parseInt(u.searchParams.get("since") || "0", 10);
-      const evts = events.filter(e => e.id > since);
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ events: evts, inflight: currentAction, pendingApprovals: [...pendingApprovals.entries()].map(([token, approval]) => approvalView(token, approval)), approvalPolicy: config.approvalPolicy, controlState: isUserPaused ? "paused_by_user" : pendingApprovals.size ? "awaiting_approval" : "running" }));
-      return;
-    }
-    if (u.pathname === "/api/action" && req.method === "POST") {
-      let body = ""; req.on("data", d => body += d); req.on("end", async () => {
-        try {
-          if (Buffer.byteLength(body) > 16 * 1024) throw new Error("action payload too large");
-          const { action, token } = JSON.parse(body);
-          if (action === "killBinary") { resetBinary(); log("action: binary killed"); }
-          else if (action === "clearApprovals") { approvedApps.clear(); log("action: approvals cleared"); }
-          else if (action === "pause") {
-            isUserPaused = true;
-            // Abort in-flight desktop work, but do NOT latch interrupt prompts on clients.
-            // Agent only sees PAUSE_BLOCK_MSG if a call is cancelled or they try again.
-            abortInFlightWithoutAgentPrompt(PAUSE_BLOCK_MSG);
-            emitEvent("paused", { client: "user" });
-            log("action: user paused desktop control (block only — no agent prompt)");
-          }
-          else if (action === "resume") { isUserPaused = false; emitEvent("resumed", { client: "user" }); log("action: user resumed desktop control"); }
-          else if (action === "allowOnce" || action === "allowAndWhitelist" || action === "alwaysApprove" || action === "fullAccess" || action === "denyApproval") {
-            // alwaysApprove = whitelist this app; fullAccess = set approvalPolicy to full + allow.
-            const decision = (action === "allowAndWhitelist" || action === "alwaysApprove")
-              ? "allow_and_whitelist"
-              : action === "fullAccess" ? "full_access"
-              : action === "allowOnce" ? "allow_once" : "deny";
-            await resolvePendingApproval(token, decision);
-          }
-          else if (action === "restart") { log("action: restarting daemon"); resetBinary(); if (overlayProc) { try { overlayProc.kill(); } catch {} } setTimeout(() => process.exit(0), 200); }
-          else if (action === "shutdown") {
-            isUserPaused = true;
-            for (const [, client] of clients) {
-              client.interrupted = true;
-              client.interruptMessage = SHUTDOWN_MSG;
-              const marker = interruptFilePath(client.sessionId, client.turnId);
-              try { fs.mkdirSync(path.dirname(marker), { recursive: true }); fs.writeFileSync(marker, ""); } catch {}
-            }
-            resetBinary(SHUTDOWN_MSG);
-            currentAction = null;
-            emitEvent("shutdown", { client: "user" });
-            log("action: shutdown — releasing helper, overlay, pipe, and HTTP server");
-            setTimeout(() => {
-              resetBinary();
-              if (overlayProc) { try { overlayProc.kill(); } catch {} }
-              try { server.close(); } catch {}
-              try { httpServer.close(); } catch {}
-              process.exit(0);
-            }, 250);
-          }
-          else if (action === "stopAll") {
-            applyStopAll({ pause: Boolean(pendingInterjection) });
-          } else {
-            throw new Error("unknown action");
-          }
-          res.writeHead(200, { "Content-Type": "application/json" }); res.end(JSON.stringify({ ok: true }));
-        } catch (error) {
-          res.writeHead(400, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error: error.message }));
-        }
-      });
-      return;
-    }
-    if (u.pathname === "/api/interject" && req.method === "POST") {
-      let body = ""; req.on("data", d => body += d); req.on("end", () => {
-        try {
-          if (Buffer.byteLength(body) > 16 * 1024) throw new Error("interjection payload too large");
-          const parsed = JSON.parse(body);
-          const text = typeof parsed.text === "string" ? parsed.text.trim().slice(0, 2000) : "";
-          if (!text) throw new Error("interjection text is required");
-          // Atomic: cancel in-flight work, latch ONE interjection instruction for the agent,
-          // and AUTO-RESUME (isUserPaused=false). Do not leave control paused after send —
-          // pause is only for the typing phase before Enter.
-          pendingInterjection = text;
-          applyStopAll({ pause: false });
-          isUserPaused = false;
-          log("interjection applied + auto-resumed:", text.slice(0, 80));
-          res.writeHead(200, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ ok: true, paused: false, resumed: true, interjection: true }));
-        } catch (error) {
-          res.writeHead(400, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error: error.message }));
-        }
-      });
-      return;
-    }
-    res.writeHead(404); res.end("not found");
-  } catch (e) { res.writeHead(500); res.end("error: " + e.message); }
-});
-httpServer.on("error", (e) => log("http server error:", e.message));
-httpServer.listen(config.port, "127.0.0.1", () => {
-  log("config UI: http://127.0.0.1:" + config.port);
-  checkForUpdates(HERE, { enabled: config.checkForUpdates }).then((result) => {
-    updateStatus = result;
-    if (result.status === "available") {
-      log(`update available: ${result.currentVersion} -> ${result.latestVersion}`);
-    }
-  }).catch((error) => {
-    updateStatus = { status: "error", currentVersion: RUNTIME_MANIFEST.version, error: error.message };
-  });
+function shutdownDaemon() {
+  isUserPaused = true;
+  for (const [, client] of clients) {
+    client.interrupted = true;
+    client.interruptMessage = SHUTDOWN_MSG;
+    const marker = interruptFilePath(client.sessionId, client.turnId);
+    try { fs.mkdirSync(path.dirname(marker), { recursive: true }); fs.writeFileSync(marker, ""); } catch {}
+  }
+  resetBinary(SHUTDOWN_MSG);
+  currentAction = null;
+  emitEvent("shutdown", { client: "user" });
+  log("action: shutdown — releasing helper and pipe server");
+  setTimeout(() => {
+    resetBinary();
+    try { server.close(); } catch {}
+    process.exit(0);
+  }, 250);
+}
+
+// ---- update check (logs only; no UI surface) ----
+checkForUpdates(HERE, { enabled: config.checkForUpdates }).then((result) => {
+  updateStatus = result;
+  if (result.status === "available") {
+    log(`update available: ${result.currentVersion} -> ${result.latestVersion}`);
+  }
+}).catch((error) => {
+  updateStatus = { status: "error", currentVersion: RUNTIME_MANIFEST.version, error: error.message };
 });
 const updateTimer = setInterval(() => {
   checkForUpdates(HERE, { enabled: config.checkForUpdates }).then((result) => {
@@ -916,37 +1049,14 @@ const updateTimer = setInterval(() => {
 }, 6 * 60 * 60 * 1000);
 updateTimer.unref();
 
-// ---- overlay (PowerShell WPF floating banner) ----
-let overlayProc = null;
-function launchOverlay() {
-  if (!config.overlayEnabled || process.env.FASTCUA_DISABLE_OVERLAY === "1") return;
-  const overlayPath = path.join(HERE, "overlay.ps1");
-  if (!fs.existsSync(overlayPath)) { log("overlay.ps1 not found, skipping launch"); return; }
-  const logPath = path.join(CUA_CACHE_DIR, "overlay.log");
-  try {
-    const errFd = fs.openSync(logPath, "w");
-    overlayProc = spawn("powershell.exe", [
-      "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", overlayPath,
-      "-Port", String(config.port),
-      "-Title", config.overlayTitle || "FastCUA",
-      "-Language", config.overlayLanguage || "auto"
-    ], { stdio: ["ignore", "ignore", errFd] });
-    overlayProc.unref();
-    overlayProc.on("exit", (code) => log("overlay exited code=", code));
-    fs.closeSync(errFd);
-    log("overlay launched (PowerShell WPF, rainbow border) -> stderr:", logPath);
-  } catch (e) { log("overlay launch failed:", e.message); }
-}
-
 applyCostart(config.costartMode);
-launchOverlay();
 
 // ---- pipe server ----
 const server = net.createServer({ allowHalfOpen: false }, makeClient);
-server.on("error", (e) => { log("pipe server error:", e.message); resetBinary(); if (overlayProc) { try { overlayProc.kill(); } catch {} } process.exit(1); });
+server.on("error", (e) => { log("pipe server error:", e.message); resetBinary(); process.exit(1); });
 server.listen(PIPE, () => log("listening on", PIPE));
 
-process.on("SIGINT", () => { resetBinary(); if (overlayProc) try { overlayProc.kill(); } catch {}; process.exit(0); });
-process.on("SIGTERM", () => { resetBinary(); if (overlayProc) try { overlayProc.kill(); } catch {}; process.exit(0); });
-process.on("SIGBREAK", () => { resetBinary(); if (overlayProc) try { overlayProc.kill(); } catch {}; process.exit(0); });
+process.on("SIGINT", () => { resetBinary(); process.exit(0); });
+process.on("SIGTERM", () => { resetBinary(); process.exit(0); });
+process.on("SIGBREAK", () => { resetBinary(); process.exit(0); });
 log("fastcua daemon ready (one shared helper, pipe:", PIPE + ")");

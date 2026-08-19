@@ -29,7 +29,7 @@ nodeRepl.write(JSON.stringify(apps, null, 2));
 
 Any non-error response means the Windows helper is reachable. If `list_apps`, `list_windows`, or another lightweight request times out, wait 2 seconds and retry the same lightweight call once. If the retry succeeds, continue from the returned apps.
 
-If the same lightweight call times out again, do not keep issuing app input. Retry `list_apps` once more after a short wait. If it still times out or reports helper communication failure, stop and report that the FastCUA helper may have crashed or the daemon/console (`http://127.0.0.1:8420`) is offline.
+If the same lightweight call times out again, do not keep issuing app input. Retry `list_apps` once more after a short wait. If it still times out or reports helper communication failure, stop and report that the FastCUA helper may have crashed or the daemon is offline.
 
 If the intended app is present but has no suitable open window, call `await sky.launch_app({ app: targetApp.id })`, then poll `list_apps()` until that app exposes a targetable window. If the intended app is not yet discoverable in `list_apps()`, call `await sky.launch_app({ app: "C:\\path\\to\\YourApp.exe" })`, or use a packaged target / `paint` alias (see API), then poll `list_apps()` or `list_windows()` for the new targetable window. Do not open or navigate the Windows Start menu/Search UI to launch apps. Do not continue while a launcher, splash screen, modal, or permission prompt is blocking the app's workspace.
 

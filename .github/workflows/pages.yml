@@ -1,39 +1,14 @@
-name: Deploy FastCUA website
-
-# Repository Pages source must be set to GitHub Actions.
+name: Headless runtime notice
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'site/**'
-      - '.github/workflows/pages.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: pages
-  cancel-in-progress: true
 
 jobs:
-  deploy:
-    environment:
-      name: fastcua-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+  headless:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-      - name: Configure Pages
-        uses: actions/configure-pages@v5
-      - name: Upload static site
-        uses: actions/upload-pages-artifact@v4
-        with:
-          path: site
-      - name: Deploy
-        id: deployment
-        uses: actions/deploy-pages@v4
+      - name: Confirm website removal
+        run: echo "FastCUA is distributed as a headless runtime; no Pages artifact is deployed."

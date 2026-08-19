@@ -6,7 +6,6 @@ import {
   compareVersions,
   readRuntimeManifest,
   runtimeDataDir,
-  runtimeDefaultPort,
   runtimeInfo,
   runtimePipe,
 } from "../lib/runtime.mjs";
@@ -48,9 +47,8 @@ try {
   assert.notEqual(runtimePipe(devRoot), runtimePipe(releaseRoot));
   assert.match(runtimePipe(devRoot), /^\\\\\.\\pipe\\fastcua-[a-f0-9]{12}$/);
   assert.equal(runtimeDataDir(devRoot, devManifest), path.join(devRoot, ".fastcua"));
-  assert.equal(runtimeDefaultPort(releaseRoot, releaseManifest), 8420);
-  assert.notEqual(runtimeDefaultPort(devRoot, devManifest), 8420);
   assert.equal(runtimeInfo(devRoot).root, path.resolve(devRoot));
+  assert.equal(Object.hasOwn(runtimeInfo(devRoot), "defaultPort"), false);
 
   assert.equal(compareVersions("0.3.0", "0.2.1"), 1);
   assert.equal(compareVersions("v0.3.0", "0.3.0"), 0);

@@ -136,7 +136,7 @@ Evaluate Windows Graphics Capture as an optional backend for surfaces that `Prin
 
 ### 4.4 Local IPC hardening
 
-Apply an explicit current-user ACL to the named pipe and authenticate the local console's mutating channel. Document and test behavior when Windows services expose pipes remotely.
+Apply an explicit current-user ACL to the named pipe and authenticate the control channel (the daemon's named-pipe control methods). Document and test behavior when Windows services expose pipes remotely.
 
 ### 4.5 Comparative evaluation
 

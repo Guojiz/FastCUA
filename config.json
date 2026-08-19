@@ -1,7 +1,7 @@
 {
   "costartMode": "claude",
   "idleTimeoutMin": 5,
-  "approvalPolicy": "safe",
+  "approvalPolicy": "full",
   "whitelist": [
     "mspaint.exe",
     "shell:AppsFolder\\Microsoft.Paint_8wekyb3d8bbwe!App",
@@ -18,5 +18,10 @@
   "overlayEnabled": true,
   "overlayTitle": "FastCUA is using your computer",
   "overlayLanguage": "auto",
-  "cuaBinPath": ""
+  "cuaBinPath": "",
+  "historyEnabled": true,
+  "historyCaptureScreenshots": true,
+  "historyMaxEntries": 10000,
+  "historyRetentionDays": 30,
+  "historyMaxShotsPerAction": 1
 }

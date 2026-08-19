@@ -34,7 +34,7 @@ $stage = Join-Path $stageParent 'FastCUA'
 New-Item -ItemType Directory -Path $stage -Force | Out-Null
 try {
   foreach ($relative in @(
-    'server.mjs', 'daemon.mjs', 'overlay.ps1', 'card.xaml', 'web.html',
+    'server.mjs', 'daemon.mjs',
     'install.ps1', 'uninstall.ps1', 'LICENSE', 'README.md', 'README_zh.md',
     'config.json', 'runtime-manifest.json', 'lib', 'skills', 'scripts/manage.ps1',
     'scripts/agent-setup.ps1',
@@ -61,7 +61,6 @@ try {
   $releaseManifest.buildType = 'release'
   $releaseManifest.commit = $Commit
   $releaseManifest.buildTime = $BuildTime
-  $releaseManifest | Add-Member -NotePropertyName defaultPort -NotePropertyValue 8420 -Force
   $files = [ordered]@{}
   Get-ChildItem -LiteralPath $stage -Recurse -File |
     Where-Object Name -ne 'runtime-manifest.json' |

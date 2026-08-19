@@ -51,10 +51,10 @@ The system has four actors:
 
 - **Human operator:** authorizes the task and can interrupt it through global controls.
 - **Agent host:** runs one full-capability primary model, loads the `computer-use` Skill, and connects to the MCP server.
-- **FastCUA runtime:** MCP server, resident daemon, console, overlay, and native host running as the current Windows user.
+- **FastCUA runtime:** MCP server, resident daemon, persistent history store, and native host running as the current Windows user.
 - **Target application:** a visible desktop process with an HWND, accessibility provider, and/or capturable surface.
 
-The local user session is the trust boundary. FastCUA constrains accidental or agent-originated misuse; it does not defend against arbitrary malicious code already running with the same user privileges. The loopback console and path-derived named pipe reduce accidental cross-runtime attachment, but they are not a replacement for an operating-system security boundary.
+The local user session is the trust boundary. FastCUA constrains accidental or agent-originated misuse; it does not defend against arbitrary malicious code already running with the same user privileges. The path-derived named pipe reduces accidental cross-runtime attachment, but it is not a replacement for an operating-system security boundary.
 
 ### 2.2 Threat and failure model
 
@@ -81,7 +81,7 @@ flowchart TB
   D --> F["Capture / square grid"]
   D --> G["Windows input stream"]
   C --> H["Approval / pause / interjection"]
-  C --> I["Local console / visible overlay"]
+  C --> I["Computer Use history (local files)"]
 ```
 
 ### 3.1 Layer responsibilities
@@ -90,9 +90,9 @@ flowchart TB
 |---|---|---|
 | `skills/computer-use/` | Agent procedure, safety rules, fallback policy | Loaded by agent host |
 | `server.mjs` | MCP tools, persistent JavaScript cell, coordinate helpers | One process per client |
-| `daemon.mjs` | Shared helper lifecycle, policy, approvals, interrupts, runtime identity, local HTTP console | Resident per runtime root |
+| `daemon.mjs` | Shared helper lifecycle, policy, approvals, interrupts, runtime identity, Computer Use history recording | Resident per runtime root |
 | `cua-native-host.exe` | UIA, HWND fallback, capture, grid rendering, activation, input | One shared child of daemon |
-| `overlay.ps1` + `web.html` | Human-visible state and controls | Local user session |
+| `lib/history.mjs` | Persistent local audit timeline (JSONL + screenshots), retention | Local data directory |
 
 This separation is intentional. Agent procedure can evolve without embedding policy prose in the native binary; MCP clients can come and go without rebuilding the Windows helper; and every local action crosses one policy point.
 
@@ -252,18 +252,11 @@ In safe mode, an action targeting an unknown application produces an approval re
 
 ### 7.2 Out-of-band controls
 
-| Key | Effect |
-|---|---|
-| `F7` | Pause and open the control center |
-| `F8` | Pause or resume |
-| `F9` | Pause and submit an interjection |
-| `F10` | Shut down FastCUA for the turn |
+FastCUA ships no UI of its own. A host control plane — the DeepSeek Harness plugin, a script, or a test — drives the resident daemon through its named-pipe control methods (`pause`, `resume`, `interject`, `resolve_approval`, `shutdown`, `stop_all`, `clear_approvals`, `restart`). The daemon maps these states to stable `[control_plane:*]` tags. Pause, stop, shutdown, approval wait, and interjection are semantically distinct. Only interjection carries new task text; the other states instruct the agent to stop calling desktop tools rather than retrying around human control.
 
-The daemon maps these states to stable `[control_plane:*]` tags. Pause, stop, shutdown, approval wait, and interjection are semantically distinct. Only interjection carries new task text; the other states instruct the agent to stop calling desktop tools rather than retrying around human control.
+### 7.3 Local configuration
 
-### 7.3 Local console
-
-The control center binds to `127.0.0.1`. Mutating browser requests must have no `Origin` header or an exact loopback same-port origin; body sizes are capped and responses use restrictive content headers. The standalone console is an Edge `--app` wrapper around the same local page, not a remote service. No separate model credential or synthesis endpoint is present in this console.
+Configuration lives only in the local `config.json` file; there is no HTTP console. The daemon reads it at startup and applies it through the `set_config` pipe method. Control messages are bounded and the pipe is path-scoped to the runtime root. The default policy is full access; users who edit `approvalPolicy` back to `"safe"` opt into per-app prompts resolved through the host control plane.
 
 ### 7.4 Residual local risk
 
@@ -373,13 +366,13 @@ Detached bounded workers prevent one UIA read from wedging the shared helper, bu
 
 ### 11.4 Local hardening
 
-Future releases should apply an explicit current-user access control list to the named pipe, add a per-installation console token or equivalent authenticated channel, and document behavior when Windows exposes local pipes remotely. These changes would strengthen the runtime against other same-user or network-reachable processes but still would not create a multi-tenant sandbox.
+Future releases should apply an explicit current-user access control list to the named pipe, add a per-installation control token or equivalent authenticated channel, and document behavior when Windows exposes local pipes remotely. These changes would strengthen the runtime against other same-user or network-reachable processes but still would not create a multi-tenant sandbox.
 
 ### 11.5 Distribution and model architecture
 
 The supported user path is the PowerShell bootstrapper plus verified GitHub Release artifacts. Installation, diagnosis, updates, rollback, and uninstall all use the installed PowerShell entry point; no alternative package-manager bootstrap or publication path is shipped.
 
-The supported agent path is one full-capability primary model. The daemon, console, release package, and recorder contain no provider, transcription, secondary-model, or separate credential configuration. The active agent keeps task context through operation, evidence review, Skill writing, lint, dry-run, and promotion.
+The supported agent path is one full-capability primary model. The daemon, release package, and recorder contain no provider, transcription, secondary-model, or separate credential configuration. The active agent keeps task context through operation, evidence review, Skill writing, lint, dry-run, and promotion.
 
 ### 11.6 Empirical evaluation
 

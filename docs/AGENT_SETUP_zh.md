@@ -58,7 +58,7 @@
 | `server.mjs`（stdio MCP） | Agent 宿主 | Agent 建立连接时 | 否 |
 | 常驻 daemon | `server.mjs` | 首次 MCP 调用 | 否 |
 | Rust 原生 host | daemon | 首次桌面操作请求 | 否 |
-| 控制中心 | daemon | 随 daemon 启动 | 访问 `http://127.0.0.1:8420` |
+| 历史存储 | daemon | 随 daemon 启动 | 通过宿主插件查看 |
 
 配置时**不要**手动运行 `node daemon.mjs`。
 
@@ -85,14 +85,9 @@ MCP 往返调用（initialize → tools/call `list_windows`），要求常驻 da
 `-Action List` 会在某个宿主指向与已安装运行时不同的 `server.mjs`
 （例如开发检出目录）时标记 `MCP configured but STALE`。
 
-## 人类控制按键
+## 配置与控制
 
-| 按键 | 操作 |
-|---|---|
-| F7 | 暂停并打开控制中心 |
-| F8 | 暂停或恢复 |
-| F9 | 暂停并插话 |
-| F10 | 退出 FastCUA |
+FastCUA 无界面运行，默认 **Full access**。所有设置在本地 `config.json`（`%LOCALAPPDATA%\FastCUA\data\config.json`）中，编辑后重启 daemon 生效。暂停、插话、审批等控制由宿主（DeepSeek Harness 插件）或 daemon 命名管道方法提供。
 
 ## 故障排除
 
@@ -101,11 +96,11 @@ MCP 往返调用（initialize → tools/call `list_windows`），要求常驻 da
 | Agent 报告 FastCUA 不可用 | 重启 Agent 客户端；MCP 配置在启动时加载 |
 | `MCP configured but STALE` | 重新运行 `-Action Install -Agent <名称>` |
 | 冒烟测试失败 | `install.ps1 -Action Doctor`；检查 `node --version` |
-| Verify 提示桌面控制已暂停 | 按 F8、使用控制中心，或向 `http://127.0.0.1:8420/api/action` POST `{"action":"resume"}` |
+| Verify 提示桌面控制已暂停 | 通过宿主控制面（DeepSeek Harness 插件）恢复，或重启 daemon |
 | Skill 未被发现 | 确认复制的是完整的 `computer-use` 文件夹，而不是单个 SKILL.md |
 
 ## 安全说明
 
 - 不要安装转发式或删减版的 `SKILL.md`；完整操作规范是必需的。
-- 不要将本地管道或控制中心暴露到本机之外。
+- 不要将本地管道暴露到本机之外。
 - 配置备份文件（`*.bak.*`）可能包含其他 MCP 注册信息，仅在本机使用。

@@ -64,7 +64,7 @@ MCP server on the first call.
 | `server.mjs` (stdio MCP) | the agent host | when the agent connects | no |
 | resident daemon | `server.mjs` | first MCP call | no |
 | Rust native host | daemon | first desktop request | no |
-| control center | daemon | with the daemon | open `http://127.0.0.1:8420` |
+| history store | daemon | with the daemon | browse via host plugin |
 
 Do **not** run `node daemon.mjs` manually as part of setup.
 
@@ -93,14 +93,9 @@ to a stale checkout. Run:
 different `server.mjs` (for example a development checkout) than the installed
 runtime.
 
-## Human control keys
+## Configuration and control
 
-| Key | Action |
-|---|---|
-| F7 | Pause and open the control center |
-| F8 | Pause or resume |
-| F9 | Pause and interject text |
-| F10 | Exit FastCUA |
+FastCUA runs headless and defaults to **Full access**. All settings live in the local `config.json` (`%LOCALAPPDATA%\FastCUA\data\config.json`); edit it and restart the daemon to apply. Pause, interjection, and approval are provided by a host control plane (the DeepSeek Harness plugin) or the daemon named-pipe methods.
 
 ## Troubleshooting
 
@@ -109,13 +104,13 @@ runtime.
 | Agent says FastCUA is unavailable | Restart the agent client; MCP configs load at startup |
 | `MCP configured but STALE` | Re-run `-Action Install -Agent <name>` |
 | Smoke test fails | `install.ps1 -Action Doctor`; check `node --version` |
-| Verify says desktop control is paused | Press F8, use the control center, or POST `{"action":"resume"}` to `http://127.0.0.1:8420/api/action` |
+| Verify says desktop control is paused | Resume from the host control plane (DeepSeek Harness plugin) or restart the daemon |
 | Skill not discovered | Confirm the full `computer-use` folder was copied, not a single SKILL.md |
 
 ## Security notes
 
 - Never install a forwarding or shortened `SKILL.md`; the full operating
   policy is required.
-- Do not expose the local pipe or control center outside this computer.
+- Do not expose the local pipe outside this computer.
 - Config backups (`*.bak.*`) may contain other MCP registrations; treat them
   as local-only.

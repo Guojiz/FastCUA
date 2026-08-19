@@ -65,7 +65,6 @@ assert.ok(rejected.errors.some((error) => /unknown parameter evidence citations:
 const compile = read("tools/skill-recorder/compile.mjs");
 const promote = read("tools/skill-recorder/promote.mjs");
 const daemon = read("daemon.mjs");
-const web = read("web.html");
 const config = JSON.parse(read("config.json"));
 const releaseBuilder = read("scripts/build-release.ps1");
 const manager = read("scripts/manage.ps1");
@@ -78,7 +77,6 @@ assert.match(promote, /current primary agent must write it from evidence/);
 assert.doesNotMatch(promote, /synthesize\.mjs/);
 assert.equal(Object.hasOwn(config, "skillWriter"), false);
 assert.doesNotMatch(daemon, /skill-writer|SKILL_WRITER|writer-config/);
-assert.doesNotMatch(web, /writer-|skill-writer|transcription API|OpenAI-compatible API/);
 assert.doesNotMatch(releaseBuilder, /synthesize\.mjs|writer-config\.mjs/);
 assert.doesNotMatch(manager, /synthesize\.mjs|writer-config\.mjs/);
 assert.doesNotMatch(releaseWorkflow, new RegExp("N" + "PM_TOKEN|n" + "pm publish|package\\.json"));

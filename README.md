@@ -7,7 +7,15 @@
 > [!WARNING]
 > FastCUA is an experimental project under active development. Use it for testing, not important or unattended work.
 
-FastCUA gives an agent a fast, inspectable interface to Windows applications. It prefers Windows UI Automation text, switches to screenshots and a numbered square grid when semantics are weak, and executes related native actions through one resident local runtime. The human remains in control through visible state, per-app approval, global pause, interjection, and exit controls.
+FastCUA gives an agent a fast, inspectable interface to Windows applications. It prefers Windows UI Automation text, switches to screenshots and a numbered square grid when semantics are weak, and executes related native actions through one resident local runtime.
+
+FastCUA offers three features:
+
+1. **Computer use** — desktop automation (UIA text first, visual square grid fallback);
+2. **Record skill** — record a demo → compile evidence → write a Skill → dry-run → approved install;
+3. **Computer use history** — a local on-disk audit timeline of every action, app, outcome, and screenshot.
+
+FastCUA runs **headless**: there is no web console, floating banner, or hotkey UI. The only configuration surface is the local `config.json` file (default **Full access**). Pause, interjection, and approval are exposed through named-pipe control methods for host integrations. The DeepSeek Harness plugin provides configuration and history browsing.
 
 FastCUA is agent-neutral, but a complete installation always has two parts in the **same agent host**:
 
@@ -109,16 +117,11 @@ the component lifecycle, and verification rules.
 
 Inside MCP, call `runtime_info` to confirm the exact server, daemon, native host, version, commit, pipe, and data directory in use.
 
-## Human control
+## Configuration and control
 
-| Key | Action |
-|---|---|
-| `F7` | Pause and open the control center |
-| `F8` | Pause or resume |
-| `F9` | Pause and interject text |
-| `F10` | Exit FastCUA |
+FastCUA defaults to **Full access**: unknown apps run without prompting. All settings live in the local `config.json` file, which users edit directly; restart the daemon to apply. Set `approvalPolicy` back to `"safe"` to restore whitelist/approval mode.
 
-The local control center is available at `http://127.0.0.1:8420`. Safe mode asks before acting in an unknown application. Trust uses exact application identity, not fuzzy name matching.
+The control plane (pause / interject / approve / exit) is exposed through daemon named-pipe methods (`pause` / `resume` / `interject` / `resolve_approval` / `shutdown`, etc.) for host integrations. The DeepSeek Harness plugin handles configuration and history browsing. Approval uses exact application identity, not fuzzy name matching.
 
 ## Visual click example
 
@@ -149,6 +152,12 @@ Password fields and secure-desktop moments are redacted. The current primary age
 > [!NOTE]
 > Using the Skill Recorder may send recorded screen content, interaction evidence, and narration to the configured cloud model provider.
 
+## Computer Use History
+
+Every desktop action and control event is appended as JSONL to `history/history.jsonl` in the local data directory, with screenshots under `history/shots/`. Each entry records the app, action, summary, outcome, duration, and (for `get_window_state` / `grid_view`) a screenshot. `type_text` / `set_value` store only length, never verbatim content. Retention is governed by `historyEnabled`, `historyCaptureScreenshots`, `historyMaxEntries`, `historyRetentionDays`, and `historyMaxShotsPerAction` in `config.json`.
+
+Agents read history with the `list_history` / `get_history` MCP tools; the DeepSeek Harness plugin provides visual browsing. All history stays on the local machine.
+
 ## Develop from source
 
 ```powershell
@@ -159,7 +168,7 @@ cd FastCUA
 
 Then copy the complete `skills\computer-use` directory into the active agent's Skill directory and configure the absolute path to `server.mjs` as a stdio MCP server. Use `runtime_info` to verify the checkout. Reproduction commands and the test matrix are in the [technical paper](docs/TECHNICAL_PAPER.md#12-reproduction-and-operation).
 
-The project website lives in `site/` and deploys from this repository through `.github/workflows/pages.yml`. The root `web.html` remains the local runtime control center; it is not the public website.
+FastCUA ships no UI of its own: configuration lives in local `config.json`, and control + history browsing are provided by the host (the DeepSeek Harness plugin).
 
 ## Boundaries
 

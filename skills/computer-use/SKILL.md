@@ -108,16 +108,28 @@ Host does **not** decide whether to edit a field. Correct loop:
 Never `type_text` before reading `focused_value` for that field in this turn. If it is unavailable/null, do not assume the field is empty. Never re-type because the tree still shows a placeholder.
 `replace: true` sets the value but does not promise a caret position. Refocus or move the caret explicitly before a later caret-relative edit.
 
+## Computer Use History
+
+FastCUA records a local, on-disk audit timeline of every desktop action and
+control event — app, action, summary, outcome, duration, and (for
+`get_window_state` / `grid_view`) a screenshot. Nothing is sent off-machine.
+Use the `list_history` and `get_history` MCP tools to recall what was already
+done (e.g. to continue a saved workflow or verify a completed action). Typed
+text and `set_value` payloads are stored as length markers, never verbatim.
+
 ### Human control plane (what the agent receives)
 
-User-side controls return tool errors with a stable prefix. Branch on the tag first; do **not** fuzzy-match prose.
+FastCUA itself is headless (no console/overlay/hotkeys). A host-provided
+control surface (for example the FastCUA panel in the DeepSeek Harness) sends
+user controls as tool errors with a stable prefix. Branch on the tag first; do
+**not** fuzzy-match prose.
 
 | Tag | Meaning | Agent behavior |
 |-----|---------|----------------|
-| `[control_plane:paused]` | **BLOCK** only (F8 / Pause). Not a task. | Stop desktop tools. No retry, no poll, no invented recovery. Wait for resume or a new **chat** message. |
-| `[control_plane:interjection]` | **INSTRUCTION** (F9 text, one-shot). Control plane auto-resumes. | Abort previous plan. Follow **only** this instruction. You **may** call Computer Use tools again immediately. |
+| `[control_plane:paused]` | **BLOCK** only (host Pause). Not a task. | Stop desktop tools. No retry, no poll, no invented recovery. Wait for resume or a new **chat** message. |
+| `[control_plane:interjection]` | **INSTRUCTION** (host interjection, one-shot). Control plane auto-resumes. | Abort previous plan. Follow **only** this instruction. You **may** call Computer Use tools again immediately. |
 | `[control_plane:stopped]` | Turn stop (Stop task). Not a new task. | End Computer Use for this turn. No further tools. Brief note that the user stopped. |
-| `[control_plane:shutdown]` | FastCUA exited (F10). Final for this turn. | Stop permanently. Do **not** restart FastCUA, reconnect, reinstall, or continue desktop automation. |
+| `[control_plane:shutdown]` | FastCUA exited. Final for this turn. | Stop permanently. Do **not** restart FastCUA, reconnect, reinstall, or continue desktop automation. |
 | `[control_plane:awaiting_approval]` | Human approval pending. **BLOCK**. | Do not retry in a loop. Wait. |
 
 Rules of thumb:

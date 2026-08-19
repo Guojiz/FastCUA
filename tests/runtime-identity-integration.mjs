@@ -11,17 +11,6 @@ const expectedVersion = JSON.parse(fs.readFileSync(path.join(root, "runtime-mani
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "fastcua-identity-"));
 const pipe = `\\\\.\\pipe\\fastcua-identity-${crypto.randomUUID()}`;
 
-async function freePort() {
-  const server = net.createServer();
-  await new Promise((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolve);
-  });
-  const port = server.address().port;
-  await new Promise((resolve) => server.close(resolve));
-  return port;
-}
-
 async function connectWithRetry(target, timeoutMs = 10_000) {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
@@ -38,14 +27,11 @@ async function connectWithRetry(target, timeoutMs = 10_000) {
   throw new Error("daemon pipe did not become ready");
 }
 
-const port = await freePort();
 const configPath = path.join(temp, "config.json");
 fs.writeFileSync(
   configPath,
   JSON.stringify({
     costartMode: "manual",
-    port,
-    overlayEnabled: false,
     checkForUpdates: false,
   }),
 );
@@ -58,10 +44,8 @@ const child = spawn(process.execPath, [path.join(root, "daemon.mjs")], {
   env: {
     ...process.env,
     FASTCUA_PIPE: pipe,
-    FASTCUA_HTTP_PORT: String(port),
     FASTCUA_CONFIG_PATH: configPath,
     FASTCUA_HOME: path.join(temp, "data"),
-    FASTCUA_DISABLE_OVERLAY: "1",
     CUA_BIN: nativeHostFixture,
   },
 });
@@ -99,10 +83,10 @@ try {
   assert.equal(result.result.buildType, "development");
   assert.equal(path.resolve(result.result.root), root);
   assert.equal(result.result.pipe, pipe);
-  assert.equal(result.result.httpPort, port);
+  assert.equal(Object.hasOwn(result.result, "httpPort"), false);
   assert.equal(path.resolve(result.result.dataDir), path.join(temp, "data"));
   assert.equal(path.resolve(result.result.nativeHostPath), nativeHostFixture);
-  console.log("PASS runtime identity integration: daemon reports one coherent root, version, pipe, port, data directory, and native host");
+  console.log("PASS runtime identity integration: daemon reports one coherent root, version, pipe, data directory, and native host");
 } catch (error) {
   error.message += `\ndaemon stderr:\n${stderr}`;
   throw error;

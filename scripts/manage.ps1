@@ -96,6 +96,44 @@ function Get-CurrentManifest {
   return Read-JsonFile (Join-Path $appDir 'runtime-manifest.json')
 }
 
+function Get-RuntimePipe([string]$Root) {
+  if ($env:FASTCUA_PIPE) { return $env:FASTCUA_PIPE }
+  $canonical = [System.IO.Path]::GetFullPath($Root).TrimEnd('\').ToLowerInvariant()
+  $sha = [System.Security.Cryptography.SHA256]::Create()
+  try {
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($canonical)
+    $hash = ([System.BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-', '').ToLowerInvariant().Substring(0, 12)
+  } finally {
+    $sha.Dispose()
+  }
+  return "\\.\pipe\fastcua-$hash"
+}
+
+function Invoke-PipeRequest([string]$PipePath, [string]$Method, $Params = @{}, [int]$TimeoutMs = 3000) {
+  $name = $PipePath -replace '^\\\\\.\\pipe\\', ''
+  $client = [System.IO.Pipes.NamedPipeClientStream]::new('.', $name, [System.IO.Pipes.PipeDirection]::InOut)
+  try {
+    $client.Connect($TimeoutMs)
+    $writer = [System.IO.StreamWriter]::new($client, [System.Text.UTF8Encoding]::new($false), 4096, $true)
+    $reader = [System.IO.StreamReader]::new($client, [System.Text.Encoding]::UTF8, $false, 4096, $true)
+    try {
+      $request = @{ id = 1; method = $Method; params = $Params } | ConvertTo-Json -Compress -Depth 20
+      $writer.WriteLine($request)
+      $writer.Flush()
+      $read = $reader.ReadLineAsync()
+      if (-not $read.Wait($TimeoutMs)) { throw "Named-pipe request timed out: $Method" }
+      $response = $read.Result | ConvertFrom-Json
+      if ($response.error) { throw [string]$response.error }
+      return $response.result
+    } finally {
+      $writer.Dispose()
+      $reader.Dispose()
+    }
+  } finally {
+    $client.Dispose()
+  }
+}
+
 function Get-FileMap([string]$Root) {
   $result = [ordered]@{}
   Get-ChildItem -LiteralPath $Root -Recurse -File |
@@ -144,7 +182,7 @@ function New-LocalRuntime([string]$SourceRoot, [string]$StageRoot) {
   $sourceResolved = (Resolve-Path -LiteralPath $SourceRoot).Path
   New-Item -ItemType Directory -Path $StageRoot -Force | Out-Null
   foreach ($relative in @(
-    'server.mjs', 'daemon.mjs', 'overlay.ps1', 'card.xaml', 'web.html',
+    'server.mjs', 'daemon.mjs',
     'install.ps1', 'uninstall.ps1', 'LICENSE', 'README.md', 'README_zh.md',
     'config.json', 'runtime-manifest.json', 'lib', 'skills', 'scripts/manage.ps1',
     'scripts/agent-setup.ps1',
@@ -182,7 +220,6 @@ function New-LocalRuntime([string]$SourceRoot, [string]$StageRoot) {
   $manifest.buildType = 'local-install'
   $manifest.commit = $commit
   $manifest.buildTime = [DateTime]::UtcNow.ToString('o')
-  $manifest | Add-Member -NotePropertyName defaultPort -NotePropertyValue 8420 -Force
   $manifest | Add-Member -NotePropertyName files -NotePropertyValue (Get-FileMap $StageRoot) -Force
   Write-JsonFile (Join-Path $StageRoot 'runtime-manifest.json') $manifest
   return $manifest
@@ -221,24 +258,23 @@ function Get-ReleaseRuntime([string]$TempRoot, $Release) {
 }
 
 function Stop-InstalledRuntime {
-  $config = Read-JsonFile (Join-Path $dataDir 'config.json')
-  $port = if ($config -and $config.port) { [int]$config.port } else { 8420 }
+  $pipe = Get-RuntimePipe $appDir
   try {
-    Invoke-RestMethod -UseBasicParsing -Method Post -ContentType 'application/json' `
-      -Body '{"action":"shutdown"}' -Uri "http://127.0.0.1:$port/api/action" -TimeoutSec 3 | Out-Null
-    Start-Sleep -Milliseconds 500
+    Invoke-PipeRequest $pipe 'shutdown' | Out-Null
+    Start-Sleep -Milliseconds 350
   } catch {}
+  # Fall back to process termination when the pipe is unavailable or stale.
+  # The native helper exits automatically via its --parent-pid watchdog.
+  Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -eq 'node.exe' -and $_.CommandLine -match '(?i)FastCUA.*daemon\.mjs' } |
+    ForEach-Object {
+      try { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } catch {}
+    }
 }
 
 function Write-DesktopFiles($Manifest) {
   $desktop = [Environment]::GetFolderPath([Environment+SpecialFolder]::DesktopDirectory)
   if (-not $desktop) { return }
-  $config = Read-JsonFile (Join-Path $dataDir 'config.json')
-  $port = if ($config -and $config.port) { [int]$config.port } elseif ($Manifest.defaultPort) { [int]$Manifest.defaultPort } else { 8420 }
-  $consoleShortcut = Join-Path $desktop 'FastCUA Console.url'
-  $shortcut = "[InternetShortcut]`r`nURL=http://127.0.0.1:$port`r`nIconFile=$env:SystemRoot\System32\shell32.dll`r`nIconIndex=14`r`n"
-  [System.IO.File]::WriteAllText($consoleShortcut, $shortcut, [System.Text.UTF8Encoding]::new($false))
-
   $agentPromptPath = Join-Path $desktop 'FastCUA Agent Setup.txt'
   $agentPrompt = @"
 Install FastCUA into this AI agent on Windows. Configure this agent's own active Skill and MCP systems; do not substitute another Computer Use implementation.
@@ -261,7 +297,7 @@ Automated helper when available in the installed runtime:
    & "$appDir\scripts\agent-setup.ps1" -Action Install
 Full runbook: https://github.com/Guojiz/FastCUA/blob/main/docs/AGENT_SETUP.md
 
-Do not install a forwarding or shortened SKILL.md. Do not expose the local pipe or control center outside this computer.
+Do not install a forwarding or shortened SKILL.md. Do not expose the local named pipe outside this computer.
 "@
   [System.IO.File]::WriteAllText($agentPromptPath, $agentPrompt.Trim() + "`r`n", [System.Text.UTF8Encoding]::new($false))
 }
@@ -371,17 +407,17 @@ function Invoke-Doctor {
     $warnings.Add('No FastCUA MCP server path was found in the known AI client configuration files.')
   }
 
-  $config = Read-JsonFile (Join-Path $dataDir 'config.json')
-  $port = if ($config -and $config.port) { [int]$config.port } else { 8420 }
+  $pipe = Get-RuntimePipe $appDir
   try {
-    $live = Invoke-RestMethod -UseBasicParsing -Uri "http://127.0.0.1:$port/api/state" -TimeoutSec 3
+    $live = Invoke-PipeRequest $pipe 'state'
     if ($live.runtime) {
       Write-Host "Live daemon:       $($live.runtime.root) v$($live.runtime.version)"
+      Write-Host "Named pipe:        $pipe"
       if ($manifest -and ([System.IO.Path]::GetFullPath([string]$live.runtime.root) -ne [System.IO.Path]::GetFullPath($appDir))) {
-        $issues.Add("Port $port is served by another FastCUA root: $($live.runtime.root)")
+        $issues.Add("Named pipe $pipe is served by another FastCUA root: $($live.runtime.root)")
       }
     } else {
-      $warnings.Add("Port $port is served by an older FastCUA without runtime identity.")
+      $warnings.Add("Named pipe $pipe is served by an older FastCUA without runtime identity.")
     }
   } catch {
     Write-Host "Live daemon:       not running"

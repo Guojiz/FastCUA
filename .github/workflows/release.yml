@@ -36,8 +36,10 @@ jobs:
           node --check daemon.mjs
           node --check server.mjs
           node --check lib/runtime.mjs
+          node --check lib/history.mjs
           node --check lib/update-check.mjs
           node tests/installer-contract.mjs
+          node tests/history-parameter-contract.mjs
           node tests/runtime-release-contract.mjs
           node tests/runtime-identity-integration.mjs
           node tests/server-lifecycle.mjs
@@ -46,7 +48,7 @@ jobs:
           [scriptblock]::Create((Get-Content install.ps1 -Raw)) | Out-Null
           [scriptblock]::Create((Get-Content scripts/manage.ps1 -Raw)) | Out-Null
           [scriptblock]::Create((Get-Content scripts/build-release.ps1 -Raw)) | Out-Null
-          [xml](Get-Content card.xaml -Raw) | Out-Null
+          [scriptblock]::Create((Get-Content scripts/agent-setup.ps1 -Raw)) | Out-Null
       - name: Build verified runtime package
         shell: pwsh
         run: |

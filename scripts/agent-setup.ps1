@@ -339,8 +339,7 @@ function Invoke-Install($Registry, [string]$AppDir) {
     Write-Ok 'end-to-end check succeeded; list_windows returned a real response'
   } elseif ($SmokePaused) {
     Write-Warn2 'Runtime reachable, but desktop control is paused by the user.'
-    Write-Warn2 'Resume with F8, the control center, or:'
-    Write-Warn2 ('  Invoke-WebRequest http://127.0.0.1:8420/api/action -Method POST -Body ''{"action":"resume"}'' -ContentType ''application/json''')
+    Write-Warn2 'Resume through the FastCUA named-pipe control plane, then retry.'
   } else {
     Write-Fail 'MCP handshake failed. Run: install.ps1 -Action Doctor'
   }
@@ -381,8 +380,7 @@ function Invoke-Verify($Registry, [string]$AppDir) {
     Write-Ok 'end-to-end check succeeded; list_windows returned a real response'
   } elseif ($SmokePaused) {
     Write-Warn2 'Runtime reachable, but desktop control is paused by the user.'
-    Write-Warn2 'Resume with F8, the control center, or:'
-    Write-Warn2 ('  Invoke-WebRequest http://127.0.0.1:8420/api/action -Method POST -Body ''{"action":"resume"}'' -ContentType ''application/json''')
+    Write-Warn2 'Resume through the FastCUA named-pipe control plane, then retry.'
     $problems++
   } else {
     Write-Fail 'MCP handshake failed. Run: install.ps1 -Action Doctor'

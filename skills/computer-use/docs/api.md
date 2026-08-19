@@ -28,11 +28,65 @@ interface Window2ComputerUseClient {
   drag(input: DragInput): Promise<void>;
   perform_secondary_action(input: PerformSecondaryActionInput): Promise<void>;
   activate_window(input: ActivateWindowInput): Promise<void>;
+  list_history(input?: ListHistoryInput): Promise<HistoryListResult>;
+  get_history(input: GetHistoryInput): Promise<HistoryEntry | null>;
 }
 
 // MCP also exposes:
 // - js({ code }) — persistent JS REPL with sky + nodeRepl
 // - close() — end this turn and close this MCP client connection
+
+// Computer Use History is local-only. list_history omits screenshot bytes by
+// default; get_history includes them by default unless explicitly disabled.
+type ListHistoryInput = {
+  limit?: number;              // default 100, max 1000
+  since?: number;              // only entry.id > since
+  sessionId?: string;
+  app?: string;
+  include_screenshots?: boolean; // MCP spelling; sky maps it to includeScreenshots
+};
+
+type GetHistoryInput = {
+  id: number;
+  include_screenshots?: boolean; // default true
+};
+
+type HistoryScreenshot = {
+  path: string;                // relative to the local history directory
+  mime?: string;
+  width?: number;
+  height?: number;
+  url?: string | null;         // data URL only when screenshots are requested
+};
+
+type HistoryEntry = {
+  id: number;
+  ts: number;
+  sessionId?: string | null;
+  turnId?: string | null;
+  app?: string | null;
+  action: string;
+  summary: string;
+  params?: Record<string, unknown> | null;
+  ok: boolean;
+  durationMs?: number | null;
+  error?: string | null;
+  screenshots?: HistoryScreenshot[];
+};
+
+type HistoryListResult = {
+  entries: HistoryEntry[];
+  stats: {
+    enabled: boolean;
+    count: number;
+    firstTs: number | null;
+    nextId: number;
+    captureScreenshots: boolean;
+    maxEntries: number;
+    retentionDays: number;
+    lastError: string | null;
+  };
+};
 
 type Window = {
   app: AppIdentifier;

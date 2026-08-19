@@ -7,7 +7,15 @@
 > [!WARNING]
 > FastCUA 仍是快速开发中的实验项目。请只用于测试，不要用于重要或无人值守的工作。
 
-FastCUA 为 Agent 提供一套快速、可审计的 Windows 应用接口。它优先读取 Windows UI Automation 文本；当语义信息不足时，再切换到截图和正方形数字网格；相关的多个原生动作由一个常驻本地运行时执行。人类可以通过可见状态、按应用审批、全局暂停、插话和退出控制始终掌握电脑。
+FastCUA 为 Agent 提供一套快速、可审计的 Windows 应用接口。它优先读取 Windows UI Automation 文本；当语义信息不足时，再切换到截图和正方形数字网格；相关的多个原生动作由一个常驻本地运行时执行。
+
+FastCUA 提供三项功能：
+
+1. **Computer use** — 桌面自动化（UIA 文本优先，视觉正方形网格兜底）；
+2. **Record skill** — 录制演示 → 编译证据 → 写 Skill → dry-run → 审批安装；
+3. **Computer use history** — 本地磁盘审计时间线，记录每次动作与应用、结果、截图。
+
+FastCUA 是**无界面（headless）运行**：没有任何网页控制台、悬浮横幅或热键 UI，唯一的配置面是本地 `config.json` 文件（默认 **Full access**）。暂停、插话、审批等控制由宿主控制面（例如 DeepSeek Harness 中的 FastCUA 插件）提供。
 
 FastCUA 不绑定某一家 Agent，但完整安装必须在**同一个 Agent 宿主**内同时具备：
 
@@ -108,16 +116,11 @@ Claude Desktop、Codex CLI、VS Code、opencode、Kimi Work），自动备份每
 
 在 MCP 内调用 `runtime_info`，确认实际使用的 server、daemon、原生 host、版本、提交、管道和数据目录。
 
-## 人类控制
+## 配置与控制
 
-| 按键 | 操作 |
-|---|---|
-| `F7` | 暂停并打开控制中心 |
-| `F8` | 暂停或继续 |
-| `F9` | 暂停并插话 |
-| `F10` | 退出 FastCUA |
+FastCUA 默认 **Full access**：对未知应用直接放行，不弹审批。所有设置都在本地配置文件 `config.json` 中，用户可直接编辑，改完重启 daemon 生效。把 `approvalPolicy` 改回 `"safe"` 即可恢复白名单/审批模式。
 
-本地控制中心位于 `http://127.0.0.1:8420`。安全模式在操作未知应用前会请求审批；信任采用精确应用身份，而不是模糊名称匹配。
+控制面（暂停 / 插话 / 审批 / 退出）通过 daemon 命名管道方法（`pause` / `resume` / `interject` / `resolve_approval` / `shutdown` 等）提供给宿主集成；DeepSeek Harness 插件负责配置与历史查看。审批采用精确应用身份，而不是模糊名称匹配。
 
 ## 视觉点击示例
 
@@ -148,6 +151,12 @@ await sky.close();
 > [!NOTE]
 > 使用 Skill Recorder 时，录制的屏幕内容、操作证据和旁白可能会发送给所使用的云端模型提供商。
 
+## 计算机使用历史
+
+每次桌面动作与控制事件都会以追加 JSONL 形式写入本地数据目录的 `history/history.jsonl`，截图存入 `history/shots/`。条目包含应用、动作、摘要、结果、耗时，以及（`get_window_state` / `grid_view` 时）截图。`type_text` / `set_value` 只记录长度、不记录原文。保留策略由 `config.json` 中的 `historyEnabled`、`historyCaptureScreenshots`、`historyMaxEntries`、`historyRetentionDays`、`historyMaxShotsPerAction` 控制。
+
+Agent 可用 `list_history` / `get_history` MCP 工具读取历史；DeepSeek Harness 插件提供可视化查看。所有历史数据只保存在本机。
+
 ## 从源码开发
 
 ```powershell
@@ -158,7 +167,7 @@ cd FastCUA
 
 然后把完整 `skills\computer-use` 目录复制到当前 Agent 的 Skill 目录，并把 `server.mjs` 的绝对路径配置为 stdio MCP Server。用 `runtime_info` 验证当前 checkout。复现命令与测试矩阵见[技术论文](docs/TECHNICAL_PAPER.md#12-reproduction-and-operation)。
 
-项目官网源码位于 `site/`，并由本仓库的 `.github/workflows/pages.yml` 发布。根目录的 `web.html` 仍是本地运行时控制中心，不是公开官网。
+FastCUA 无自带 UI：配置在本地 `config.json`，控制与历史查看由宿主（DeepSeek Harness 插件）提供。
 
 ## 使用边界
 

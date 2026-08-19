@@ -37,6 +37,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node --check lib/runtime.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --check lib/history.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node --check lib/update-check.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node --check tests/protocol-regression.mjs
@@ -49,15 +51,17 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node --check tests/installer-contract.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --check tests/history-parameter-contract.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node --check tests/server-lifecycle.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node --check tests/real-machine-validation.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          node --check tests/site-contract.mjs
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node --check tests/release-workflow-contract.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node tests/installer-contract.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node tests/history-parameter-contract.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node tests/runtime-release-contract.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -65,17 +69,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node tests/server-lifecycle.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          node tests/site-contract.mjs
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node tests/release-workflow-contract.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           [scriptblock]::Create((Get-Content install.ps1 -Raw)) | Out-Null
           [scriptblock]::Create((Get-Content scripts/manage.ps1 -Raw)) | Out-Null
           [scriptblock]::Create((Get-Content scripts/build-release.ps1 -Raw)) | Out-Null
           [scriptblock]::Create((Get-Content uninstall.ps1 -Raw)) | Out-Null
-          [scriptblock]::Create((Get-Content overlay.ps1 -Raw)) | Out-Null
+          [scriptblock]::Create((Get-Content scripts/agent-setup.ps1 -Raw)) | Out-Null
           [scriptblock]::Create((Get-Content tests/run-control-plane.ps1 -Raw)) | Out-Null
-          [xml](Get-Content card.xaml -Raw) | Out-Null
       - name: Build native artifacts
         shell: pwsh
         run: |
