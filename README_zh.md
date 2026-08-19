@@ -3,19 +3,17 @@
 > [!IMPORTANT]
 > **FastCUA 已停止开发。**
 >
-> 项目于 **2026 年 8 月 19 日**结束后续开发。新用户请直接使用 **[Cua Driver](https://github.com/trycua/cua/tree/main/libs/cua-driver)**。
+> 项目于 **2026 年 8 月 19 日**结束后续开发。新用户请直接使用 **[Cua](https://github.com/trycua/cua)**。
 
 ## 项目状态
 
 FastCUA 最初定位为面向 AI Agent 的 accessibility-first Windows 控制平面，将 Windows UI Automation、视觉回退、常驻运行时、MCP 与明确的人类接管机制组合在一起。
 
-此后，Cua Driver 已经发展到与 FastCUA 高度重叠的核心方向，并形成了更完整的实现：支持 Windows、macOS 与 Linux，具备各平台原生无障碍接口、后台安全输入路径，以及 Electron、Tauri、WPF、WinUI、WebView2 等桌面技术栈适配，同时提供 MCP、SDK 和持续维护的跨平台测试矩阵。
+此后，Cua 已经发展到与 FastCUA 高度重叠的核心方向，并形成了更完整的实现：支持 Windows、macOS 与 Linux，具备各平台原生无障碍接口、后台安全输入路径，以及 Electron、Tauri、WPF、WinUI、WebView2 等桌面技术栈适配，同时提供 MCP、SDK 和持续维护的跨平台测试矩阵。
 
-继续维护第二套高度重叠的底层 Computer Use 基础设施已经没有足够意义。与其重复造轮子，FastCUA 将停止开发，并建议所有新老用户逐步迁移到 Cua Driver。
+继续维护第二套高度重叠的底层 Computer Use 基础设施已经没有足够意义。与其重复造轮子，FastCUA 将停止开发，并建议所有新老用户逐步迁移到 Cua。
 
-**推荐项目：** https://github.com/trycua/cua
-
-**Cua Driver：** https://github.com/trycua/cua/tree/main/libs/cua-driver
+**推荐替代项目：** https://github.com/trycua/cua
 
 ## FastCUA 接下来会怎样？
 
@@ -27,7 +25,7 @@ FastCUA 最初定位为面向 AI Agent 的 accessibility-first Windows 控制平
 - 不再计划继续做兼容性适配；
 - 已知或未来出现的问题可能不会修复；
 - 不建议再把 FastCUA 用于新的部署；
-- 后续 Computer Use 开发建议迁移到 Cua Driver。
+- 后续 Computer Use 开发建议迁移到 Cua。
 
 FastCUA 的部分设计仍然可能具有参考价值，尤其是人类随时接管、插话、按应用审批，以及基于证据生成 Skill 的思路。
 
@@ -39,7 +37,9 @@ FastCUA 的部分设计仍然可能具有参考价值，尤其是人类随时接
 & "$env:LOCALAPPDATA\FastCUA\app\uninstall.ps1"
 ```
 
-如需持续维护的替代方案，请查看 Cua 仓库中的 Cua Driver 安装文档。
+如需持续维护的替代方案，请查看 Cua 仓库：
+
+https://github.com/trycua/cua
 
 ## 许可证
 
