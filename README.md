@@ -3,19 +3,17 @@
 > [!IMPORTANT]
 > **FastCUA is no longer under development.**
 >
-> Development ended on **August 19, 2026**. New users should use **[Cua Driver](https://github.com/trycua/cua/tree/main/libs/cua-driver)** instead.
+> Development ended on **August 19, 2026**. New users should use **[Cua](https://github.com/trycua/cua)** instead.
 
 ## Project status
 
 FastCUA started as an accessibility-first Windows control plane for AI agents, combining Windows UI Automation, visual fallback, a resident runtime, MCP, and explicit human takeover controls.
 
-Cua Driver has since converged on the same core problem while developing a substantially broader implementation: Windows, macOS, and Linux support; native accessibility backends; background-safe input paths; Electron, Tauri, WPF, WinUI, WebView2 and other desktop stacks; MCP integration; SDKs; and an actively maintained cross-platform test matrix.
+Cua has since converged on the same core problem while developing a substantially broader implementation: Windows, macOS, and Linux support; native accessibility backends; background-safe input paths; Electron, Tauri, WPF, WinUI, WebView2 and other desktop stacks; MCP integration; SDKs; and an actively maintained cross-platform test matrix.
 
-Maintaining a second implementation of the same low-level computer-use infrastructure is no longer a good use of development effort. Rather than duplicate work, FastCUA development is stopping and users are encouraged to migrate to Cua Driver.
+Maintaining a second implementation of the same low-level computer-use infrastructure is no longer a good use of development effort. Rather than duplicate work, FastCUA development is stopping and users are encouraged to migrate to Cua.
 
-**Recommended project:** https://github.com/trycua/cua
-
-**Cua Driver:** https://github.com/trycua/cua/tree/main/libs/cua-driver
+**Recommended replacement:** https://github.com/trycua/cua
 
 ## What happens to FastCUA?
 
@@ -27,7 +25,7 @@ However:
 - no compatibility work is planned;
 - bugs may remain unfixed;
 - the project should not be selected for new deployments;
-- users should migrate to Cua Driver for ongoing computer-use development.
+- users should migrate to Cua for ongoing computer-use development.
 
 The original FastCUA design may still be useful as prior art, especially its emphasis on human takeover, interjection, per-application approval, and evidence-first Skill recording.
 
@@ -39,7 +37,9 @@ Existing installations can continue to run at their own risk, but they are no lo
 & "$env:LOCALAPPDATA\FastCUA\app\uninstall.ps1"
 ```
 
-For a maintained replacement, see the Cua Driver installation documentation in the Cua repository.
+For a maintained replacement, see the Cua repository:
+
+https://github.com/trycua/cua
 
 ## License
 
