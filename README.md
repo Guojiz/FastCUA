@@ -5,6 +5,16 @@
 >
 > Development ended on **August 19, 2026**. New users should use **[Cua](https://github.com/trycua/cua)** instead.
 
+<p align="center">
+  <a href="https://guojiz.github.io/FastCUA/"><img alt="Project site" src="https://img.shields.io/badge/site-guojiz.github.io%2FFastCUA-111111?style=flat-square"></a>
+  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-111111?style=flat-square"></a>
+  <a href="https://github.com/trycua/cua"><img alt="Use Cua instead" src="https://img.shields.io/badge/replacement-Cua-111111?style=flat-square"></a>
+</p>
+
+**Project site (historical documentation):** https://guojiz.github.io/FastCUA/
+
+The site remains as a record of the original FastCUA design: accessibility-first Windows control, vision on demand, a warm runtime, and visible human takeover. It is not a launch page for new deployments.
+
 ## Project status
 
 FastCUA started as an accessibility-first Windows control plane for AI agents, combining Windows UI Automation, visual fallback, a resident runtime, MCP, and explicit human takeover controls.
@@ -17,7 +27,7 @@ Maintaining a second implementation of the same low-level computer-use infrastru
 
 ## What happens to FastCUA?
 
-This repository remains available as a historical and technical reference. Existing source code, documentation, experiments, the human-control design, and the Skill Recorder work will remain here.
+This repository remains available as a historical and technical reference. Existing source code, documentation, experiments, the human-control design, and the Skill Recorder work will remain here. The [project site](https://guojiz.github.io/FastCUA/) and the [recorder playbook](skills/skill-recorder) stay with that record.
 
 However:
 
@@ -40,6 +50,22 @@ Existing installations can continue to run at their own risk, but they are no lo
 For a maintained replacement, see the Cua repository:
 
 https://github.com/trycua/cua
+
+## Links
+
+| | |
+| --- | --- |
+| **Project site** | https://guojiz.github.io/FastCUA/ |
+| **Replacement** | https://github.com/trycua/cua |
+| **Author site** | https://guojiz.github.io/ |
+| **X** | https://x.com/guojizh |
+| **Bilibili** | https://space.bilibili.com/3493114115263006 |
+| **Sponsor** | https://github.com/Guojiz/Sponsors |
+
+### Other Guojiz projects with official sites
+
+- [GitLearnOS](https://guojiz.github.io/gitlearnos/) — learner-owned Git memory for AI-assisted study
+- [Word Snap](https://guojiz.github.io/word-snap/) — bilingual vocabulary matching PWA
 
 ## License
 
