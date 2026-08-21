@@ -1,0 +1,68 @@
+name: Release FastCUA runtime
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  windows-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - name: Confirm every component matches the tag
+        shell: pwsh
+        run: |
+          $expected = '${{ github.ref_name }}'.TrimStart('v')
+          $manifest = (Get-Content runtime-manifest.json -Raw | ConvertFrom-Json).version
+          $nativeHost = (Select-String -Path native-host/Cargo.toml -Pattern '^version = "([^"]+)"$').Matches[0].Groups[1].Value
+          $recorder = (Select-String -Path tools/skill-recorder/Cargo.toml -Pattern '^version = "([^"]+)"$').Matches[0].Groups[1].Value
+          foreach ($entry in @{ manifest=$manifest; nativeHost=$nativeHost; recorder=$recorder }.GetEnumerator()) {
+            if ($entry.Value -ne $expected) { throw "$($entry.Key) version $($entry.Value) does not match tag $expected" }
+          }
+      - name: Static checks and contracts
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          cargo fmt --manifest-path native-host/Cargo.toml -- --check
+          cargo fmt --manifest-path tools/skill-recorder/Cargo.toml -- --check
+          cargo test --manifest-path native-host/Cargo.toml --locked
+          node --check daemon.mjs
+          node --check server.mjs
+          node --check lib/runtime.mjs
+          node --check lib/history.mjs
+          node --check lib/update-check.mjs
+          node tests/installer-contract.mjs
+          node tests/history-parameter-contract.mjs
+          node tests/runtime-release-contract.mjs
+          node tests/runtime-identity-integration.mjs
+          node tests/server-lifecycle.mjs
+          node tests/skill-authoring-contract.mjs
+          node tests/release-workflow-contract.mjs
+          [scriptblock]::Create((Get-Content install.ps1 -Raw)) | Out-Null
+          [scriptblock]::Create((Get-Content scripts/manage.ps1 -Raw)) | Out-Null
+          [scriptblock]::Create((Get-Content scripts/build-release.ps1 -Raw)) | Out-Null
+          [scriptblock]::Create((Get-Content scripts/agent-setup.ps1 -Raw)) | Out-Null
+      - name: Build verified runtime package
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          ./scripts/build-release.ps1 -Version '${{ github.ref_name }}' -Commit '${{ github.sha }}'
+          Copy-Item install.ps1 dist/install.ps1
+      - name: Publish GitHub release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: FastCUA ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            dist/fastcua-runtime-win-x64.zip
+            dist/SHA256SUMS.txt
+            dist/runtime-manifest.json
+            dist/install.ps1

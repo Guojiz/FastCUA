@@ -1,0 +1,14 @@
+name: Headless runtime notice
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  headless:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Confirm website removal
+        run: echo "FastCUA is distributed as a headless runtime; no Pages artifact is deployed."

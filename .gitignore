@@ -1,0 +1,32 @@
+# Runtime logs
+*.log
+
+# Local test scripts
+_*.mjs
+
+# Node
+node_modules/
+
+# OS junk
+Thumbs.db
+.DS_Store
+helper/
+native-host/target/
+native-host/.cargo-home/
+native-host/.rustup-home/
+tests/*.exe
+
+# Release artifacts generated locally (CI / gh release upload)
+/dist/
+/cua-native-host.exe
+/SHA256SUMS.txt
+
+# Feasibility tool build output
+tools/record-feasibility/target/
+
+# Skill recorder build output
+tools/skill-recorder/target/
+
+# Local Skill-writer credentials
+skill-writer-auth.json
+.fastcua/
