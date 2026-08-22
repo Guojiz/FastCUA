@@ -8,7 +8,40 @@ Its core idea is simple:
 
 > **Do not send the whole screen to the model unless the model actually needs it.**
 
-[Website](https://guojiz.github.io/FastCUA/) · [中文](README_zh.md) · [Technical paper](docs/TECHNICAL_PAPER.md) · [Next design](docs/NEXT_DESIGN.md)
+[Website](https://guojiz.github.io/FastCUA/) · [中文](README_zh.md) · [Current architecture](docs/CURRENT_ARCHITECTURE.md) · [Technical paper](docs/TECHNICAL_PAPER.md) · [Next design](docs/NEXT_DESIGN.md)
+
+## Headless and host-neutral by design
+
+FastCUA is intended to sit **under** an Agent or Harness, not replace it.
+
+```text
+Agent / Harness / Host
+  ├─ task planning
+  ├─ user interaction
+  ├─ optional pause / interjection / approval UX
+  └─ FastCUA integration
+          ↓
+      FastCUA
+      ├─ UIA / HWND observation
+      ├─ visual capture
+      ├─ agent-defined ROI
+      ├─ recursive visual grounding
+      ├─ coordinate mapping
+      ├─ Windows input
+      └─ optional host-control hooks
+          ↓
+        Windows
+```
+
+FastCUA should not force a particular floating overlay, control center, hotkey layout, or agent product UX.
+
+A host may optionally use runtime control primitives such as `pause`, `resume`, `interject`, approval resolution, or `shutdown`, but **the host decides how those controls are presented to the user**.
+
+> **FastCUA defines the Windows runtime contract. The host defines the human experience.**
+
+This separation is intentional. It allows DeepSeek, Qwen, Codex, Claude, opencode, and other agent stacks to integrate the same Windows substrate without inheriting FastCUA-specific UI assumptions.
+
+Some legacy standalone-control UI code may still exist in the current branch while the implementation is being aligned with this boundary. `docs/CURRENT_ARCHITECTURE.md` is authoritative for the product direction, and `docs/HANDOFF_HEADLESS_RUNTIME.md` contains the cleanup handoff.
 
 ## The problem FastCUA is trying to solve
 
@@ -146,7 +179,7 @@ Which region?
 
 instead of one high-precision coordinate regression over the entire screen.
 
-This is **one image at each observation step**, not a fan-out that cuts the screen into many tiles and sends all of them to the model.
+This is **one image at each observation step**, not a fan-out that cuts the screen into many tiles and sends all of them to the model at once.
 
 ## 3. The agent can define the crop itself
 
@@ -291,6 +324,7 @@ A compact summary is:
 | Coordinate handling | Often model-facing | Browser-managed | Runtime maps local coordinates back to Windows |
 | Scope | Any visible surface | Web content | Windows apps, browser chrome, cross-app flows |
 | Runtime state | Integration-dependent | Browser session | Resident daemon + native host |
+| User interaction model | Integration-defined | Browser/tool-defined | **Host-defined; FastCUA stays headless** |
 
 FastCUA complements in-page browser automation; it does not replace it.
 
@@ -298,12 +332,13 @@ FastCUA complements in-page browser automation; it does not replace it.
 
 ```mermaid
 flowchart TB
-  A["Agent host + computer-use Skill"] -->|"stdio MCP"| B["server.mjs"]
+  A["Agent / Harness + computer-use Skill"] -->|"stdio MCP"| B["server.mjs"]
   B -->|"path-scoped named pipe"| C["Resident daemon"]
   C --> D["Rust native host"]
   D --> E["UI Automation / HWND"]
   D --> F["Capture / arbitrary ROI / square grid"]
   D --> G["Keyboard / mouse input"]
+  A -. optional host controls .-> C
 ```
 
 All clients share one daemon, policy state, UIA quality history, capture state, and physical pointer.
@@ -390,6 +425,12 @@ cd FastCUA
 
 Then copy the complete `skills\computer-use` directory into the active agent's Skill directory and configure the absolute path to `server.mjs` as a stdio MCP server. Reproduction commands and the test matrix are in the [technical paper](docs/TECHNICAL_PAPER.md#12-reproduction-and-operation).
 
+## Documentation status
+
+The current product boundary is defined in [`docs/CURRENT_ARCHITECTURE.md`](docs/CURRENT_ARCHITECTURE.md).
+
+The technical paper is an implementation-backed report and may still contain descriptions from the earlier FastCUA-owned UI/control-center architecture until the headless cleanup is complete. The migration plan is tracked in [`docs/NEXT_DESIGN.md`](docs/NEXT_DESIGN.md), and the code handoff is in [`docs/HANDOFF_HEADLESS_RUNTIME.md`](docs/HANDOFF_HEADLESS_RUNTIME.md).
+
 ## Boundaries
 
 FastCUA currently targets Windows 11 x64. UAC, Secure Desktop, authentication dialogs, password managers, Windows Security, higher-integrity processes, protected surfaces, and applications with unusual capture/accessibility behavior are outside the normal path. Synthetic input is not hardware input. Remaining input, provider, capture, IPC, and evaluation work is tracked in [Next design](docs/NEXT_DESIGN.md).
@@ -412,8 +453,8 @@ FastCUA currently targets Windows 11 x64. UAC, Secure Desktop, authentication di
 
 ### Other Guojiz projects with official sites
 
-- [GitLearnOS](https://guojiz.github.io/gitlearnos/) — learner-owned Git memory for AI-assisted study
-- [Word Snap](https://guojiz.github.io/word-snap/) — bilingual vocabulary matching PWA
+- [GitLearnOS](https://guojiz.github.io/gitlearnos/) - learner-owned Git memory for AI-assisted study
+- [Word Snap](https://guojiz.github.io/word-snap/) - bilingual vocabulary matching PWA
 
 ## License
 
