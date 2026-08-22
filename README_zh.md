@@ -1,67 +1,215 @@
 # FastCUA
 
-**文本优先。视觉按需。不断放大，直到足够精准。**
+**文本优先。视觉按需。不断细分，直到足够精准。**
 
-FastCUA 是一个面向 AI Agent 的本地 Windows Computer Use 运行时，它围绕一条原则设计：
+FastCUA 是一个面向 AI Agent 的本地 Windows Computer Use 运行时。
 
-> **不要默认每一步 Computer Use 都需要截图。只把当前决策真正需要的信息交给模型。**
+它最核心的想法其实很简单：
+
+> **除非模型真的需要，否则不要默认把整张屏幕都交给模型。**
 
 [网站](https://guojiz.github.io/FastCUA/) · [English](README.md) · [技术论文](docs/TECHNICAL_PAPER.md) · [下一步设计](docs/NEXT_DESIGN.md)
 
 > [!WARNING]
 > FastCUA 仍是快速开发中的实验项目。请只用于测试，不要用于重要或无人值守的工作。
 
-## FastCUA 到底有什么不同
+## FastCUA 想解决什么问题
 
-### 1. 默认不是先截图
-
-FastCUA 会先从 Windows UI Automation 读取结构化语义信息，例如控件角色、名称、边界和当前快照中的元素索引。
-
-如果这些信息已经足够可靠，Agent 可以完全不接收截图，直接完成定位和操作：
+很多视觉 Computer Use 系统大致都是这样工作的：
 
 ```text
-Windows UI
+整张截图
    ↓
-UI Automation 文本
+视觉模型
    ↓
-Agent 选择 element_index
+预测 x, y
    ↓
-Windows 输入
+点击
 ```
 
-如果 UI Automation 很弱、失效、过期，或者虽然存在但实际上不可操作，FastCUA 会切换到视觉，而不是让 Agent 一遍遍重试坏掉的语义路径。
+这种方式当然能工作，但里面有两类经常可以避免的成本。
 
-### 2. 需要视觉时，也不是直接在整张大图上猜 XY
+第一，Windows 很多标准控件本来就会通过 UI Automation 暴露名称、角色、边界等结构化信息。如果这些信息已经足够，仍然把整张截图送给模型，其实是在重复描述操作系统已经知道的东西。
 
-FastCUA 不要求模型一上来就在大尺寸截图上直接预测一个精确坐标。
+第二，当视觉确实不可避免时，让模型直接在一张很大的截图上一次性预测一个精确坐标并不总是稳。模型可能已经认出了按钮，却因为 4K 分辨率、高 DPI、密集工具栏、小控件或截图缩放，最后点偏几像素。
 
-第一层视觉观察是**一张带编号正方形区域的窗口图**。模型只需要判断目标在哪个区域。选择编号本身不会产生任何点击。
+FastCUA 对这两种情况采用两条不同的路径。
 
-FastCUA 随后只裁出这个区域，再画一个新的 3×3 网格。如果目标仍然不够清楚，就继续细分：
+## 1. 文本够用，就完全不需要截图
+
+假设 Windows 当前的 UI Automation 快照是：
+
+```text
+[12] Button
+name="Save"
+
+[13] Edit
+name="Project name"
+
+[14] CheckBox
+name="Auto save"
+```
+
+如果 UIA 状态足够可靠，Agent 只需要选择元素 `12`：
+
+```text
+Windows
+   ↓
+UI Automation
+   ↓
+结构化文本
+   ↓
+Agent 选择 element_index=12
+   ↓
+校验后的 Windows 输入
+```
+
+整个过程不需要把截图放进模型上下文。
+
+Agent 甚至可以明确请求：
+
+```text
+include_text = true
+include_screenshot = false
+```
+
+但 FastCUA 也不会盲目信任无障碍信息。UIA 观察会被分成 `good`、`weak`、`broken`，当语义信息不完整、过期、不可操作，或者 provider 超时时，运行时可以直接给出 `prefer_vision=true`。
+
+所以它不是“永远用 UIA”，而是：
+
+> **语义信息有用时就用；不好用时就立刻换视觉。**
+
+## 2. 必须用视觉时，也不要一上来就在整张大图上猜 XY
+
+假设当前应用窗口是：
+
+```text
+3840 × 2160
+```
+
+一次性的视觉控制可能要求模型直接给出：
+
+```text
+click(3371, 184)
+```
+
+FastCUA 更倾向于把精准定位变成一个由粗到细的搜索过程。
+
+第一步仍然只有**一张窗口图**，只是在这张图上画编号区域：
+
+```text
+┌────┬────┬────┬────┐
+│ 1  │ 2  │ 3  │ 4  │
+├────┼────┼────┼────┤
+│ 5  │ 6  │ 7  │ 8  │
+├────┼────┼────┼────┤
+│ 9  │10  │11  │12  │
+└────┴────┴────┴────┘
+```
+
+模型只需要回答：
+
+```text
+目标在 11 号区域。
+```
+
+选择 `11` 本身**不会点击**。
+
+FastCUA 接下来只取 11 号区域，再画一个新的 3×3 网格：
+
+```text
+┌────┬────┬────┐
+│ 1  │ 2  │ 3  │
+├────┼────┼────┤
+│ 4  │ 5  │ 6  │
+├────┼────┼────┤
+│ 7  │ 8  │ 9  │
+└────┴────┴────┘
+```
+
+Agent 可以继续：
+
+```text
+11 → 6 → 2
+```
+
+直到目标已经被隔离得足够清楚，再真正提交点击。
+
+连续 3×3 细分后，搜索面积大约会缩小为：
+
+```text
+细分 1 次 → 1 / 9
+细分 2 次 → 1 / 81
+细分 3 次 → 1 / 729
+```
+
+于是模型解决的不再是：
+
+```text
+请在 3840×2160 里一次性给出一个精准坐标
+```
+
+而是连续几个简单问题：
+
+```text
+在哪个区域？
+→ 在哪个子区域？
+→ 还需要继续细分吗？
+```
+
+而且这始终是**每一步只给模型一张图**，不是把整张屏幕切成十几张小图再一次性全部喂进去。
+
+## 3. Agent 也可以自己决定下一步要看哪里
+
+数字网格并不是唯一的缩小方式。
+
+FastCUA 的区域系统也支持任意边界：
+
+```text
+left
+top
+right
+bottom
+```
+
+所以 Agent 可以相当于说：
+
+```text
+下一步只给我看这个窗口的右上角。
+```
+
+然后观察链可以变成：
 
 ```text
 完整窗口
-    ↓
-编号区域
-    ↓
-选择一个区域
-    ↓
-只裁这个区域
-    ↓
-3×3 细分
-    ↓
-仍不够精确就继续细分
-    ↓
-最后只提交一次点击
+   ↓
+Agent 选择感兴趣区域
+   ↓
+局部截图
+   ↓
+Agent 再缩小范围
+   ↓
+更小的局部截图
+   ↓
+精准定位
 ```
 
-也就是说，模型解决的是连续几个更简单的问题：**“目标在哪个区域？”**，而不是在 4K 窗口上一次性做出类似 `click(3371, 184)` 的高精度坐标回归。
+这样一来，Zoom / Refine 就不只是固定的“两阶段放大技巧”，而变成了一个**由 Agent 主动控制的观察能力**。
 
-这是一条**单图、由粗到细的观察链**，不是把整张图切成很多小图后一次性全部喂给模型。
+进入细分以后，原生 host 还可以直接抓取选中的局部区域，而不是每次重新截完整窗口再裁剪。
 
-### 3. 模型负责判断目标，几何换算交给运行时
+## 4. 模型负责判断，坐标数学交给运行时
 
-进入裁剪或细分后，模型输出的坐标只属于当前看到的局部图。FastCUA 会保留裁剪原点和截图缩放比例，并用确定性的代码把坐标映射回去：
+假设模型最后看到的是一张 `300 × 200` 的局部图，并判断目标在：
+
+```text
+x = 84
+y = 31
+```
+
+模型不用自己计算这个点在原始显示器上的绝对位置。
+
+FastCUA 会保留裁剪起点和截图缩放比例，并用确定性的代码完成：
 
 ```text
 局部图坐标
@@ -73,17 +221,27 @@ FastCUA 随后只裁出这个区域，再画一个新的 3×3 网格。如果目
 物理屏幕坐标
 ```
 
-模型不需要自己反算 DPI、裁剪偏移或整屏几何关系。超出当前区域的坐标会被拒绝，而不是偷偷钳到附近某个位置。
+DPI 缩放、裁剪偏移、窗口几何这些事情都属于运行时，不应该消耗模型推理。超出当前区域的坐标会直接被拒绝，而不是偷偷钳到附近某个位置。
 
-### 4. 模型说“点这里”，不等于系统立刻就点
+## 5. “已经定位到”不等于“立刻产生副作用”
 
-真正产生输入之前，FastCUA 会在副作用发生前重新检查本地环境。窗口身份、前台状态、光标位置、目标边界、超时以及人类控制信号都可以终止执行。
+就算目标已经确定，FastCUA 也不会默认环境还和刚才完全一样。
 
-换句话说：
+比如：
 
-> **模型决定应该发生什么；运行时决定现在是否仍然安全、有效地让它发生。**
+```text
+Agent 准备点击 Excel
+        ↓
+FastCUA 移动光标
+        ↓
+用户突然切到了另一个应用
+```
 
-完整路径可以概括为：
+简单的自动化系统可能还是会把这个点击发出去。
+
+FastCUA 会在真正产生副作用之前重新检查环境。窗口身份、前台状态、光标位置、目标边界、超时和人类控制信号，都可以让这次操作在 Mouse Down 之前被终止。
+
+所以完整路径其实是：
 
 ```text
 UIA 文本
@@ -94,7 +252,7 @@ UIA 文本
 
    ↓ 不足
 
-窗口图像
+视觉
    ↓
 区域
    ↓
@@ -109,30 +267,21 @@ UIA 文本
 校验后执行
 ```
 
-FastCUA 同时保持一个常驻本地运行时，因此 UIA 质量历史、截图状态、审批、暂停/插话状态，以及一组相关的原生动作，不需要在每一次工具调用时从头重建。
+一句话概括：
 
-FastCUA 不绑定某一家 Agent，但完整安装必须在**同一个 Agent 宿主**内同时具备：
-
-1. 完整的 `skills/computer-use/` 操作规范；
-2. `sky-computer-use` stdio MCP Server。
-
-只装 MCP 等于有能力却缺少必要操作规范；只装 Skill 则没有执行器。
-
-## 模型要求
-
-只使用**一个五官齐全的主模型**：理解文本和图像、可靠推理、调用 Skill 与 MCP，并保留完成整个任务所需的上下文。录制旁白时最好能原生理解音频，否则使用文字笔记。不再配置 writer、转写、备用或纯文本模型。
+> **FastCUA 尽量只把当前决策需要的最小观察交给模型，再把模型的模糊判断转换成确定性的 Windows 动作。**
 
 ## 为什么使用 FastCUA
 
 | | 视觉优先 Computer Use | 浏览器自动化 | FastCUA |
 |---|---|---|---|
 | 主要观察方式 | 截图 | DOM/CDP | 先读 UIA 文本，需要时才开视觉 |
-| 视觉定位 | 常直接预测整图 XY | DOM selector | 编号区域 + 递归局部细分 |
+| 视觉定位 | 常直接预测整图 XY | DOM selector | Agent 自选 ROI + 递归局部细分 |
+| 视觉负担 | 常是完整当前画面 | 页面结构 | 越来越小的局部区域 |
 | 坐标处理 | 常由模型面对 | 浏览器处理 | 运行时把局部坐标映射回 Windows |
 | 范围 | 任意可见界面 | 网页内容 | Windows 应用、浏览器外壳、跨应用流程 |
-| 执行方式 | 通常每轮一个动作 | 浏览器命令 | 一个模型回合执行多个原生动作 |
-| 运行时状态 | 常按调用重建 | 浏览器会话 | 一个常驻 daemon 与原生 host |
-| 人类接管 | 取决于集成 | 仅限浏览器 | 全局暂停、插话、审批、退出 |
+| 运行时状态 | 取决于集成 | 浏览器会话 | 常驻 daemon + 原生 host |
+| 人类接管 | 取决于集成 | 仅限浏览器 | 暂停、插话、审批、退出 |
 
 FastCUA 是网页内自动化的补充，不是替代品。
 
@@ -144,12 +293,19 @@ flowchart TB
   B -->|"按路径隔离的命名管道"| C["常驻 daemon"]
   C --> D["Rust 原生 host"]
   D --> E["UI Automation / HWND"]
-  D --> F["截图 / 正方形网格"]
+  D --> F["截图 / 区域 / 正方形网格"]
   D --> G["键盘 / 鼠标输入"]
   C --> H["审批 / 暂停 / 插话"]
 ```
 
-所有客户端共享一个 daemon、策略状态和物理光标。持久化 `js` cell 可在一个模型回合内执行一组相关 `sky.*` 动作；目标过期、焦点或光标变化、坐标越界、超时和人类控制信号都会停止执行。
+所有客户端共享一个 daemon、策略状态、UIA 质量历史、截图状态、审批、人类控制状态和物理光标。
+
+FastCUA 不绑定某一家 Agent，但完整安装必须在**同一个 Agent 宿主**内同时具备：
+
+1. 完整的 `skills/computer-use/` 操作规范；
+2. `sky-computer-use` stdio MCP Server。
+
+只装 MCP 等于有能力却缺少必要操作规范；只装 Skill 则没有执行器。
 
 ## 定位逻辑
 
@@ -157,18 +313,18 @@ flowchart TB
 
 | 观察结果 | 必须采取的动作 |
 |---|---|
-| `quality:"good"`，目标有名称和有效边界 | 点击当前快照的 `element_index` |
-| `prefer_vision:true`、`weak`、`broken`、`[no-hit]`，或一次索引过期 | 停止语义点击，调用 `grid_view` |
+| `quality:"good"`，目标有名称和有效边界 | 使用当前 `element_index` |
+| `prefer_vision:true`、`weak`、`broken`、`[no-hit]`，或一次索引过期 | 停止语义点击，切换视觉定位 |
 
-视觉操控遵循**观察 → 选择 → 细分 → 提交**：
+视觉控制遵循**观察 → 选择 → 细分 → 提交**：
 
-1. `grid_view({window})` 返回一张带正方形数字格的窗口图。
-2. 看图后选择包含目标的格号。选择只是判断，不会产生输入。
-3. 若目标没有安全地落在格子中心，调用 `grid_refine({window,grid,cell})`；它只裁出该格并重新画 3×3，可继续细分。
-4. 只提交一次：格子中心用 `click_cell({window,grid,cell})`，格内偏移用 `click_in_cell({window,grid,cell,x,y,view})`，当前图或裁剪图中的精确位置用 `click_view({window,view,x,y})`。
-5. 任何可能改变布局或焦点的动作后重新观察。
+1. `grid_view({window})` 返回一张带编号的窗口图。
+2. 选择包含目标的区域。选择本身不会产生输入。
+3. `grid_refine(...)` 只裁这个区域并重新画 3×3，需要时继续细分。
+4. 最后只通过 `click_cell`、`click_in_cell` 或 `click_view` 提交一次动作。
+5. 任何可能改变布局或焦点的操作后重新观察。
 
-坐标始终属于当前窗口图或裁剪图，原点在左上角。helper 会反算截图缩放并拒绝窗口外坐标。完整机制与论证见[技术论文](docs/TECHNICAL_PAPER.md#4-observation-semantics-first-pixels-when-needed)。
+完整机制与约束见[技术论文](docs/TECHNICAL_PAPER.md#4-observation-semantics-first-pixels-when-needed)。
 
 ## 安装
 
@@ -178,16 +334,9 @@ flowchart TB
 irm https://raw.githubusercontent.com/Guojiz/FastCUA/main/install.ps1 | iex
 ```
 
-经过校验的安装器会在桌面生成 `FastCUA Agent Setup.txt`。把它交给真正要使用 FastCUA 的 Agent。该 Agent 必须：
+安装器会在桌面生成 `FastCUA Agent Setup.txt`。把它交给真正要使用 FastCUA 的 Agent。该 Agent 需要安装完整的 `skills\computer-use` 文件夹，把已安装的 `server.mjs` 配置为 `sky-computer-use` stdio MCP Server，重新加载，并确认 `list_windows` 可以正常调用。
 
-1. 把完整 `skills\computer-use` 文件夹安装到自己的 Skill 系统；
-2. 把 Node.js + 已安装的 `server.mjs` 配置为 `sky-computer-use` MCP；
-3. 重新加载并确认 Skill 可被发现；
-4. 成功调用 `list_windows`。
-
-Skill 或 MCP 缺少任何一个，安装都不完整。
-
-### 验证与更新
+### 验证和更新
 
 ```powershell
 & "$env:LOCALAPPDATA\FastCUA\app\install.ps1" -Action Doctor
@@ -206,19 +355,17 @@ Skill 或 MCP 缺少任何一个，安装都不完整。
 | `F9` | 暂停并插话 |
 | `F10` | 退出 FastCUA |
 
-本地控制中心位于 `http://127.0.0.1:8420`。安全模式在操作未知应用前会请求审批；信任采用精确应用身份，而不是模糊名称匹配。
+本地控制中心位于 `http://127.0.0.1:8420`。安全模式会在操作未知应用之前请求审批。
 
 ## 视觉点击示例
 
-假设 `window` 来自 `list_windows`：
-
 ```js
-let view = await sky.grid_view({ window });       // 看图，选择 4 号格
+let view = await sky.grid_view({ window });       // 看图，选 4 号格
 view = await sky.grid_refine({
   window,
   grid: view.grid,
   cell: "4",
-});                                               // 看图，选择 5 号格
+});                                               // 看图，选 5 号格
 await sky.click_cell({ window, grid: view.grid, cell: "5" });
 await sky.close();
 ```
@@ -232,7 +379,7 @@ await sky.close();
      → 用新参数 dry-run → 人工审阅后安装
 ```
 
-密码框和安全桌面时刻会被遮蔽。当前主 Agent 根据证据写 Skill；来源校验、dry-run、应用范围和明确的安装审批都是硬门禁。详见 `skills/skill-recorder/` 与[技术论文](docs/TECHNICAL_PAPER.md#9-evidence-first-skill-recording)。
+密码框和安全桌面时刻会被遮蔽。详见 `skills/skill-recorder/` 与[技术论文](docs/TECHNICAL_PAPER.md#9-evidence-first-skill-recording)。
 
 > [!NOTE]
 > 使用 Skill Recorder 时，录制的屏幕内容、操作证据和旁白可能会发送给所使用的云端模型提供商。
@@ -245,13 +392,11 @@ cd FastCUA
 .\native-host\build.ps1
 ```
 
-然后把完整 `skills\computer-use` 目录复制到当前 Agent 的 Skill 目录，并把 `server.mjs` 的绝对路径配置为 stdio MCP Server。用 `runtime_info` 验证当前 checkout。复现命令与测试矩阵见[技术论文](docs/TECHNICAL_PAPER.md#12-reproduction-and-operation)。
-
-项目官网源码位于 `site/`，并由本仓库的 `.github/workflows/pages.yml` 发布。根目录的 `web.html` 仍是本地运行时控制中心，不是公开官网。
+然后把完整 `skills\computer-use` 目录复制到当前 Agent 的 Skill 目录，并把 `server.mjs` 的绝对路径配置为 stdio MCP Server。复现命令与测试矩阵见[技术论文](docs/TECHNICAL_PAPER.md#12-reproduction-and-operation)。
 
 ## 使用边界
 
-FastCUA 当前面向 Windows 11 x64。UAC、安全桌面、认证对话框、密码管理器、Windows 安全中心、更高完整性进程、受保护画面，以及具有特殊截图/无障碍行为的应用，不属于正常工作路径。合成输入不等同于硬件输入，当前组合键实现仍使用已被取代的 `keybd_event` API。剩余的输入、provider、截图、IPC 与评测工作记录在[下一步设计](docs/NEXT_DESIGN.md)中。
+FastCUA 当前面向 Windows 11 x64。UAC、安全桌面、认证对话框、密码管理器、Windows 安全中心、更高完整性进程、受保护画面，以及具有特殊截图/无障碍行为的应用，不属于正常工作路径。合成输入不等同于硬件输入。剩余的输入、provider、截图、IPC 与评测工作记录在[下一步设计](docs/NEXT_DESIGN.md)中。
 
 ## 卸载
 
