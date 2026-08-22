@@ -1,62 +1,165 @@
 # FastCUA
 
-> [!IMPORTANT]
-> **FastCUA is no longer under development.**
->
-> Development ended on **August 19, 2026**. New users should use **[Cua](https://github.com/trycua/cua)** instead.
+**A local, accessibility-first Windows control plane for AI agents.**
 
-<p align="center">
-  <a href="https://guojiz.github.io/FastCUA/"><img alt="Project site" src="https://img.shields.io/badge/site-guojiz.github.io%2FFastCUA-111111?style=flat-square"></a>
-  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-111111?style=flat-square"></a>
-  <a href="https://github.com/trycua/cua"><img alt="Use Cua instead" src="https://img.shields.io/badge/replacement-Cua-111111?style=flat-square"></a>
-</p>
+[Website](https://guojiz.github.io/FastCUA/) · [中文](README_zh.md) · [Technical paper](docs/TECHNICAL_PAPER.md) · [Next design](docs/NEXT_DESIGN.md)
 
-**Project site (historical documentation):** https://guojiz.github.io/FastCUA/
+> [!WARNING]
+> FastCUA is an experimental project under active development. Use it for testing, not important or unattended work.
 
-The site remains as a record of the original FastCUA design: accessibility-first Windows control, vision on demand, a warm runtime, and visible human takeover. It is not a launch page for new deployments.
+FastCUA gives an agent a fast, inspectable interface to Windows applications. It prefers Windows UI Automation text, switches to screenshots and a numbered square grid when semantics are weak, and executes related native actions through one resident local runtime. The human remains in control through visible state, per-app approval, global pause, interjection, and exit controls.
 
-## Project status
+FastCUA is agent-neutral, but a complete installation always has two parts in the **same agent host**:
 
-FastCUA started as an accessibility-first Windows control plane for AI agents, combining Windows UI Automation, visual fallback, a resident runtime, MCP, and explicit human takeover controls.
+1. the full `skills/computer-use/` operating policy;
+2. the `sky-computer-use` stdio MCP server.
 
-Cua has since converged on the same core problem while developing a substantially broader implementation: Windows, macOS, and Linux support; native accessibility backends; background-safe input paths; Electron, Tauri, WPF, WinUI, WebView2 and other desktop stacks; MCP integration; SDKs; and an actively maintained cross-platform test matrix.
+MCP alone is capability without the required procedure. The Skill alone has no executor.
 
-Maintaining a second implementation of the same low-level computer-use infrastructure is no longer a good use of development effort. Rather than duplicate work, FastCUA development is stopping and users are encouraged to migrate to Cua.
+## Model requirement
 
-**Recommended replacement:** https://github.com/trycua/cua
+Use **one full-capability primary model** with text/image understanding, reliable reasoning, Skills, MCP, and enough context for the whole task. Native audio understanding is useful for recorded narration; otherwise use typed notes. Do not configure writer, transcription, fallback, or text-only models.
 
-## What happens to FastCUA?
+## Why FastCUA
 
-This repository remains available as a historical and technical reference. Existing source code, documentation, experiments, the human-control design, and the Skill Recorder work will remain here. The [project site](https://guojiz.github.io/FastCUA/) and the [recorder playbook](skills/skill-recorder) stay with that record.
+| | Vision-first computer use | Browser automation | FastCUA |
+|---|---|---|---|
+| Main observation | Screenshots | DOM/CDP | UIA text, then vision when needed |
+| Scope | Any visible surface | Web content | Windows apps, browser chrome, cross-app flows |
+| Execution | Often one action per loop | Browser commands | Several native actions per model turn |
+| Runtime state | Often rebuilt per call | Browser session | One warm daemon and native host |
+| Human takeover | Integration-dependent | Browser-limited | Global pause, interject, approve, exit |
 
-However:
+FastCUA complements in-page browser automation; it does not replace it.
 
-- no new FastCUA features are planned;
-- no compatibility work is planned;
-- bugs may remain unfixed;
-- the project should not be selected for new deployments;
-- users should migrate to Cua for ongoing computer-use development.
+## Architecture
 
-The original FastCUA design may still be useful as prior art, especially its emphasis on human takeover, interjection, per-application approval, and evidence-first Skill recording.
+```mermaid
+flowchart TB
+  A["Agent host + computer-use Skill"] -->|"stdio MCP"| B["server.mjs"]
+  B -->|"path-scoped named pipe"| C["Resident daemon"]
+  C --> D["Rust native host"]
+  D --> E["UI Automation / HWND"]
+  D --> F["Capture / square grid"]
+  D --> G["Keyboard / mouse input"]
+  C --> H["Approval / pause / interjection"]
+```
 
-## Existing installations
+All clients share one daemon, policy state, and physical pointer. A persistent `js` cell can execute related `sky.*` actions in one model turn; stale targets, changed focus/cursor, out-of-bounds points, timeouts, and human control signals stop execution.
 
-Existing installations can continue to run at their own risk, but they are no longer maintained. To remove FastCUA:
+## Targeting logic
+
+Start with `get_window_state({include_text:true})` and read `state.uia`:
+
+| Observation | Required action |
+|---|---|
+| `quality:"good"` and a named, bounded target | Click its current `element_index` |
+| `prefer_vision:true`, `weak`, `broken`, `[no-hit]`, or one stale-index failure | Stop semantic clicking and call `grid_view` |
+
+Visual control is **observe → select → refine → commit**:
+
+1. `grid_view({window})` returns one window image with numbered square cells.
+2. Inspect the image and select the number containing the target. Selection is only a decision; it sends no input.
+3. If the target is not safely isolated at that cell's center, call `grid_refine({window,grid,cell})`. It crops that square and draws a new 3×3 grid; refine again if needed.
+4. Commit exactly once: `click_cell({window,grid,cell})` for the cell center, `click_in_cell({window,grid,cell,x,y,view})` for a cell-local offset, or `click_view({window,view,x,y})` for an exact point in the current image/crop.
+5. Re-observe after any action that may change layout or focus.
+
+Coordinates always use the current window image or crop, origin at its top-left. The helpers reverse capture scaling and reject points outside the target window. Full mechanics and proofs are in the [technical paper](docs/TECHNICAL_PAPER.md#4-observation-semantics-first-pixels-when-needed).
+
+## Install
+
+Use the PowerShell installer. It installs Node.js through WinGet when needed, downloads the GitHub Release runtime, and verifies its checksum:
+
+```powershell
+irm https://raw.githubusercontent.com/Guojiz/FastCUA/main/install.ps1 | iex
+```
+
+The verified installer writes `FastCUA Agent Setup.txt` to the desktop. Give it to the agent that will actually use FastCUA. That agent must:
+
+1. install the complete `skills\computer-use` folder into its own Skill system;
+2. configure Node.js + the installed `server.mjs` as `sky-computer-use` MCP;
+3. reload and verify that the Skill is discoverable;
+4. call `list_windows` successfully.
+
+If either the Skill or MCP is missing, installation is incomplete.
+
+### Verify and update
+
+```powershell
+& "$env:LOCALAPPDATA\FastCUA\app\install.ps1" -Action Doctor
+& "$env:LOCALAPPDATA\FastCUA\app\install.ps1" -Action Check
+& "$env:LOCALAPPDATA\FastCUA\app\install.ps1" -Action Update
+```
+
+Inside MCP, call `runtime_info` to confirm the exact server, daemon, native host, version, commit, pipe, and data directory in use.
+
+## Human control
+
+| Key | Action |
+|---|---|
+| `F7` | Pause and open the control center |
+| `F8` | Pause or resume |
+| `F9` | Pause and interject text |
+| `F10` | Exit FastCUA |
+
+The local control center is available at `http://127.0.0.1:8420`. Safe mode asks before acting in an unknown application. Trust uses exact application identity, not fuzzy name matching.
+
+## Visual click example
+
+Given a `window` returned by `list_windows`:
+
+```js
+let view = await sky.grid_view({ window });       // inspect; choose cell 4
+view = await sky.grid_refine({
+  window,
+  grid: view.grid,
+  cell: "4",
+});                                               // inspect; choose cell 5
+await sky.click_cell({ window, grid: view.grid, cell: "5" });
+await sky.close();
+```
+
+## Record a Skill (preview)
+
+The optional recorder turns a demonstration into an auditable evidence package before any Skill is written:
+
+```text
+record → compile evidence → current primary agent writes → provenance lint
+       → dry-run with new values → human-reviewed promotion
+```
+
+Password fields and secure-desktop moments are redacted. The current primary agent writes the Skill from evidence; lint, dry-run, application scope, and explicit promotion approval remain hard gates. See `skills/skill-recorder/` and the [technical paper](docs/TECHNICAL_PAPER.md#9-evidence-first-skill-recording).
+
+> [!NOTE]
+> Using the Skill Recorder may send recorded screen content, interaction evidence, and narration to the configured cloud model provider.
+
+## Develop from source
+
+```powershell
+git clone https://github.com/Guojiz/FastCUA.git
+cd FastCUA
+.\native-host\build.ps1
+```
+
+Then copy the complete `skills\computer-use` directory into the active agent's Skill directory and configure the absolute path to `server.mjs` as a stdio MCP server. Use `runtime_info` to verify the checkout. Reproduction commands and the test matrix are in the [technical paper](docs/TECHNICAL_PAPER.md#12-reproduction-and-operation).
+
+The project website lives in `site/` and deploys from this repository through `.github/workflows/pages.yml`. The root `web.html` remains the local runtime control center; it is not the public website.
+
+## Boundaries
+
+FastCUA currently targets Windows 11 x64. UAC, Secure Desktop, authentication dialogs, password managers, Windows Security, higher-integrity processes, protected surfaces, and applications with unusual capture/accessibility behavior are outside the normal path. Synthetic input is not hardware input, and the current key-chord implementation still uses the superseded `keybd_event` API. Remaining input, provider, capture, IPC, and evaluation work is tracked in [Next design](docs/NEXT_DESIGN.md).
+
+## Uninstall
 
 ```powershell
 & "$env:LOCALAPPDATA\FastCUA\app\uninstall.ps1"
 ```
-
-For a maintained replacement, see the Cua repository:
-
-https://github.com/trycua/cua
 
 ## Links
 
 | | |
 | --- | --- |
 | **Project site** | https://guojiz.github.io/FastCUA/ |
-| **Replacement** | https://github.com/trycua/cua |
 | **Author site** | https://guojiz.github.io/ |
 | **X** | https://x.com/guojizh |
 | **Bilibili** | https://space.bilibili.com/3493114115263006 |
@@ -69,10 +172,4 @@ https://github.com/trycua/cua
 
 ## License
 
-FastCUA remains available under the MIT License. See [LICENSE](LICENSE).
-
----
-
-Thank you to everyone who tried, tested, discussed, or contributed to FastCUA. The computer-use ecosystem moved quickly, and in this case the right next step is not another parallel driver, but to point users toward the stronger actively maintained implementation.
-
-[中文说明](README_zh.md)
+MIT. See [LICENSE](LICENSE).
