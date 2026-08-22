@@ -1,13 +1,115 @@
 # FastCUA
 
-**A local, accessibility-first Windows control plane for AI agents.**
+**Text first. Vision on demand. Zoom until precise.**
+
+FastCUA is a local Windows computer-use runtime for AI agents, designed around one rule:
+
+> **Do not assume every computer-use step needs a screenshot. Show the model only the information needed for the current decision.**
 
 [Website](https://guojiz.github.io/FastCUA/) · [中文](README_zh.md) · [Technical paper](docs/TECHNICAL_PAPER.md) · [Next design](docs/NEXT_DESIGN.md)
 
 > [!WARNING]
 > FastCUA is an experimental project under active development. Use it for testing, not important or unattended work.
 
-FastCUA gives an agent a fast, inspectable interface to Windows applications. It prefers Windows UI Automation text, switches to screenshots and a numbered square grid when semantics are weak, and executes related native actions through one resident local runtime. The human remains in control through visible state, per-app approval, global pause, interjection, and exit controls.
+## What makes FastCUA different
+
+### 1. Screenshots are not the default observation
+
+FastCUA first asks Windows UI Automation for structured semantic information such as control roles, names, bounds, and current snapshot element indexes.
+
+If that information is good enough, the agent can act without receiving a screenshot at all:
+
+```text
+Windows UI
+   ↓
+UI Automation text
+   ↓
+Agent chooses element_index
+   ↓
+Windows input
+```
+
+If UI Automation is weak, broken, stale, or non-actionable, FastCUA switches to vision instead of repeatedly forcing the semantic path.
+
+### 2. Vision uses progressive refinement instead of one-shot full-screen XY
+
+When vision is necessary, FastCUA does not require the model to immediately predict a precise point on a large screenshot.
+
+The first visual observation is **one window image with numbered square regions**. The model chooses the region containing the target. Choosing a number does not click anything.
+
+FastCUA then crops only that region, draws a fresh 3×3 grid, and can repeat the process until the target is isolated:
+
+```text
+full window
+    ↓
+numbered regions
+    ↓
+choose one region
+    ↓
+crop only that region
+    ↓
+3×3 refinement
+    ↓
+refine again if needed
+    ↓
+commit one click
+```
+
+So the model solves several simpler questions such as **“which region contains the target?”** instead of one high-precision regression such as `click(3371, 184)` on a 4K window.
+
+This is a single-image, coarse-to-fine observation loop, not a fan-out that sends many image tiles to the model at once.
+
+### 3. The model judges the target; the runtime does the geometry
+
+After a crop or refinement, model coordinates belong only to the current image or crop. FastCUA keeps the crop origin and capture scale and maps the point back deterministically:
+
+```text
+local view coordinate
+        ↓
+crop coordinate
+        ↓
+window coordinate
+        ↓
+physical screen coordinate
+```
+
+The model does not need to reverse DPI scaling, crop offsets, or full-screen geometry itself. Out-of-bounds points are rejected rather than silently clamped.
+
+### 4. Grounding does not immediately become a side effect
+
+Before committing input, FastCUA revalidates the local environment near the effect point. Window identity, foreground state, cursor position, bounds, timeouts, and human control signals can stop execution.
+
+In short:
+
+> **The model decides what should happen. The runtime decides whether it is still safe and geometrically valid to make it happen.**
+
+The overall observation and action path is therefore:
+
+```text
+UIA text
+   ↓ sufficient
+semantic target
+   ↓
+validated input
+
+   ↓ insufficient
+
+window image
+   ↓
+region
+   ↓
+smaller region
+   ↓
+precise local target
+   ↓
+deterministic coordinate mapping
+   ↓
+environment revalidation
+   ↓
+validated input
+```
+
+FastCUA also keeps one resident local runtime so UIA quality history, capture state, approvals, pause/interjection state, and related native actions do not have to be rebuilt from scratch for every tool call.
 
 FastCUA is agent-neutral, but a complete installation always has two parts in the **same agent host**:
 
@@ -24,7 +126,9 @@ Use **one full-capability primary model** with text/image understanding, reliabl
 
 | | Vision-first computer use | Browser automation | FastCUA |
 |---|---|---|---|
-| Main observation | Screenshots | DOM/CDP | UIA text, then vision when needed |
+| Main observation | Screenshots | DOM/CDP | UIA text first; vision only when needed |
+| Visual grounding | Often direct full-image XY | DOM selectors | Numbered regions + recursive local refinement |
+| Coordinate handling | Often model-facing | Browser-managed | Runtime maps crop-local points back to Windows |
 | Scope | Any visible surface | Web content | Windows apps, browser chrome, cross-app flows |
 | Execution | Often one action per loop | Browser commands | Several native actions per model turn |
 | Runtime state | Often rebuilt per call | Browser session | One warm daemon and native host |
