@@ -10,9 +10,6 @@ Its core idea is simple:
 
 [Website](https://guojiz.github.io/FastCUA/) · [中文](README_zh.md) · [Technical paper](docs/TECHNICAL_PAPER.md) · [Next design](docs/NEXT_DESIGN.md)
 
-> [!WARNING]
-> FastCUA is an experimental project under active development. Use it for testing, not important or unattended work.
-
 ## The problem FastCUA is trying to solve
 
 Most visual Computer Use systems start from roughly this loop:
@@ -151,11 +148,11 @@ instead of one high-precision coordinate regression over the entire screen.
 
 This is **one image at each observation step**, not a fan-out that cuts the screen into many tiles and sends all of them to the model.
 
-## 3. The agent can choose its own visual region
+## 3. The agent can define the crop itself
 
-The numbered grid is only one way to narrow the search.
+The numbered grid is not the only way to narrow the search, and the agent is not restricted to selecting a pre-made cell.
 
-FastCUA also supports arbitrary region bounds such as:
+FastCUA's region system accepts arbitrary window-relative bounds:
 
 ```text
 left
@@ -164,31 +161,52 @@ right
 bottom
 ```
 
-So an agent can effectively ask:
+For example, on a large window the agent can request only:
 
 ```text
-Only show me the upper-right part of this window next.
+left   = 2800
+top    = 0
+right  = 3800
+bottom = 500
 ```
 
-The observation loop can therefore be model-directed:
+That means:
+
+> **The agent can decide exactly which rectangle it wants to inspect next.**
+
+The next observation can therefore be driven by the model itself:
 
 ```text
 full window
    ↓
-agent chooses a region of interest
+agent chooses an arbitrary ROI
    ↓
-regional capture
+capture only that rectangle
    ↓
-agent narrows again
+agent chooses a smaller rectangle
    ↓
-smaller regional capture
+capture only that rectangle
    ↓
 precise grounding
 ```
 
-This makes zoom/refinement an **active observation primitive**, not merely a fixed post-processing trick.
+The agent can mix both modes:
 
-Once refinement begins, the native host can capture the selected region directly rather than recapturing the whole window every time.
+```text
+numbered grid
+   ↓
+choose a coarse area
+   ↓
+model-defined ROI
+   ↓
+recursive refinement if needed
+```
+
+or skip the grid entirely when the useful region is already obvious.
+
+This turns zoom/refinement into an **active observation primitive**: the model controls not only what it clicks, but also what part of the interface it wants to see next.
+
+Once refinement begins, the native host can capture the selected region directly instead of recapturing the whole window every time.
 
 ## 4. The model judges; the runtime does the geometry
 
@@ -226,12 +244,12 @@ Agent prepares to click Excel
         ↓
 FastCUA moves the cursor
         ↓
-user switches to another app
+foreground window changes
 ```
 
 A naive controller might still send the click.
 
-FastCUA revalidates the environment near the effect point. Window identity, foreground state, cursor position, target bounds, timeouts, and human control signals can abort execution before the mouse-down event.
+FastCUA revalidates the environment near the effect point. Window identity, foreground state, cursor position, target bounds, and timeouts can abort execution before the mouse-down event.
 
 So the full FastCUA path is:
 
@@ -246,7 +264,7 @@ validated input
 
 vision
    ↓
-region
+agent-selected region
    ↓
 smaller region
    ↓
@@ -268,12 +286,11 @@ A compact summary is:
 | | Vision-first Computer Use | Browser automation | FastCUA |
 |---|---|---|---|
 | Main observation | Screenshot | DOM/CDP | UIA text first, vision only when needed |
-| Visual grounding | Often direct full-image XY | DOM selectors | Model-directed ROI + recursive refinement |
+| Visual grounding | Often direct full-image XY | DOM selectors | Agent-defined ROI + recursive refinement |
 | Visual payload | Usually whole current view | Page structure | Progressively smaller regions |
 | Coordinate handling | Often model-facing | Browser-managed | Runtime maps local coordinates back to Windows |
 | Scope | Any visible surface | Web content | Windows apps, browser chrome, cross-app flows |
 | Runtime state | Integration-dependent | Browser session | Resident daemon + native host |
-| Human control | Integration-dependent | Browser-limited | Pause, interject, approve, exit |
 
 FastCUA complements in-page browser automation; it does not replace it.
 
@@ -285,12 +302,11 @@ flowchart TB
   B -->|"path-scoped named pipe"| C["Resident daemon"]
   C --> D["Rust native host"]
   D --> E["UI Automation / HWND"]
-  D --> F["Capture / region / square grid"]
+  D --> F["Capture / arbitrary ROI / square grid"]
   D --> G["Keyboard / mouse input"]
-  C --> H["Approval / pause / interjection"]
 ```
 
-All clients share one daemon, policy state, UIA quality history, capture state, approvals, human-control state, and physical pointer.
+All clients share one daemon, policy state, UIA quality history, capture state, and physical pointer.
 
 FastCUA is agent-neutral, but a complete installation always has two parts in the **same agent host**:
 
@@ -308,13 +324,12 @@ Start with `get_window_state({include_text:true})` and read `state.uia`:
 | `quality:"good"` and a named, bounded target | Use the current `element_index` |
 | `prefer_vision:true`, `weak`, `broken`, `[no-hit]`, or one stale-index failure | Stop semantic clicking and use visual grounding |
 
-Visual control follows **observe → select → refine → commit**:
+When vision is needed, the agent has two coarse-to-fine options:
 
-1. `grid_view({window})` returns one numbered window image.
-2. Select the region containing the target. Selection sends no input.
-3. `grid_refine(...)` crops that region and draws a new 3×3 grid. Repeat if needed.
-4. Commit once with `click_cell`, `click_in_cell`, or `click_view`.
-5. Re-observe after actions that may change layout or focus.
+1. **Discrete refinement:** `grid_view({window})` → select one numbered region → `grid_refine(...)` → repeat if needed.
+2. **Model-defined ROI:** choose arbitrary `left/top/right/bottom` bounds → capture only that rectangle → choose a smaller rectangle if needed.
+
+Both paths can end in `click_cell`, `click_in_cell`, or `click_view`. Selection and observation do not inject input; commit happens only at the final action.
 
 Full mechanics and invariants are in the [technical paper](docs/TECHNICAL_PAPER.md#4-observation-semantics-first-pixels-when-needed).
 
@@ -337,17 +352,6 @@ The installer writes `FastCUA Agent Setup.txt` to the desktop. Give it to the ag
 ```
 
 Use `runtime_info` inside MCP to confirm the exact server, daemon, native host, version, commit, pipe, and data directory in use.
-
-## Human control
-
-| Key | Action |
-|---|---|
-| `F7` | Pause and open the control center |
-| `F8` | Pause or resume |
-| `F9` | Pause and interject text |
-| `F10` | Exit FastCUA |
-
-The local control center is available at `http://127.0.0.1:8420`. Safe mode asks before acting in an unknown application.
 
 ## Visual click example
 
