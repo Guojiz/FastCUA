@@ -8,7 +8,40 @@ FastCUA 是一个面向 AI Agent 的本地 Windows Computer Use 运行时。
 
 > **除非模型真的需要，否则不要默认把整张屏幕都交给模型。**
 
-[网站](https://guojiz.github.io/FastCUA/) · [English](README.md) · [技术论文](docs/TECHNICAL_PAPER.md) · [下一步设计](docs/NEXT_DESIGN.md)
+[网站](https://guojiz.github.io/FastCUA/) · [English](README.md) · [当前架构](docs/CURRENT_ARCHITECTURE.md) · [技术论文](docs/TECHNICAL_PAPER.md) · [下一步设计](docs/NEXT_DESIGN.md)
+
+## 默认无界面，并且不绑定具体 Harness
+
+FastCUA 的位置是在 **Agent / Harness 下面**，不是去替代它。
+
+```text
+Agent / Harness / Host
+  ├─ 任务规划
+  ├─ 用户交互
+  ├─ 可选的暂停 / 插话 / 审批 UX
+  └─ FastCUA 集成
+          ↓
+      FastCUA
+      ├─ UIA / HWND 观察
+      ├─ 视觉截图
+      ├─ Agent 自定义 ROI
+      ├─ 递归视觉定位
+      ├─ 坐标映射
+      ├─ Windows 输入
+      └─ 可选宿主控制接口
+          ↓
+        Windows
+```
+
+FastCUA 不应该强制任何固定的悬浮窗、控制中心、快捷键布局或 Agent 产品交互方式。
+
+宿主可以按需调用 `pause`、`resume`、`interject`、审批处理、`shutdown` 等底层控制能力，但**这些能力具体怎么展示给用户，由宿主自己决定**。
+
+> **FastCUA 定义 Windows 运行时契约，Harness 定义人怎么和 Agent 交互。**
+
+这种拆分是为了适配广泛性。DeepSeek、Qwen、Codex、Claude、opencode 或其他 Agent 栈都可以复用同一个 Windows 底层，而不需要继承 FastCUA 自己的一套 UI 设计。
+
+当前 `main` 分支里仍可能留有旧版 FastCUA 自带控制 UI 的遗留代码。它们属于后续代码清理对象，不代表当前产品边界。当前架构以 `docs/CURRENT_ARCHITECTURE.md` 为准，代码接手说明见 `docs/HANDOFF_HEADLESS_RUNTIME.md`。
 
 ## FastCUA 想解决什么问题
 
@@ -74,7 +107,7 @@ include_screenshot = false
 
 所以它不是“永远用 UIA”，而是：
 
-> **语义信息有用时就用；不好用时就立刻换视觉。**
+> **语义信息有用时就用，不好用时就立刻换视觉。**
 
 ## 2. 必须用视觉时，也不要一上来就在整张大图上猜 XY
 
@@ -146,7 +179,7 @@ Agent 可以继续：
 请在 3840×2160 里一次性给出一个精准坐标
 ```
 
-而是连续几个简单问题：
+而是连续几个更简单的问题：
 
 ```text
 在哪个区域？
@@ -212,7 +245,7 @@ Agent 自定义 ROI
 
 如果 Agent 一开始就知道有用区域大概在哪里，也可以直接跳过网格，自己指定截取范围。
 
-因此 Zoom / Refine 不只是固定的“两阶段放大技巧”，而是一个**Agent 主动控制的观察能力**：模型不仅决定要点哪里，也决定下一步到底要看屏幕的哪一部分。
+因此 Zoom / Refine 不只是固定的两阶段放大技巧，而是一个**Agent 主动控制的观察能力**：模型不仅决定要点哪里，也决定下一步到底要看界面的哪一部分。
 
 进入局部观察后，原生 host 可以直接抓取选中的区域，而不是每次重新截完整窗口再裁剪。
 
@@ -299,6 +332,7 @@ Agent 自选区域
 | 坐标处理 | 常由模型面对 | 浏览器处理 | 运行时把局部坐标映射回 Windows |
 | 范围 | 任意可见界面 | 网页内容 | Windows 应用、浏览器外壳、跨应用流程 |
 | 运行时状态 | 取决于集成 | 浏览器会话 | 常驻 daemon + 原生 host |
+| 人机交互方式 | 由集成决定 | 由浏览器/工具决定 | **由宿主决定，FastCUA 保持 headless** |
 
 FastCUA 是网页内自动化的补充，不是替代品。
 
@@ -306,12 +340,13 @@ FastCUA 是网页内自动化的补充，不是替代品。
 
 ```mermaid
 flowchart TB
-  A["Agent 宿主 + computer-use Skill"] -->|"stdio MCP"| B["server.mjs"]
+  A["Agent / Harness + computer-use Skill"] -->|"stdio MCP"| B["server.mjs"]
   B -->|"按路径隔离的命名管道"| C["常驻 daemon"]
   C --> D["Rust 原生 host"]
   D --> E["UI Automation / HWND"]
   D --> F["截图 / 任意 ROI / 正方形网格"]
   D --> G["键盘 / 鼠标输入"]
+  A -. 可选宿主控制 .-> C
 ```
 
 所有客户端共享一个 daemon、策略状态、UIA 质量历史、截图状态和物理光标。
@@ -359,34 +394,34 @@ irm https://raw.githubusercontent.com/Guojiz/FastCUA/main/install.ps1 | iex
 & "$env:LOCALAPPDATA\FastCUA\app\install.ps1" -Action Update
 ```
 
-在 MCP 内调用 `runtime_info`，确认实际使用的 server、daemon、原生 host、版本、提交、管道和数据目录。
+在 MCP 内调用 `runtime_info`，可以确认当前实际使用的 server、daemon、原生 host、版本、commit、pipe 和数据目录。
 
 ## 视觉点击示例
 
 ```js
-let view = await sky.grid_view({ window });       // 看图，选 4 号格
+let view = await sky.grid_view({ window });       // 查看并选择 4 号区域
 view = await sky.grid_refine({
   window,
   grid: view.grid,
   cell: "4",
-});                                               // 看图，选 5 号格
+});                                               // 查看并选择 5 号区域
 await sky.click_cell({ window, grid: view.grid, cell: "5" });
 await sky.close();
 ```
 
-## 录制技能（预览）
+## Record a Skill（预览）
 
-可选录制器会先把演示变成可审计证据包，再允许写出 Skill：
+可选的录制器会先把演示转成可审计证据，再生成 Skill：
 
 ```text
-录制 → 编译证据 → 当前主 Agent 写 Skill → 来源校验
-     → 用新参数 dry-run → 人工审阅后安装
+录制 → 编译证据 → 当前主 Agent 编写 → provenance lint
+     → 用新值 dry-run → 人工确认后 promotion
 ```
 
-密码框和安全桌面时刻会被遮蔽。详见 `skills/skill-recorder/` 与[技术论文](docs/TECHNICAL_PAPER.md#9-evidence-first-skill-recording)。
+密码字段和 Secure Desktop 片段会被处理为不可直接复用的敏感区域。详细说明见 `skills/skill-recorder/` 和[技术论文](docs/TECHNICAL_PAPER.md#9-evidence-first-skill-recording)。
 
 > [!NOTE]
-> 使用 Skill Recorder 时，录制的屏幕内容、操作证据和旁白可能会发送给所使用的云端模型提供商。
+> 如果当前主模型来自云端，Skill Recorder 的屏幕内容、交互证据或旁白可能会进入该模型提供商的处理范围。
 
 ## 从源码开发
 
@@ -396,11 +431,17 @@ cd FastCUA
 .\native-host\build.ps1
 ```
 
-然后把完整 `skills\computer-use` 目录复制到当前 Agent 的 Skill 目录，并把 `server.mjs` 的绝对路径配置为 stdio MCP Server。复现命令与测试矩阵见[技术论文](docs/TECHNICAL_PAPER.md#12-reproduction-and-operation)。
+然后把完整的 `skills\computer-use` 目录复制到当前 Agent 的 Skill 目录，并把 `server.mjs` 的绝对路径配置成 stdio MCP Server。复现命令和测试矩阵见[技术论文](docs/TECHNICAL_PAPER.md#12-reproduction-and-operation)。
 
-## 使用边界
+## 文档状态
 
-FastCUA 当前面向 Windows 11 x64。UAC、安全桌面、认证对话框、密码管理器、Windows 安全中心、更高完整性进程、受保护画面，以及具有特殊截图/无障碍行为的应用，不属于正常工作路径。合成输入不等同于硬件输入。剩余的输入、provider、截图、IPC 与评测工作记录在[下一步设计](docs/NEXT_DESIGN.md)中。
+当前产品边界以 [`docs/CURRENT_ARCHITECTURE.md`](docs/CURRENT_ARCHITECTURE.md) 为准。
+
+技术论文是一份实现型报告，在 headless 清理完成前，里面可能仍保留旧版 FastCUA 自带 Overlay / Control Center 时代的描述。迁移任务记录在 [`docs/NEXT_DESIGN.md`](docs/NEXT_DESIGN.md)，代码接手卡位于 [`docs/HANDOFF_HEADLESS_RUNTIME.md`](docs/HANDOFF_HEADLESS_RUNTIME.md)。
+
+## 边界
+
+FastCUA 当前目标平台是 Windows 11 x64。UAC、Secure Desktop、认证弹窗、密码管理器、Windows Security、更高完整性级别进程、受保护表面，以及截图/无障碍行为异常的应用，都不属于常规支持路径。合成输入也不等于硬件输入。剩余输入、provider、截图、IPC 和评估工作见[下一步设计](docs/NEXT_DESIGN.md)。
 
 ## 卸载
 
@@ -412,17 +453,17 @@ FastCUA 当前面向 Windows 11 x64。UAC、安全桌面、认证对话框、密
 
 | | |
 | --- | --- |
-| **项目站点** | https://guojiz.github.io/FastCUA/ |
-| **作者站点** | https://guojiz.github.io/ |
+| **项目网站** | https://guojiz.github.io/FastCUA/ |
+| **作者网站** | https://guojiz.github.io/ |
 | **X** | https://x.com/guojizh |
-| **哔哩哔哩** | https://space.bilibili.com/3493114115263006 |
-| **赞助** | https://github.com/Guojiz/Sponsors |
+| **Bilibili** | https://space.bilibili.com/3493114115263006 |
+| **Sponsor** | https://github.com/Guojiz/Sponsors |
 
-### 其它已上线官网的 Guojiz 项目
+### 其他带官网的项目
 
-- [GitLearnOS](https://guojiz.github.io/gitlearnos/) — 学习者拥有的 Git 学习记忆
-- [Word Snap](https://guojiz.github.io/word-snap/) — 双语单词匹配 PWA
+- [GitLearnOS](https://guojiz.github.io/gitlearnos/)：面向 AI 辅助学习的 learner-owned Git memory
+- [Word Snap](https://guojiz.github.io/word-snap/)：双语词汇匹配 PWA
 
-## 许可证
+## License
 
 MIT，见 [LICENSE](LICENSE)。
