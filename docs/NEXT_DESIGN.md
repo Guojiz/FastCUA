@@ -1,12 +1,75 @@
 # FastCUA Next Design: Close the Implementation Gaps
 
-**Status:** Authoritative plan for behavior that the current repository does not yet match.
+**Status:** Authoritative migration plan for behavior that the current repository does not yet fully match.
 
-The [technical paper](TECHNICAL_PAPER.md) describes FastCUA's implemented control system and recommended user path. This document holds the mismatches and unfinished redesigns so they are not presented as completed features.
+The current product boundary is defined in [`CURRENT_ARCHITECTURE.md`](CURRENT_ARCHITECTURE.md). This document records implementation mismatches, cleanup work, and acceptance criteria so planned behavior is not confused with already-completed behavior.
+
+The implementation handoff for the headless cleanup is in [`HANDOFF_HEADLESS_RUNTIME.md`](HANDOFF_HEADLESS_RUNTIME.md).
 
 ## 1. Fixed product decisions
 
-### 1.1 One installation path
+### 1.1 FastCUA is a headless, host-neutral Windows runtime
+
+FastCUA should provide:
+
+- Windows observation;
+- UIA / HWND semantics;
+- vision on demand;
+- numbered recursive grounding;
+- agent-defined ROI;
+- coordinate translation;
+- native input;
+- resident runtime state;
+- optional host-control primitives.
+
+FastCUA should **not** prescribe the user-facing interaction model of the Agent or Harness.
+
+The intended split is:
+
+```text
+Harness / Host
+  ├─ task UX
+  ├─ user interaction
+  ├─ optional pause / interjection / approval UX
+  └─ FastCUA integration
+          ↓
+FastCUA
+  ├─ perception
+  ├─ grounding
+  ├─ execution
+  └─ optional host-control protocol
+          ↓
+Windows
+```
+
+A host may use `pause`, `resume`, `interject`, approval resolution, `shutdown`, or related control semantics, but FastCUA does not need to ship its own overlay, web console, fixed hotkeys, or mandatory control UI.
+
+This is a compatibility decision: different Harnesses should be able to reuse FastCUA without inheriting FastCUA-specific UX.
+
+### 1.2 Preserve host-control semantics while removing FastCUA-owned UX
+
+Do not interpret the headless migration as “remove human control.”
+
+The following may remain valid runtime capabilities:
+
+```text
+pause
+resume
+interject
+resolve_approval
+shutdown
+```
+
+What becomes legacy is the FastCUA-owned presentation layer around them.
+
+The cleanup must distinguish:
+
+```text
+host-control protocol        KEEP / REVIEW
+FastCUA-owned control UI      RETIRE
+```
+
+### 1.3 One installation path
 
 FastCUA is installed and maintained through the PowerShell bootstrapper and verified GitHub Release artifacts. npm is not a user-facing installation, update, doctor, or release path.
 
@@ -24,7 +87,7 @@ Canonical maintenance:
 & "$env:LOCALAPPDATA\FastCUA\app\install.ps1" -Action Update
 ```
 
-### 1.2 One full-capability primary model
+### 1.4 One full-capability primary model
 
 FastCUA recommends one active model with the capabilities needed for the whole task:
 
@@ -34,59 +97,131 @@ FastCUA recommends one active model with the capabilities needed for the whole t
 - reliable Skill and MCP tool use;
 - enough context for observation, execution, evidence review, and Skill writing.
 
-The same model plans the task, operates Windows, reviews recorder evidence, and writes the reusable Skill. FastCUA does not configure a writer model, transcription model, fallback model, or cheaper text-only submodel. If the active model cannot understand narration audio, the user supplies typed notes; FastCUA does not silently route the data elsewhere.
+The same model plans the task, operates Windows, reviews recorder evidence, and writes the reusable Skill. FastCUA does not configure a writer model, transcription model, fallback model, or cheaper text-only submodel.
 
-### 1.3 Documentation must separate truth from plans
+### 1.5 Documentation authority
 
-- README: supported user path only.
-- Technical paper: implemented mechanisms, measured evidence, and explicit limitations.
-- This document: implementation mismatches, migrations, and acceptance criteria.
-- Skill/API references: exact instructions required by the current recommended path.
+Until implementation and documentation are fully synchronized, use this order when documents disagree:
 
-## 2. Gap A — remove the legacy package-manager path (implemented)
+1. `CURRENT_ARCHITECTURE.md` for the current product boundary;
+2. this file for migration obligations;
+3. README / README_zh for supported user-facing explanation;
+4. `TECHNICAL_PAPER.md` for implementation-backed historical/current mechanisms, noting that some old UI-era wording still needs synchronization.
 
-### Resolved mismatch (2026-08-04)
+## 2. Gap A: remove the FastCUA-owned Human Control UI layer
 
-The PowerShell/GitHub Release installer already performs the real installation, checksum verification, update, and rollback. The repository nevertheless retains an npm wrapper and several npm-facing messages:
+### Current mismatch
 
-- `package.json` and `bin/fastcua.mjs`;
-- npm commands in installer prompts, console copy, and tests;
-- npm version coupling in release validation;
-- optional `npm publish` in `.github/workflows/release.yml`.
+The current `main` branch still contains pieces from an older architecture where FastCUA itself owned the user-facing control experience.
 
-These paths duplicate the actual release system and make the installation story ambiguous.
+Likely legacy areas include:
 
-### Implemented changes
+- `overlay.ps1`;
+- `card.xaml`;
+- `web.html` when used as FastCUA's own control center;
+- fixed F7/F8/F9/F10 UX;
+- overlay-specific configuration;
+- daemon HTTP endpoints used only by the retired local UI;
+- release packaging for those UI assets;
+- tests that verify only those UI surfaces.
 
-1. Replace every generated `npx fastcua doctor/check/update` instruction with the installed PowerShell entry point.
-2. Remove npm-specific copy from the console, scripts, tests, and website.
-3. Remove `package.json`, `bin/fastcua.mjs`, and npm-only contract tests after no runtime code depends on them.
-4. Remove `NPM_TOKEN`, npm registry setup, `npm publish`, and package-version checks from the release workflow.
-5. Make `runtime-manifest.json` the release version source; keep Rust component versions synchronized and validated against the tag.
-6. Verify that a clean Windows machine can install, diagnose, update, roll back, and uninstall without npm.
+These are not part of the desired product boundary.
+
+### Preserve while cleaning
+
+Do not accidentally remove:
+
+- host-facing pause/resume semantics;
+- interjection semantics;
+- approval policy and resolution;
+- shutdown / stop semantics used by hosts;
+- named-pipe control methods or their eventual equivalent;
+- agent-visible control-state tags where host integrations rely on them;
+- safety validation and application identity logic.
+
+### Target implementation
+
+```text
+Host UI / Harness policy
+          ↓
+optional host-control protocol
+          ↓
+FastCUA daemon/runtime
+          ↓
+Windows
+```
+
+FastCUA should start and operate without any FastCUA-owned visible UI.
 
 ### Acceptance criteria
 
-- `rg -i 'npm|npx'` returns no product or documentation references except historical migration notes in this file.
-- GitHub Release contains the runtime ZIP, checksum, manifest, and installer.
-- installer/update/rollback contract tests pass without `package.json` or `bin/fastcua.mjs`.
-- generated desktop setup instructions contain only PowerShell maintenance commands.
+- Computer Use works with no overlay, control center, or FastCUA-owned hotkey UI;
+- runtime startup has no dependency on `overlay.ps1`, `card.xaml`, or the old control-center page;
+- release artifacts do not ship retired UI files unless an explicitly supported host still consumes them;
+- external hosts can still use retained pause/interjection/approval/shutdown semantics;
+- tests distinguish protocol semantics from retired presentation code;
+- README, architecture docs, technical paper, and website no longer present FastCUA-owned Human Control UX as a core product feature.
 
-## 3. Gap B — remove the separate-model architecture (implemented)
+## 3. Gap B: preserve and expose active visual observation clearly
 
-### Resolved mismatch (2026-08-04)
+FastCUA's visual design is broader than a fixed numbered grid.
 
-An earlier recorder design added a dedicated OpenAI-compatible Skill writer, a second transcription model, API-key storage, provider/model fields in the control center, and automatic audio fallbacks. The remaining implementation includes:
+Two supported narrowing modes must remain explicit:
 
-- `tools/skill-recorder/synthesize.mjs` and `writer-config.mjs`;
-- `/api/skill-writer/config` in `daemon.mjs`;
-- writer/provider/model/transcription/API-key controls in `web.html`;
-- writer configuration in `config.json` and environment variables;
-- writer-specific release files and contract tests.
+```text
+A. Discrete recursive grounding
+window → numbered region → 3×3 → 3×3 → commit
 
-This splits context between models, asks the user to configure extra providers, and conflicts with the single full-capability agent design.
+B. Agent-defined ROI
+window → arbitrary rectangle → smaller rectangle → commit
+```
 
-### Target recorder flow
+The ROI path matters because the model can decide where the next observation should come from using arbitrary window-relative bounds:
+
+```text
+left
+top
+right
+bottom
+```
+
+The implementation and Skill/API documentation should make this a first-class capability rather than an incidental helper.
+
+### Acceptance criteria
+
+- Agent-defined ROI remains usable independently of the numbered-grid path;
+- visual observation can narrow to an arbitrary rectangle chosen by the model;
+- local coordinate mapping remains deterministic;
+- grid and ROI modes can be composed;
+- the runtime, not the model, handles crop offsets, scale reversal, window geometry, and DPI mapping;
+- no refactor reduces the system back to full-window direct XY as the only visual path.
+
+## 4. Gap C: remove the legacy package-manager path
+
+### Resolved mismatch
+
+The PowerShell/GitHub Release installer already performs the real installation, checksum verification, update, and rollback. The repository previously retained an npm-facing wrapper and messages that duplicated the supported path.
+
+### Required state
+
+- generated setup instructions use PowerShell only;
+- release workflow does not require npm publication;
+- runtime manifest remains the release version source;
+- clean Windows install/update/rollback/uninstall works without npm.
+
+### Acceptance criteria
+
+- `rg -i 'npm|npx'` returns no active product-path references except historical migration notes;
+- GitHub Release contains runtime ZIP, checksum, manifest, and installer;
+- installer/update/rollback tests do not depend on `package.json` or an npm wrapper.
+
+## 5. Gap D: keep one full-capability primary model
+
+### Resolved mismatch
+
+An earlier recorder design added a dedicated Skill writer, transcription model, provider configuration, API-key storage, and fallback routing.
+
+The desired flow is:
 
 ```text
 record demonstration
@@ -98,55 +233,48 @@ record demonstration
 → explicit human review and promotion
 ```
 
-Audio handling is simple: the active model understands the WAV directly, or the user provides typed notes. There is no transcription API fallback.
-
-### Implemented changes
-
-1. Make the current agent procedure in `skills/skill-recorder/SKILL.md` the only synthesis path.
-2. Keep `compile.mjs`, evidence formats, frame extraction, lint, dry-run, and gated promotion.
-3. Remove the writer settings UI and daemon endpoints.
-4. Remove writer secret storage, provider/model environment variables, `synthesize.mjs`, and `writer-config.mjs`.
-5. Remove writer-specific files from source-install and release-package lists.
-6. Replace writer contract tests with a model-independent contract: a fixture `SKILL.md` written from evidence must pass or fail deterministic lint as expected.
-7. Confirm that no recorder workflow asks the user for a model name, base URL, API key, transcription model, or fallback choice.
+FastCUA should not configure a separate writer/transcription stack.
 
 ### Acceptance criteria
 
 - one active agent can complete record → evidence → Skill → lint → dry-run → promote;
-- no FastCUA page or config contains provider, writer model, transcription model, or writer API-key fields;
-- no recording media is transmitted to a separately configured service by FastCUA;
-- failure to understand audio asks for typed notes and does not switch models;
-- provenance, redaction, scope, dry-run, and promotion gates remain unchanged.
+- no product page or config requires writer model, transcription model, provider base URL, or extra API key;
+- failure to understand audio asks for typed notes rather than silently switching models;
+- provenance, redaction, scope, dry-run, and promotion gates remain intact.
 
-## 4. Other implementation gaps
+## 6. Other engineering obligations
 
-These are real engineering obligations already identified by source review. They remain secondary to the two product corrections above.
-
-### 4.1 Balanced key chords
+### 6.1 Balanced key chords
 
 Replace `keybd_event` with a single observable `SendInput(INPUT[])` transaction. Preserve left/right modifiers and extended-key metadata, detect physically held modifiers/buttons and abort, tag injected events for diagnostics, and add partial-insertion failure tests.
 
-### 4.2 Destructive UIA isolation
+### 6.2 Destructive UIA isolation
 
 Move synchronous value mutation into a disposable process boundary so a wedged provider can be killed without allowing a late destructive write.
 
-### 4.3 Capture compatibility
+### 6.3 Capture compatibility
 
-Evaluate Windows Graphics Capture as an optional backend for surfaces that `PrintWindow`/`BitBlt` cannot represent, while keeping the same coordinate, redaction, and local-processing contracts.
+Evaluate Windows Graphics Capture as an optional backend for surfaces that `PrintWindow` / `BitBlt` cannot represent, while keeping the same coordinate, redaction, and local-processing contracts.
 
-### 4.4 Local IPC hardening
+### 6.4 Local IPC hardening
 
-Apply an explicit current-user ACL to the named pipe and authenticate the local console's mutating channel. Document and test behavior when Windows services expose pipes remotely.
+Apply an explicit current-user ACL to the named pipe and authenticate any mutating local control channel. Document and test behavior when Windows services expose pipes remotely.
 
-### 4.5 Comparative evaluation
+### 6.5 Comparative evaluation
 
 Measure task success, model turns, image bytes/tokens, median/p95 latency, human interventions, and unsafe-action near misses for vision-only, accessibility-only, and hybrid modes across a declared application matrix.
 
-## 5. Delivery order
+Do not claim token or task-success advantages before this comparison is reproducible.
 
-1. [x] Remove package-manager-facing instructions and release publication.
-2. [x] Switch recorder documentation and Skill procedure to the current primary agent.
-3. [x] Remove separate writer/transcription code, settings, secrets, and tests.
-4. [ ] Re-run installer, release, recorder, Windows fixture, and Office end-to-end suites on a clean interactive Windows machine.
-5. Complete input, provider, capture, and IPC hardening.
-6. Publish comparative results only after the experiment is reproducible.
+## 7. Delivery order
+
+1. [x] Make the headless/host-neutral boundary explicit in README and architecture docs.
+2. [x] Add a code handoff that separates retired UX from retained host-control protocol.
+3. [ ] Inventory every dependency on the old FastCUA-owned overlay/control-center layer.
+4. [ ] Add preservation tests for host-control protocol behavior before deleting UI code.
+5. [ ] Remove overlay/web/hotkey dependencies from runtime startup.
+6. [ ] Remove obsolete UI assets, UI-only config, UI-only HTTP plumbing, release entries, and UI-only tests.
+7. [ ] Re-run installer, release, recorder, Windows fixture, and Office end-to-end suites on a clean interactive Windows machine.
+8. [ ] Synchronize `TECHNICAL_PAPER.md` and the project website with the resulting implementation.
+9. [ ] Complete input, provider, capture, and IPC hardening.
+10. [ ] Publish comparative results only after the experiment is reproducible.
